@@ -1,0 +1,21 @@
+DEV_LOGIN_CODES=1
+
+# Optional: "Continue with Google" / "Continue with Microsoft". Each turns on when both of
+# its values are set. See README → SIGN_IN_WITH_GOOGLE_AND_MICROSOFT for the redirect URIs.
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# MICROSOFT_CLIENT_ID=
+# MICROSOFT_CLIENT_SECRET=
+
+# Turnstile test keys: the widget always passes, and siteverify accepts them only with DEV_LOGIN_CODES=1.
+TURNSTILE_SITEKEY=1x00000000000000000000AA
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+# With a real widget instead, put its keys above and list the dev hostnames (the
+# widget's domain list in the dashboard must include them too):
+# TURNSTILE_HOSTNAMES=localhost,127.0.0.1
+
+# Stripe test mode (see README → BILLING). The webhook secret is printed by
+# `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook`.
+# STRIPE_SECRET_KEY=sk_test_…
+# STRIPE_WEBHOOK_SECRET=whsec_…
+# STRIPE_PRICE_ID=price_…

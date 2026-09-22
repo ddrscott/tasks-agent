@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1a1a">
+<title>Tasks</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%231a1a1a'/><rect x='6' y='7' width='5' height='18' fill='%23E85D00'/><rect x='14' y='7' width='5' height='12' fill='%23e0e0e0'/><rect x='22' y='7' width='5' height='7' fill='%23e0e0e0'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Nunito:wght@400;600;700&family=Space+Grotesk:wght@400;500;700&family=Source+Serif+4:wght@400;600;700&display=swap">
+<script>
+  // Paint the saved theme before first render so the page never flashes the wrong colors.
+  (function () {
+    var t = "auto";
+    try { t = localStorage.getItem("todo-theme") || "auto"; } catch (e) {}
+    if (t === "auto") t = matchMedia("(prefers-color-scheme: dark)").matches ? "signal" : "paper";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/client/main.tsx"></script>
+</body>
+</html>

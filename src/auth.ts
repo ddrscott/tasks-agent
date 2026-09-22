@@ -1,0 +1,201 @@
+// Passwordless email login. The user enters their email, we send a 6-digit code
+// plus a one-click link carrying the same code, and a verified code becomes a
+// 30-day session cookie. Only hashes of codes and session tokens are stored.
+
+import { verifyTurnstile } from "./turnstile";
+
+const CODE_TTL_MS = 10 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 30 * 1000;
+const MAX_ATTEMPTS = 5;
+const SESSION_TTL_S = 30 * 24 * 60 * 60;
+const COOKIE = "sid";
+
+export type User = { email: string; id: string };
+
+const enc = new TextEncoder();
+
+export async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The agent instance name for a user. Stable, and doesn't reveal the email in URLs. */
+export const userIdFor = async (email: string) => (await sha256(`user:${email}`)).slice(0, 32);
+
+const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
+  Response.json(body, { status, headers });
+
+export function normalizeEmail(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const email = raw.trim().toLowerCase();
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+export function allowed(env: Env, email: string): boolean {
+  const list = (env.ALLOWED_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (list.length === 0) return true;
+  return list.some((rule) => (rule.startsWith("@") ? email.endsWith(rule) : email === rule));
+}
+
+function randomCode(): string {
+  const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
+  return n.toString().padStart(6, "0");
+}
+
+export function randomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function cookieValue(req: Request, name: string): string | null {
+  const header = req.headers.get("Cookie") ?? "";
+  for (const part of header.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return v.join("=");
+  }
+  return null;
+}
+
+function sessionCookie(req: Request, token: string, maxAge: number): string {
+  const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
+  return `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/tasks; Max-Age=${maxAge}${secure}`;
+}
+
+/**
+ * Where to go after signing in. Only paths inside the app are allowed, so a
+ * crafted link can't bounce a fresh session to another site.
+ */
+export function safeNext(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.startsWith("/tasks/") || raw.startsWith("//") || /[\\\s]/.test(raw)) return null;
+  return raw.length <= 2000 ? raw : null;
+}
+
+/** Start a 30-day session for a verified email. Returns the Set-Cookie header. */
+export async function createSession(req: Request, env: Env, email: string): Promise<string> {
+  const token = randomToken();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO sessions (token_hash, email, expires_at, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256(token), email, Date.now() + SESSION_TTL_S * 1000, Date.now()),
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(Date.now()),
+  ]);
+  return sessionCookie(req, token, SESSION_TTL_S);
+}
+
+/**
+ * A per-session value for forms that change something (the OAuth consent screen).
+ * Another site can make the browser post a form, but it can't read this value.
+ */
+export async function csrfToken(req: Request): Promise<string | null> {
+  const token = cookieValue(req, COOKIE);
+  return token ? (await sha256(`csrf:${token}`)).slice(0, 32) : null;
+}
+
+export async function currentUser(req: Request, env: Env): Promise<User | null> {
+  const token = cookieValue(req, COOKIE);
+  if (!token) return null;
+  const row = await env.DB.prepare("SELECT email FROM sessions WHERE token_hash = ? AND expires_at > ?")
+    .bind(await sha256(token), Date.now())
+    .first<{ email: string }>();
+  return row ? { email: row.email, id: await userIdFor(row.email) } : null;
+}
+
+async function start(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<{ email?: unknown; next?: unknown; turnstile?: unknown }>()
+    .catch(() => ({}) as { email?: unknown; next?: unknown; turnstile?: unknown });
+  const email = normalizeEmail(body.email);
+  if (!email) return json({ error: "That doesn't look like an email address." }, 400);
+  if (!(await verifyTurnstile(req, env, body.turnstile))) {
+    return json({ error: "We couldn't confirm you're human. Try again.", turnstile: true }, 403);
+  }
+  if (!allowed(env, email)) return json({ error: "This board is invite-only, and that email isn't on the list." }, 403);
+
+  const prev = await env.DB.prepare("SELECT sent_at FROM login_codes WHERE email = ?").bind(email).first<{ sent_at: number }>();
+  if (prev && Date.now() - prev.sent_at < RESEND_COOLDOWN_MS) {
+    return json({ error: "A code was just sent. Check your inbox, or try again in a few seconds." }, 429);
+  }
+
+  const code = randomCode();
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO login_codes (email, code_hash, expires_at, attempts, sent_at) VALUES (?, ?, ?, 0, ?)
+     ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at,
+       attempts = 0, sent_at = excluded.sent_at`,
+  ).bind(email, await sha256(`${email}:${code}`), now + CODE_TTL_MS, now).run();
+
+  const origin = new URL(req.url).origin;
+  // The link opens the app, which submits the code from JavaScript. A plain GET that
+  // signed you in would be burned by mail scanners that prefetch links.
+  const next = safeNext(body.next);
+  const link = `${origin}/tasks/?email=${encodeURIComponent(email)}&code=${code}${next ? `&next=${encodeURIComponent(next)}` : ""}`;
+
+  if (env.DEV_LOGIN_CODES === "1") {
+    console.log(`[dev] login code for ${email}: ${code}  ${link}`);
+    return json({ ok: true, devCode: code });
+  }
+
+  try {
+    await env.EMAIL.send({
+      from: { email: env.EMAIL_FROM, name: "Tasks" },
+      to: email,
+      subject: `${code} is your Tasks sign-in code`,
+      text: `Your sign-in code is ${code}\n\nOr sign in with this link:\n${link}\n\nThe code expires in 10 minutes. If you didn't ask for it, you can ignore this email.`,
+      html: loginEmailHtml(code, link),
+    });
+  } catch (e) {
+    console.error("login email failed", (e as { code?: string }).code, (e as Error).message);
+    return json({ error: "We couldn't send the email. Try again in a minute." }, 502);
+  }
+  return json({ ok: true });
+}
+
+/** Returns the session cookie on success, or an error message. */
+async function check(req: Request, env: Env, email: string | null, code: string): Promise<{ cookie: string } | { error: string }> {
+  if (!email || !/^\d{6}$/.test(code)) return { error: "Enter the 6-digit code from the email." };
+  const row = await env.DB.prepare("SELECT code_hash, expires_at, attempts FROM login_codes WHERE email = ?")
+    .bind(email).first<{ code_hash: string; expires_at: number; attempts: number }>();
+  if (!row || row.expires_at < Date.now()) return { error: "That code expired. Send a new one." };
+  if (row.attempts >= MAX_ATTEMPTS) return { error: "Too many tries. Send a new code." };
+  if ((await sha256(`${email}:${code}`)) !== row.code_hash) {
+    await env.DB.prepare("UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
+    const left = MAX_ATTEMPTS - row.attempts - 1;
+    return { error: left > 0 ? `That code isn't right. ${left} ${left === 1 ? "try" : "tries"} left.` : "Too many tries. Send a new code." };
+  }
+  await env.DB.prepare("DELETE FROM login_codes WHERE email = ?").bind(email).run();
+  return { cookie: await createSession(req, env, email) };
+}
+
+async function verifyPost(req: Request, env: Env): Promise<Response> {
+  const body = await req.json<{ email?: unknown; code?: unknown }>().catch(() => ({}) as Record<string, unknown>);
+  const r = await check(req, env, normalizeEmail(body.email), String(body.code ?? "").trim());
+  if ("error" in r) return json({ error: r.error }, 400);
+  return json({ ok: true }, 200, { "Set-Cookie": r.cookie });
+}
+
+async function logout(req: Request, env: Env): Promise<Response> {
+  const token = cookieValue(req, COOKIE);
+  if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  return json({ ok: true }, 200, { "Set-Cookie": sessionCookie(req, "", 0) });
+}
+
+export async function handleAuth(req: Request, env: Env, path: string): Promise<Response | null> {
+  if (path === "/api/auth/start" && req.method === "POST") return start(req, env);
+  if (path === "/api/auth/verify" && req.method === "POST") return verifyPost(req, env);
+  if (path === "/api/auth/logout" && req.method === "POST") return logout(req, env);
+  if (path === "/api/me" && req.method === "GET") {
+    const user = await currentUser(req, env);
+    return user ? json({ ...user, model: env.CHAT_MODEL }) : json({ error: "signed out" }, 401);
+  }
+  return null;
+}
+
+function loginEmailHtml(code: string, link: string): string {
+  return `<!doctype html><html><body style="margin:0;background:#f7f6f3;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#2c2c2c">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px">
+<table width="100%" style="max-width:440px;background:#fffef9;border:2px solid #2c2c2c" cellpadding="0" cellspacing="0"><tr><td style="padding:32px">
+<div style="font-size:24px;font-weight:700;margin-bottom:24px">tasks<span style="color:#E85D00">.</span></div>
+<div style="font-size:15px;color:#6b6b6b;margin-bottom:8px">Your sign-in code</div>
+<div style="font-family:'JetBrains Mono',Menlo,monospace;font-size:36px;letter-spacing:8px;font-weight:700;margin-bottom:24px">${code}</div>
+<a href="${link}" style="display:inline-block;background:#E85D00;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px">Sign in with one click</a>
+<p style="font-size:13px;color:#6b6b6b;margin:24px 0 0">The code expires in 10 minutes. If you didn't ask for it, ignore this email.</p>
+</td></tr></table></td></tr></table></body></html>`;
+}

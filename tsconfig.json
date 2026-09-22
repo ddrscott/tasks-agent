@@ -1,0 +1,9 @@
+{
+  "extends": "agents/tsconfig",
+  "compilerOptions": {
+    "types": ["./worker-configuration.d.ts", "vite/client"],
+    "jsx": "react-jsx",
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts", "worker-configuration.d.ts"]
+}

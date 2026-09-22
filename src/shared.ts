@@ -1,0 +1,190 @@
+// Board model and pure operations, shared by the agent (server) and the UI (client).
+// Every mutation goes through these functions, so drag-and-drop, buttons, and the
+// chat agent's tools all change the board the same way.
+
+export type Card = {
+  id: string;
+  title: string;
+  notes: string;
+  laneId: string;
+  due: string | null; // YYYY-MM-DD
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Lane = { id: string; name: string };
+
+export type Board = {
+  lanes: Lane[];
+  cards: Card[]; // array order is display order within each lane
+  theme: string;
+};
+
+export const THEME_IDS = [
+  "auto", "signal", "paper", "nord", "dracula", "solar", "forest",
+  "sakura", "ocean", "synthwave", "newsprint", "contrast",
+] as const;
+
+export function newBoard(): Board {
+  return {
+    lanes: [
+      { id: "todo", name: "To do" },
+      { id: "doing", name: "Doing" },
+      { id: "done", name: "Done" },
+    ],
+    cards: [],
+    theme: "auto",
+  };
+}
+
+// Short ids are easy for a small model to copy correctly.
+export function shortId(prefix: string, taken: Set<string>): string {
+  for (;;) {
+    const id = prefix + Math.random().toString(36).slice(2, 6);
+    if (!taken.has(id)) return id;
+  }
+}
+
+export const laneCards = (b: Board, laneId: string) => b.cards.filter((c) => c.laneId === laneId);
+
+export function findLane(b: Board, ref: string): Lane | undefined {
+  const r = ref.trim().toLowerCase();
+  return b.lanes.find((l) => l.id === ref) ?? b.lanes.find((l) => l.name.toLowerCase() === r);
+}
+
+function requireCard(b: Board, id: string): Card {
+  const c = b.cards.find((c) => c.id === id);
+  if (!c) throw new Error(`No card with id "${id}"`);
+  return c;
+}
+
+function requireLane(b: Board, ref: string): Lane {
+  const l = findLane(b, ref);
+  if (!l) throw new Error(`No lane "${ref}". Lanes: ${b.lanes.map((l) => l.name).join(", ")}`);
+  return l;
+}
+
+const now = () => new Date().toISOString();
+const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
+
+export function addCard(
+  b: Board,
+  input: { title: string; laneId?: string; notes?: string; due?: string | null; top?: boolean },
+): { board: Board; card: Card } {
+  const title = clean(input.title, 200);
+  if (!title) throw new Error("A card needs a title");
+  const lane = input.laneId ? requireLane(b, input.laneId) : b.lanes[0];
+  if (!lane) throw new Error("Add a lane first");
+  const t = now();
+  const card: Card = {
+    id: shortId("c", new Set(b.cards.map((c) => c.id))),
+    title,
+    notes: (input.notes ?? "").slice(0, 4000),
+    laneId: lane.id,
+    due: validDue(input.due),
+    createdAt: t,
+    updatedAt: t,
+  };
+  const cards = [...b.cards];
+  if (input.top) {
+    const first = cards.findIndex((c) => c.laneId === lane.id);
+    cards.splice(first === -1 ? cards.length : first, 0, card);
+  } else cards.push(card);
+  return { board: { ...b, cards }, card };
+}
+
+export function updateCard(
+  b: Board,
+  id: string,
+  patch: { title?: string; notes?: string; due?: string | null },
+): Board {
+  const card = requireCard(b, id);
+  const next = { ...card, updatedAt: now() };
+  if (patch.title !== undefined) {
+    const title = clean(patch.title, 200);
+    if (!title) throw new Error("A card needs a title");
+    next.title = title;
+  }
+  if (patch.notes !== undefined) next.notes = patch.notes.slice(0, 4000);
+  if (patch.due !== undefined) next.due = validDue(patch.due);
+  return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
+}
+
+/** Move a card into a lane at `index` among that lane's cards (end when omitted). */
+export function moveCard(b: Board, id: string, laneRef: string, index?: number): Board {
+  const card = requireCard(b, id);
+  const lane = requireLane(b, laneRef);
+  const rest = b.cards.filter((c) => c.id !== id);
+  const moved = { ...card, laneId: lane.id, updatedAt: card.laneId === lane.id ? card.updatedAt : now() };
+  const inLane = rest.filter((c) => c.laneId === lane.id);
+  const i = index === undefined ? inLane.length : Math.max(0, Math.min(index, inLane.length));
+  let at: number;
+  if (inLane.length === 0) at = rest.length;
+  else if (i >= inLane.length) at = rest.indexOf(inLane[inLane.length - 1]) + 1;
+  else at = rest.indexOf(inLane[i]);
+  rest.splice(at, 0, moved);
+  return { ...b, cards: rest };
+}
+
+export function deleteCards(b: Board, ids: string[]): Board {
+  ids.forEach((id) => requireCard(b, id));
+  return { ...b, cards: b.cards.filter((c) => !ids.includes(c.id)) };
+}
+
+export function addLane(b: Board, name: string): { board: Board; lane: Lane } {
+  const n = clean(name, 40);
+  if (!n) throw new Error("A lane needs a name");
+  if (findLane(b, n)) throw new Error(`There is already a lane called "${n}"`);
+  if (b.lanes.length >= 8) throw new Error("Boards are limited to 8 lanes");
+  const lane = { id: shortId("l", new Set(b.lanes.map((l) => l.id))), name: n };
+  return { board: { ...b, lanes: [...b.lanes, lane] }, lane };
+}
+
+export function renameLane(b: Board, ref: string, name: string): Board {
+  const lane = requireLane(b, ref);
+  const n = clean(name, 40);
+  if (!n) throw new Error("A lane needs a name");
+  const clash = findLane(b, n);
+  if (clash && clash.id !== lane.id) throw new Error(`There is already a lane called "${n}"`);
+  return { ...b, lanes: b.lanes.map((l) => (l.id === lane.id ? { ...l, name: n } : l)) };
+}
+
+/** Delete a lane and every card in it. */
+export function deleteLane(b: Board, ref: string): Board {
+  const lane = requireLane(b, ref);
+  if (b.lanes.length === 1) throw new Error("A board needs at least one lane");
+  return {
+    ...b,
+    lanes: b.lanes.filter((l) => l.id !== lane.id),
+    cards: b.cards.filter((c) => c.laneId !== lane.id),
+  };
+}
+
+export function moveLane(b: Board, ref: string, index: number): Board {
+  const lane = requireLane(b, ref);
+  const lanes = b.lanes.filter((l) => l.id !== lane.id);
+  lanes.splice(Math.max(0, Math.min(index, lanes.length)), 0, lane);
+  return { ...b, lanes };
+}
+
+function validDue(due: string | null | undefined): string | null {
+  if (!due) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due))) {
+    throw new Error(`Due dates must look like 2026-09-30, got "${due}"`);
+  }
+  return due;
+}
+
+/** Plain-text board for the model's context. */
+export function describeBoard(b: Board): string {
+  return b.lanes
+    .map((l) => {
+      const cards = laneCards(b, l.id);
+      const lines = cards.map(
+        (c) =>
+          `  - [${c.id}] ${c.title}${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}`,
+      );
+      return `${l.name} (lane id ${l.id}, ${cards.length} cards)\n${lines.join("\n") || "  (empty)"}`;
+    })
+    .join("\n");
+}

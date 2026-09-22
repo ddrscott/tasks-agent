@@ -1,0 +1,72 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "todo-agent",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-09-22",
+  // global_fetch_strictly_public lets the OAuth provider fetch client metadata documents (CIMD)
+  // safely: fetch() can only reach the public internet, never this zone or its origin.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+  // Served as askscottpierce.com/tasks. Routes run ahead of whatever else serves the zone.
+  // The two /.well-known routes are OAuth discovery for the MCP endpoint. RFC 8414 and
+  // RFC 9728 put them at the domain root, so this app is the OAuth server for the whole
+  // domain. Nothing else on askscottpierce.com uses them.
+  "routes": [
+    { "pattern": "askscottpierce.com/tasks", "zone_name": "askscottpierce.com" },
+    { "pattern": "askscottpierce.com/tasks/*", "zone_name": "askscottpierce.com" },
+    { "pattern": "askscottpierce.com/.well-known/oauth-authorization-server", "zone_name": "askscottpierce.com" },
+    { "pattern": "askscottpierce.com/.well-known/oauth-protected-resource/tasks/*", "zone_name": "askscottpierce.com" }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/tasks/api/*", "/tasks/agent", "/tasks/agent/*", "/tasks/mcp", "/tasks/oauth/*",
+      "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/*"
+    ]
+  },
+  "ai": { "binding": "AI", "remote": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "todo-agent-auth",
+      "database_id": "616a0109-b37d-4298-98f9-cbbe8387d9c0",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "send_email": [{ "name": "EMAIL" }],
+  // OAuth clients, grants, and tokens for outside agents (@cloudflare/workers-oauth-provider).
+  // Created by the first deploy's auto-provisioning ("todo-agent-oauth-kv").
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "97d2042e9ac84425ac8b7ca68945aef5" }],
+  "durable_objects": {
+    "bindings": [{ "name": "TodoAgent", "class_name": "TodoAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TodoAgent"] }],
+  "vars": {
+    // Cheap Workers AI model with tool calling ($0.06 in / $0.40 out per M tokens).
+    // Swap to "@cf/qwen/qwen3-30b-a3b-fp8" or "@cf/openai/gpt-oss-20b" if you prefer.
+    "CHAT_MODEL": "@cf/zai-org/glm-4.7-flash",
+    // Must be an address on a domain onboarded to Cloudflare Email Sending.
+    "EMAIL_FROM": "hey@askscottpierce.com",
+    // Comma-separated emails or "@domain.com" rules. Empty lets anyone sign up, which
+    // is the public setting: Turnstile guards the email form, and FREE_DAILY_CHATS caps
+    // each account's assistant use.
+    "ALLOWED_EMAILS": "",
+    // Turnstile on the email sign-in form. Empty sitekey turns it off. The secret is
+    // TURNSTILE_SECRET (wrangler secret put). Hostnames are the ones siteverify may
+    // report for a real token; never add localhost here.
+    "TURNSTILE_SITEKEY": "0x4AAAAAACmZxOxCRxlu8sDn",
+    "TURNSTILE_HOSTNAMES": "askscottpierce.com",
+    // Assistant messages per user per day. The board and MCP are never capped.
+    "FREE_DAILY_CHATS": "30",
+    "PRO_DAILY_CHATS": "150",
+    // Stripe price for the Pro subscription (price_…). Billing stays off until this and
+    // the STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET secrets are set.
+    "STRIPE_PRICE_ID": "",
+    // Google sign-in (Google Cloud project ask-scott-pierce, client "Tasks web"). The
+    // client ID is public; GOOGLE_CLIENT_SECRET is a secret.
+    "GOOGLE_CLIENT_ID": "400799187975-uljuberbt7uciidou2qp0vqr7fotbmat.apps.googleusercontent.com"
+  }
+}
