@@ -95,6 +95,41 @@ export const BOARD_TOOLS = {
 export type ToolName = keyof typeof BOARD_TOOLS;
 export const TOOL_NAMES = Object.keys(BOARD_TOOLS) as ToolName[];
 
+/** Read-only search, shared by the in-app assistant and MCP. Runs TodoAgent.search. */
+export const SEARCH_TOOL = {
+  name: "search_cards",
+  description:
+    "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
+    "lanes, due dates, and a snippet. Use it to find the card a user means when the board is large or the wording differs.",
+  inputSchema: z.object({
+    query: z.string().min(1).describe("What to look for, in plain words"),
+    mode: z.enum(["hybrid", "keyword", "semantic"]).optional()
+      .describe("hybrid (default) mixes exact words and meaning; keyword matches words; semantic matches meaning"),
+    lane: z.string().optional().describe("Only search this lane (name or id)"),
+    limit: z.number().int().min(1).max(50).optional().describe("Most results to return, default 10"),
+  }),
+};
+
+export type SearchInput = z.infer<typeof SEARCH_TOOL.inputSchema>;
+export type SearchHit = {
+  id: string;
+  title: string; // with \u0001…\u0002 around keyword matches
+  snippet: string; // from the notes, marked the same way; empty when the notes didn't match
+  lane: string;
+  due: string | null;
+  match: "keyword" | "semantic" | "both";
+};
+export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
+
+/** Plain-text search results for a model: one line per card. */
+export function describeHits(r: SearchResult): string {
+  const strip = (s: string) => s.replace(/[\u0001\u0002]/g, "");
+  if (!r.hits.length) return "No matching cards.";
+  return r.hits.map((h) =>
+    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}`,
+  ).join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : "");
+}
+
 /** What every tool call returns: a summary plus the fresh board, so the caller never works from a stale picture. */
 export type ToolOutcome = { ok: true; summary: string; board: string } | { ok: false; summary: string };
 

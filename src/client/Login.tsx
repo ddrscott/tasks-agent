@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, BASE } from "./base";
+import { api } from "./base";
+import { Footer } from "./Footer";
 
 async function post(path: string, body: unknown) {
   const r = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -215,12 +216,10 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         {tsFailed && !error && (
           <div className="login-note">The human check couldn't finish. It retries on its own{providers.length > 0 ? ", or continue with an account above" : ""}.</div>
         )}
-        <div className="legal-links">
-          <a href={`${BASE}/privacy`}>Privacy</a> · <a href={`${BASE}/terms`}>Terms</a>
-        </div>
         {/* Stays mounted across both steps so "Resend code" gets a fresh token too. */}
         {turnstile && <div ref={tsBox} className="turnstile-box" />}
       </div>
+      <Footer />
     </main>
   );
 }

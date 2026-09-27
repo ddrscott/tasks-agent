@@ -6,7 +6,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useRef, useState } from "react";
 import { laneCards, type Board, type Card, type Lane } from "../shared";
-import { IconCalendar, IconCheck, IconDots, IconNotes, IconPlus } from "./icons";
+import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 
 export type Actions = {
   addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
@@ -100,9 +100,21 @@ export function BoardView(p: Props) {
     void p.actions.moveCard(id, lane, index);
   }
 
-  function toggleDone(card: Card) {
+  /** Done means "in the last lane": send the card there, or back to the top of the first lane. */
+  function toggleDone(card: Card, fromKeyboard = false) {
     const target = card.laneId === doneLane ? board.lanes[0].id : doneLane;
-    if (target && target !== card.laneId) void p.actions.moveCard(card.id, target, card.laneId === doneLane ? 0 : Number.MAX_SAFE_INTEGER);
+    if (!target || target === card.laneId) return;
+    void p.actions.moveCard(card.id, target, card.laneId === doneLane ? 0 : Number.MAX_SAFE_INTEGER);
+    // The card remounts in its new lane, which drops keyboard focus; follow it there.
+    if (fromKeyboard) {
+      let tries = 0;
+      const refocus = () => {
+        const el = document.querySelector<HTMLElement>(`[data-card-id="${card.id}"]`);
+        if (el?.closest(`[data-lane-id="${target}"]`)) el.focus();
+        else if (++tries < 20) setTimeout(refocus, 50);
+      };
+      setTimeout(refocus, 50);
+    }
   }
 
   const active = drag ? cards.find((c) => c.id === drag.id) : undefined;
@@ -153,6 +165,7 @@ function LaneView(props: Props & {
       className={`lane${props.highlight ? " over" : ""}`}
       style={{ viewTransitionName: `lane-${lane.id}`, ["--lane-color" as string]: `var(--lane-${(props.index % 4) + 1})` }}
       aria-label={lane.name}
+      data-lane-id={lane.id}
     >
       <header className="lane-head">
         <span className="lane-dot" />
@@ -193,7 +206,7 @@ function LaneView(props: Props & {
       <SortableContext id={lane.id} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="cards" ref={setNodeRef}>
           {cards.map((c) => (
-            <SortableCard key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} />
+            <SortableCard key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.lanes.length > 1} />
           ))}
           {cards.length === 0 && !adding && (
             <div className="lane-empty">{props.index === 0 ? "Nothing here yet. Add a card, or ask the assistant." : "Drag cards here"}</div>
@@ -206,18 +219,24 @@ function LaneView(props: Props & {
   );
 }
 
-function SortableCard(p: { card: Card; isDone: boolean; flash: boolean; onOpen(c: Card): void; onToggle(c: Card): void }) {
+function SortableCard(p: { card: Card; isDone: boolean; flash: boolean; canToggle: boolean; onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id });
   return (
     <div
       ref={setNodeRef} {...attributes} {...listeners}
       style={{ transform: CSS.Translate.toString(transform), transition, viewTransitionName: isDragging ? undefined : `card-${p.card.id}` }}
       className={isDragging ? "dragging" : undefined}
-      aria-roledescription="card. Space to pick up, Enter to edit"
+      data-card-id={p.card.id}
+      aria-roledescription={`card. Space to pick up, Enter to edit, X to mark ${p.isDone ? "not done" : "done"}`}
       onClick={() => p.onOpen(p.card)}
-      onKeyDown={(e) => { listeners?.onKeyDown?.(e); if (e.key === "Enter" && !e.defaultPrevented) p.onOpen(p.card); }}
+      onKeyDown={(e) => {
+        listeners?.onKeyDown?.(e);
+        if (e.defaultPrevented) return;
+        if (e.key === "Enter") p.onOpen(p.card);
+        if (e.key.toLowerCase() === "x" && p.canToggle && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); p.onToggle(p.card, true); }
+      }}
     >
-      <CardFace {...p} dragging={isDragging} />
+      <CardFace {...p} onToggle={p.canToggle ? p.onToggle : undefined} dragging={isDragging} />
     </div>
   );
 }
@@ -227,17 +246,24 @@ function CardFace(p: { card: Card; isDone: boolean; flash?: boolean; overlay?: b
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
-      <button
-        className="check" title={p.isDone ? "Move back to the first lane" : "Mark done"} aria-label={p.isDone ? "Mark not done" : "Mark done"}
-        onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); p.onToggle?.(card); }}
-      ><IconCheck /></button>
+      {/* Shown on hover and keyboard focus only; the lane already says whether a card is done. */}
+      {p.onToggle && !p.overlay && (
+        <button
+          className="done-btn" tabIndex={-1}
+          title={p.isDone ? "Reopen: move back to the first lane (x)" : "Mark done (x)"} aria-label={p.isDone ? "Reopen" : "Mark done"}
+          onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); p.onToggle?.(card); }}
+        >{p.isDone ? <IconUndo /> : <IconCheck />}</button>
+      )}
       <div>
         <div className="card-title">{card.title}</div>
         <div className="card-meta">
           {card.due && <DueChip due={card.due} done={p.isDone} />}
           {card.notes && <span className="chip" title={card.notes}><IconNotes />notes</span>}
+          {!!card.attachments?.length && (
+            <span className="chip" title={card.attachments.map((a) => a.name).join("\n")}><IconClip />{card.attachments.length}</span>
+          )}
         </div>
       </div>
     </div>
@@ -301,22 +327,27 @@ function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; set
   );
 }
 
+/** A small square "+" in the margin after the last lane. The name field opens in a popover, so the board never shifts. */
 function AddLane({ onAdd, full }: { onAdd(name: string): Promise<unknown>; full: boolean }) {
   const [open, setOpen] = useState(false);
   if (full) return null;
   return (
-    <div className="add-lane">
-      {open ? (
-        <input
-          className="field" autoFocus placeholder="Lane name, e.g. Waiting" maxLength={40}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && e.currentTarget.value.trim()) { void onAdd(e.currentTarget.value.trim()); setOpen(false); }
-            if (e.key === "Escape") setOpen(false);
-          }}
-          onBlur={() => setOpen(false)}
-        />
-      ) : (
-        <button className="btn" onClick={() => setOpen(true)}><IconPlus />Add lane</button>
+    <div className="add-lane anchor">
+      <button className="btn icon" title="Add lane" aria-label="Add lane" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <IconPlus />
+      </button>
+      {open && (
+        <Popover onClose={() => setOpen(false)}>
+          <div className="add-lane-form">
+            <input
+              className="field" autoFocus placeholder="New lane, e.g. Waiting" maxLength={40} aria-label="New lane name"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.currentTarget.value.trim()) { void onAdd(e.currentTarget.value.trim()); setOpen(false); }
+              }}
+            />
+            <span className="hint"><kbd>↵</kbd> add · <kbd>esc</kbd> cancel</span>
+          </div>
+        </Popover>
       )}
     </div>
   );

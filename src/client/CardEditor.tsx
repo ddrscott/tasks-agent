@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Card, Lane } from "../shared";
-import { IconClose, IconTrash } from "./icons";
+import { Attachments } from "./Attachments";
+import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
 type Props = {
   card: Card;
@@ -8,11 +9,15 @@ type Props = {
   onSave(patch: { title?: string; notes?: string; due?: string | null }): void;
   onMove(laneId: string): void;
   onDelete(): void;
+  onRemoveAttachment(id: string): void;
+  /** Move to the done lane, or back out of it. Missing when the board has one lane. */
+  onToggleDone?(): void;
+  isDone: boolean;
   onClose(): void;
 };
 
 /** Edit a card. Changes save when the dialog closes, however it closes. */
-export function CardEditor({ card, lanes, onSave, onMove, onDelete, onClose }: Props) {
+export function CardEditor({ card, lanes, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -62,6 +67,7 @@ export function CardEditor({ card, lanes, onSave, onMove, onDelete, onClose }: P
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
+        <Attachments cardId={card.id} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>
@@ -69,7 +75,12 @@ export function CardEditor({ card, lanes, onSave, onMove, onDelete, onClose }: P
       <div className="dialog-foot">
         <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>
         <span className="spacer" />
-        <button className="btn primary" onClick={close}><IconClose />Done</button>
+        {onToggleDone && (
+          <button className="btn" onClick={() => { close(); onToggleDone(); }}>
+            {isDone ? <><IconUndo />Reopen</> : <><IconCheck />Mark done</>}
+          </button>
+        )}
+        <button className="btn primary" onClick={close}><IconClose />Close</button>
       </div>
     </dialog>
   );

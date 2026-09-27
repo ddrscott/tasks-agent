@@ -1,0 +1,11 @@
+// Bench-only Worker: runs routing experiments against Workers AI. Never deployed.
+{
+  "name": "todo-agent-bench",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "0223b96fe77599b23ff8ec7fcd32e2f1",
+  "ai": { "binding": "AI", "remote": true },
+  // Third-party models (Jev) run through AI Gateway.
+  "vars": { "JEV_GATEWAY": "default" }
+}

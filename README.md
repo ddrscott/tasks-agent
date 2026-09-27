@@ -10,10 +10,11 @@ Cloudflare, and you sign in with an emailed code.
 |---|---|
 | App + API | Workers, with static assets built by Vite + React |
 | Board, chat history, undo stack | Agents SDK: one Durable Object (`TodoAgent`) per user, SQLite-backed |
-| Assistant | Workers AI `@cf/zai-org/glm-4.7-flash`, about $0.06 in / $0.40 out per M tokens |
+| Assistant | Two paths: Needle 3 (a 121M tool-calling model) running in the browser tab through [needle-rs](https://github.com/ddrscott/needle-rs), free, for plain one-step commands; Workers AI `@cf/zai-org/glm-4.7-flash` (about $0.06 in / $0.40 out per M tokens) for everything else |
 | Login codes + sessions | D1 (`todo-agent-auth`), plus optional Google and Microsoft sign-in (OpenID Connect) |
 | Login email | Email Sending (`send_email` binding) from `hey@askscottpierce.com` |
 | Bot protection | Turnstile on the email sign-in form, checked with Siteverify before any email goes out |
+| Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
@@ -39,14 +40,33 @@ run ahead of whatever serves the zone.
   tools, and MCP calls all end in the pure functions in `src/shared.ts`. The board
   tools are defined once in `src/tools.ts` for both the assistant and MCP. The agent
   rejects state pushed directly from clients.
+- **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
+  appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
+  same, and the card editor has Mark done / Reopen, which is the path on touch
+  screens.
 - **Live sync.** Board state is Agents SDK synced state, so every open tab
   updates at once. Changes animate with the View Transitions API. Cards the
   assistant touches flash briefly.
-- **Undo.** Every change is undoable (⌘Z or the Undo button), including a whole
-  assistant turn as one step. The last 30 steps are kept.
+- **Undo and redo.** Every change is undoable (⌘Z or the Undo button), including a
+  whole assistant turn as one step, and an undo can be redone (⇧⌘Z, Ctrl+Y, the Redo
+  button, or Redo on the toast). The last 30 steps are kept. A new change clears redo.
 - **Themes.** Auto, which follows the OS, plus 11 fixed themes. Hover to preview,
   click to keep. Your choice syncs to your account and is cached locally so the
-  page never flashes the wrong theme.
+  page never flashes the wrong theme. Each sign-in email is its own account, so a
+  new one keeps the theme this browser already uses until you pick one there
+  (`themeChosen` on the board).
+- **Two assistants, one transcript.** The first time the chat opens, the tab downloads
+  Needle 3 (35 MB, once; Cache Storage after that) and runs it in a Web Worker. A message
+  goes to it first: the board's lane names and a handful of verb tools (finished, started,
+  reopen, move, set a date, add, delete) are the schema, the card is named in the person's
+  own words and matched to a title on the client, and the turn is applied locally only when
+  the engine's confidence, the card match, and a few plain-language checks all clear
+  (`src/needle-tools.ts`). Everything else, including questions, notes, anything with two
+  clauses, and anything the small model is unsure of, goes to GLM exactly as before. A local
+  turn runs the same board tools under one undo step and is written into the chat transcript
+  by `TodoAgent.applyLocal`, so undo, the ✓ lines, and every open tab see it the same way.
+  The footer under the message box says which path handled the last message. Local turns are
+  free and don't count against the daily cap. `bench/needle.mjs` measures the policy.
 - **Cost guard.** The assistant is capped per user per day: `FREE_DAILY_CHATS` (30)
   on the free plan and `PRO_DAILY_CHATS` (150) with a Stripe subscription. The chat
   shows a meter and an upgrade button at the cap. The board and MCP are never capped.
@@ -58,8 +78,8 @@ Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP c
 can work the board. The in-app page at **/tasks/connect** (user menu → Connect an
 agent) shows the server URL, setup steps for each client, connected apps, and tokens.
 
-- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board` plus
-  the seven board tools from `src/tools.ts`. MCP changes sync live and are undoable,
+- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`,
+  `search_cards`, and the seven board tools from `src/tools.ts`. MCP changes sync live and are undoable,
   one undo step per call.
 - **OAuth (most clients).** The client only needs the URL. It discovers the OAuth
   server, registers itself (Dynamic Client Registration, or a Client ID Metadata
@@ -82,6 +102,49 @@ agent) shows the server URL, setup steps for each client, connected apps, and to
   `/.well-known/oauth-protected-resource/tasks/*` here. Nothing else on the domain
   can use them.
 - MCP calls don't hit Workers AI, so the daily chat cap doesn't apply to them.
+
+## // SEARCH
+
+Search covers card titles and notes (not attachments yet). It runs inside each user's
+TodoAgent (`src/search.ts`), so results never cross between users.
+
+- **Keyword:** an FTS5 table (`card_fts`) with porter stemming, prefix matches for terms
+  of three or more letters, and bm25 ranking with titles weighted 5x. Common words are
+  dropped.
+- **Semantic:** one embedding per card from Workers AI (`EMBEDDING_MODEL`,
+  `@cf/baai/bge-small-en-v1.5`), stored in `card_vec` and compared by cosine
+  similarity. Boards are small, so a scan is faster than a vector database. Results
+  must score at least 0.52 and be within 0.06 of the best match. Those numbers come from
+  measured scores; tune them in `search.ts` if a new model behaves differently.
+- **Hybrid** (the default) merges both rankings with reciprocal rank fusion.
+- **Freshness:** every change updates the keyword index in the same step, undo
+  included. Embeddings refresh in the background when a card's text changes, and any
+  stale ones are refreshed before a semantic search. Moving cards costs nothing.
+- **Surfaces:** the ⌘K search box, the assistant's `search_cards` tool, and the MCP
+  `search_cards` tool. All three call `TodoAgent.search`.
+- Without Workers AI (`npm run dev:local`), search falls back to keyword matches and
+  says so.
+
+## // ATTACHMENTS
+
+Cards take files: the Attach files button, dropping files on an open card, or pasting a
+screenshot into it. `POST /tasks/api/attachments?card=<id>` streams the body into R2,
+then tells the card's agent over RPC (`attach`, which the browser can't call). Only
+name, size, and type go into the board, so agents and the assistant see file names.
+
+- **Limits.** `ATTACHMENT_MAX_MB` (25) per file and `ATTACHMENT_QUOTA_MB` (250) per user,
+  counted from R2. At most 20 files per card.
+- **Downloads** (`GET /tasks/api/attachments/<id>`) only look under the signed-in user's
+  own prefix. Images, PDFs, and plain text open inline; everything else downloads as
+  `application/octet-stream`. Every response has `nosniff`, and everything but PDFs
+  gets a sandboxing CSP, so an uploaded HTML or SVG file can't run on this origin.
+- **Removal is undoable.** Removing a file, or deleting its card or lane, drops only the
+  reference. `TodoAgent.collectAttachments` deletes R2 objects that neither the board
+  nor undo history refers to. It runs 25 hours after something drops a file, and again
+  weekly while history still holds removed ones. It skips objects under an hour old,
+  in case an upload is still finishing.
+- R2 costs: 10 GB and 1M writes a month are free, then $0.015/GB-month, and there are
+  no download (egress) fees.
 
 ## // TURNSTILE
 
@@ -168,8 +231,8 @@ board, so one person gets the same board every time. `ALLOWED_EMAILS` still appl
 
 Locally, put the same four values in `.dev.vars` (see `.dev.vars.example`).
 
-Keys: `n` new card · `/` assistant · `t` theme · `⌘Z` undo · `Space` pick up a
-card, arrows to move it · `Enter` edit a card. Pasting a list into "Add a card"
+Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
+card, arrows to move it · `Enter` edit a card · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
 creates one card per line.
 
 ## // DEVELOP
@@ -189,6 +252,41 @@ The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
 `.dev.vars` sets `DEV_LOGIN_CODES=1`, which skips sending email: the code shows
 on the sign-in screen and in the terminal. Copy `.dev.vars.example` to create it.
 
+## // ROUTING_BENCH
+
+`bench/` checks whether a fast model can handle plain commands ("finished the taxes") without
+a GLM round trip. There's no real traffic to mine, so `bench/cases.ts` holds three simulated
+boards and 80 hand-labeled commands, traps included.
+
+```sh
+npm run bench                  # the GLM and Jev arms; starts a throwaway Worker (bench/wrangler.jsonc) on :8799
+npm run bench -- --arm glm     # the production prompt and tools (src/prompt.ts, src/tools.ts)
+npm run bench -- --arm jev     # embed the message, shortlist cards, one Jev call
+npm run bench:needle           # the Needle arm: the real wasm engine in Node, ../needle-rs weights (NEEDLE_RS= to point elsewhere)
+npm run bench -- --score       # re-score bench/results/*.jsonl without calling a model
+```
+
+The Needle arm is the one that ships: it runs the same `src/needle-tools.ts` the tab does and
+reports, per threshold, how many commands the local path would take and how many it would get
+wrong. On the 80 cases (2026-09-27), at the shipped threshold of 0.8 it takes 17 commands and
+gets all 17 right; between 0.5 and 0.9 the count only moves between 19 and 16, always with zero
+wrong actions. The rest, including every question, every two-clause message, and the traps, go
+to GLM. In Node's single-threaded exact build a turn is about a second; in the browser's relaxed
+build it measured about 250 ms.
+
+- Jev is a third-party model, so it runs through AI Gateway (Unified Billing). The
+  `wrangler login` token has no AI Gateway scope, so local runs of the Jev arm need
+  `CLOUDFLARE_API_TOKEN` set to a token with AI Gateway Run, Workers AI Read/Write, and
+  Workers Scripts Write (`wrangler dev`'s remote preview needs the last one). A new
+  permission can take a minute or two to reach `wrangler dev`.
+- Unified Billing only spends credits through a gateway with Authentication turned on.
+  With it off, every non-`@cf/` model fails with `2049: Invalid User Credentials`, even
+  with credits loaded.
+- Through Unified Billing the Jev response is wrapped as `{ state, result: { answers, usage } }`,
+  and a noul answer reads `{ type: "noul", noul: 0.96 }`.
+- Latencies go through `wrangler dev`'s remote-binding proxy, which adds overhead to
+  every model call. GLM makes several calls per command, so it pays that overhead more often.
+
 ## // DEPLOY
 
 ```sh
@@ -197,10 +295,12 @@ npm run db:migrate:remote    # only when migrations/ changes
 ```
 
 Secrets (`npx wrangler secret put <NAME>`): `TURNSTILE_SECRET`, `STRIPE_SECRET_KEY`,
-`STRIPE_WEBHOOK_SECRET`, and optionally the four Google/Microsoft ones.
+`STRIPE_WEBHOOK_SECRET`, `GOOGLE_CLIENT_SECRET`, and optionally `MICROSOFT_CLIENT_ID` and
+`MICROSOFT_CLIENT_SECRET`. (`GOOGLE_CLIENT_ID` is a var in `wrangler.jsonc`.)
 
 `OAUTH_KV` is the `todo-agent-oauth-kv` namespace, created by the first OAuth deploy
-and pinned by id in `wrangler.jsonc`.
+and pinned by id in `wrangler.jsonc`. The R2 bucket for attachments is created the
+same way by the first deploy that includes them; pin its `bucket_name` afterwards.
 
 The D1 database (`616a0109-…`) exists, and askscottpierce.com is already set up
 for Email Sending.
@@ -218,3 +318,5 @@ for Email Sending.
 | `FREE_DAILY_CHATS` | `30` | assistant messages per day on the free plan |
 | `PRO_DAILY_CHATS` | `150` | assistant messages per day on Pro |
 | `STRIPE_PRICE_ID` | empty (billing off) | the Pro subscription's recurring price |
+| `ATTACHMENT_MAX_MB` | `25` | largest single attachment |
+| `ATTACHMENT_QUOTA_MB` | `250` | attachment storage per user |

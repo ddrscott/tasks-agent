@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { GrantInfo } from "../oauth";
 import type { TokenInfo } from "../tokens";
 import { api, BASE } from "./base";
+import { Footer } from "./Footer";
 import { IconCheck, IconTrash } from "./icons";
 
 // Instructions for connecting outside agents to the board over MCP, the apps
@@ -103,6 +104,7 @@ const CLIENTS: Client[] = [
 
 const TOOLS: [string, string, boolean?][] = [
   ["get_board", "Read every lane and card, with ids, due dates, and notes"],
+  ["search_cards", "Find cards by keywords or by meaning across titles and notes"],
   ["add_cards", "Create one or more cards, in any lane, with notes and due dates"],
   ["move_cards", "Move cards between lanes, for example to Done"],
   ["update_card", "Change a card's title, notes, or due date"],
@@ -334,6 +336,7 @@ export function Connect({ onBack }: { onBack(): void }) {
           </ul>
         </section>
       </main>
+      <Footer />
     </div>
   );
 }

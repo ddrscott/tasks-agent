@@ -4,10 +4,16 @@ import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } 
 import { createWorkersAI } from "workers-ai-provider";
 import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
 import * as ops from "./shared";
-import { THEME_IDS, type Board } from "./shared";
-import { BOARD_TOOLS, TOOL_NAMES, type ToolName, type ToolOutcome } from "./tools";
+import { THEME_IDS, type Attachment, type Board } from "./shared";
+import { systemPrompt } from "./prompt";
+import { CardIndex } from "./search";
+import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
 const HISTORY_LIMIT = 30;
+// Removed attachments stay in R2 while undo could bring them back. Cleanup runs a
+// day after something drops one, and checks again weekly while history still does.
+const ATTACHMENT_GRACE_S = 25 * 60 * 60;
+const ATTACHMENT_RECHECK_S = 7 * 24 * 60 * 60;
 
 /**
  * One instance per signed-in user (named by their user id). Holds the board as
@@ -24,7 +30,34 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async onStart() {
     this.sql`CREATE TABLE IF NOT EXISTS history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
+    // Boards that were undone, newest last, so an accidental undo can be redone.
+    // Any new change clears it, the same as in an editor.
+    this.sql`CREATE TABLE IF NOT EXISTS redo (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, chats INTEGER NOT NULL)`;
+    this.index.backfill(this.state);
+  }
+
+  // Keyword and semantic search over this board (search.ts).
+  private _index?: CardIndex;
+  private get index(): CardIndex {
+    if (!this._index) {
+      this._index = new CardIndex(this.ctx.storage.sql, this.env.AI, this.env.EMBEDDING_MODEL);
+      this._index.init();
+    }
+    return this._index;
+  }
+
+  /** Keep the search index in step with a board change. Embeddings update in the background. */
+  private reindex(before: Board | null, after: Board) {
+    this.index.sync(before, after);
+    this.index.refreshVectors(after).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+  }
+
+  /** Search titles and notes. For the UI (callable), the assistant, and MCP (RPC). */
+  @callable()
+  async search(input: unknown): Promise<SearchResult> {
+    return this.index.search(this.state, SEARCH_TOOL.inputSchema.parse(input));
   }
 
   validateStateChange(_next: Board, source: Connection | "server") {
@@ -43,8 +76,61 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       this.sql`INSERT INTO history (grp, label, board) VALUES (${group ?? null}, ${label}, ${JSON.stringify(before)})`;
       this.sql`DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT ${HISTORY_LIMIT})`;
     }
+    this.sql`DELETE FROM redo`;
     this.setState(after);
+    this.reindex(before, after);
+    const kept = new Set(ops.attachmentIds(after));
+    if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
     return after;
+  }
+
+  // ---------- attachments ----------
+
+  private scheduleCleanup(delayS: number) {
+    // One pending run is enough; later drops are covered by it or by its recheck.
+    if (this.getSchedules().some((s) => s.callback === "collectAttachments")) return;
+    return this.schedule(delayS, "collectAttachments");
+  }
+
+  /**
+   * Record a file the Worker just stored in R2. Deliberately not @callable: only
+   * the upload endpoint may add one, after it has checked the size and quota.
+   */
+  attach(cardId: string, att: Attachment): { ok: true } | { ok: false; error: string } {
+    try {
+      this.mutate("Attach file", (b) => ops.addAttachment(b, cardId, att));
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+
+  @callable()
+  removeAttachment(cardId: string, attId: string) {
+    this.mutate("Remove attachment", (b) => ops.removeAttachment(b, cardId, attId));
+  }
+
+  /** Delete R2 objects that neither the board nor undo history refers to. */
+  async collectAttachments() {
+    const live = new Set(ops.attachmentIds(this.state));
+    const inHistory = new Set<string>();
+    for (const row of this.sql<{ board: string }>`SELECT board FROM history UNION ALL SELECT board FROM redo`) {
+      for (const id of ops.attachmentIds(JSON.parse(row.board) as Board)) if (!live.has(id)) inHistory.add(id);
+    }
+    const prefix = `${this.name}/`;
+    const doomed: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.ATTACHMENTS.list({ prefix, cursor });
+      for (const obj of page.objects) {
+        const id = obj.key.slice(prefix.length);
+        // Skip very new objects: an upload may be between R2 and the board.
+        if (!live.has(id) && !inHistory.has(id) && Date.now() - obj.uploaded.getTime() > 60 * 60 * 1000) doomed.push(obj.key);
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    for (let i = 0; i < doomed.length; i += 1000) await this.env.ATTACHMENTS.delete(doomed.slice(i, i + 1000));
+    if (inHistory.size) await this.schedule(ATTACHMENT_RECHECK_S, "collectAttachments");
   }
 
   // ---------- board actions for the UI ----------
@@ -103,7 +189,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   setTheme(theme: string) {
     if (!(THEME_IDS as readonly string[]).includes(theme)) throw new Error(`Unknown theme ${theme}`);
-    this.setState({ ...this.state, theme }); // preferences aren't undoable
+    this.setState({ ...this.state, theme, themeChosen: true }); // preferences aren't undoable
+  }
+
+  /** Swap in a board from the undo or redo stack, keeping preferences, which aren't undoable. */
+  private restore(board: Board) {
+    const before = this.state;
+    this.setState({ ...board, theme: before.theme, themeChosen: before.themeChosen });
+    this.reindex(before, this.state);
+    const kept = new Set(ops.attachmentIds(this.state));
+    if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
   }
 
   /** Undo the last change. Returns what was undone, or null when there's nothing left. */
@@ -113,14 +208,31 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       SELECT id, label, board FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!top) return null;
     this.sql`DELETE FROM history WHERE id = ${top.id}`;
-    const restored = JSON.parse(top.board) as Board;
-    this.setState({ ...restored, theme: this.state.theme });
+    this.sql`INSERT INTO redo (grp, label, board) VALUES (NULL, ${top.label}, ${JSON.stringify(this.state)})`;
+    this.sql`DELETE FROM redo WHERE id NOT IN (SELECT id FROM redo ORDER BY id DESC LIMIT ${HISTORY_LIMIT})`;
+    this.restore(JSON.parse(top.board) as Board);
     return top.label;
   }
 
+  /** Redo the last undone change. Returns what was redone, or null when there's nothing to redo. */
   @callable()
-  canUndo(): string | null {
-    return this.sql<{ label: string }>`SELECT label FROM history ORDER BY id DESC LIMIT 1`[0]?.label ?? null;
+  redo(): string | null {
+    const top = this.sql<{ id: number; label: string; board: string }>`
+      SELECT id, label, board FROM redo ORDER BY id DESC LIMIT 1`[0];
+    if (!top) return null;
+    this.sql`DELETE FROM redo WHERE id = ${top.id}`;
+    this.sql`INSERT INTO history (grp, label, board) VALUES (NULL, ${top.label}, ${JSON.stringify(this.state)})`;
+    this.restore(JSON.parse(top.board) as Board);
+    return top.label;
+  }
+
+  /** Labels for the Undo and Redo buttons, or null when that stack is empty. */
+  @callable()
+  undoRedo(): { undo: string | null; redo: string | null } {
+    return {
+      undo: this.sql<{ label: string }>`SELECT label FROM history ORDER BY id DESC LIMIT 1`[0]?.label ?? null,
+      redo: this.sql<{ label: string }>`SELECT label FROM redo ORDER BY id DESC LIMIT 1`[0]?.label ?? null,
+    };
   }
 
   // ---------- board tools, for the chat below and for outside agents (mcp.ts) ----------
@@ -149,6 +261,36 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** The board as plain text, the same view the chat model gets. */
   describe(): string {
     return ops.describeBoard(this.state);
+  }
+
+  /**
+   * A turn the tab handled itself with the local model (Needle 3, see src/needle-tools.ts):
+   * run the resolved board tools as one undo step and write the same user and assistant
+   * messages the big-model path would, so the sidebar, undo, and every open tab agree.
+   * Local turns are free, so they don't count against the daily cap.
+   */
+  @callable()
+  async applyLocal(turn: { text: string; calls: { name: ToolName; input: unknown }[]; engine: string; confidence: number; ms?: number }): Promise<{ outcomes: ToolOutcome[]; reply: string }> {
+    const text = String(turn.text ?? "").trim().slice(0, 2000);
+    const calls = Array.isArray(turn.calls) ? turn.calls.slice(0, 8) : [];
+    if (!text || !calls.length) throw new Error("Nothing to apply.");
+    const group = crypto.randomUUID();
+    const outcomes = calls.map((c) => this.runTool(c.name, c.input, group));
+    const done = outcomes.filter((o) => o.ok).map((o) => o.summary);
+    const reply = done.length ? `${done.join(". ")}.` : "That didn't work; try telling me again.";
+    const stamp = new Date().toISOString();
+    const user = { id: crypto.randomUUID(), role: "user" as const, parts: [{ type: "text" as const, text }], metadata: { createdAt: stamp } };
+    const assistant = {
+      id: crypto.randomUUID(),
+      role: "assistant" as const,
+      metadata: { createdAt: stamp, local: true, engine: turn.engine, confidence: turn.confidence, ms: turn.ms ?? null },
+      parts: [
+        ...calls.map((c, i) => ({ type: `tool-${c.name}` as const, toolCallId: `local-${group}-${i}`, state: "output-available" as const, input: c.input, output: outcomes[i] })),
+        { type: "text" as const, text: reply, state: "done" as const },
+      ],
+    };
+    await this.persistMessages([...this.messages, user, assistant] as typeof this.messages);
+    return { outcomes, reply };
   }
 
   // ---------- chat agent ----------
@@ -188,38 +330,26 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         toolCalls: "before-last-2-messages",
       }),
       stopWhen: isStepCount(8),
-      tools: Object.fromEntries(TOOL_NAMES.map((name) => {
-        const { description, inputSchema } = BOARD_TOOLS[name];
-        return [name, tool({ description, inputSchema, execute: async (input: unknown) => this.runTool(name, input, group) })];
-      })),
+      tools: {
+        ...Object.fromEntries(TOOL_NAMES.map((name) => {
+          const { description, inputSchema } = BOARD_TOOLS[name];
+          return [name, tool({ description, inputSchema, execute: async (input: unknown) => this.runTool(name, input, group) })];
+        })),
+        [SEARCH_TOOL.name]: tool({
+          description: SEARCH_TOOL.description,
+          inputSchema: SEARCH_TOOL.inputSchema,
+          execute: async (input) => {
+            try {
+              const r = await this.search(input);
+              return { ok: true, summary: `Searched "${input.query}": ${r.hits.length} found`, results: describeHits(r) };
+            } catch (e) {
+              return { ok: false, summary: (e as Error).message };
+            }
+          },
+        }),
+      },
     });
 
     return result.toUIMessageStreamResponse();
   }
-}
-
-function systemPrompt(board: Board, today: string): string {
-  return `You are the assistant built into Tasks, a kanban-style task board. The user chats with you to
-add, update, move, and remove their cards. The board is on screen next to this chat and
-updates live when you use a tool.
-
-Today is ${today}.
-
-Current board:
-${ops.describeBoard(board)}
-
-How to work:
-- Act with the tools; don't just describe what you would do. Batch related changes into one
-  call where the tool allows it (add several cards at once, move several ids at once).
-- Decide each card's final lane before calling a tool, and move each card once. Only touch
-  the cards the user actually mentioned.
-- Match what the user says to existing cards by meaning, not exact wording. If two cards
-  could match and it matters, ask which one.
-- "Done", "finished", "did", "got" usually means move the card to the last lane (the done lane).
-  "Started" or "working on" means the middle lane.
-- Turn relative dates ("friday", "next week") into YYYY-MM-DD using today's date.
-- Everything you change can be undone with one click, so act without asking for confirmation,
-  except delete_lane, which also deletes its cards.
-- After acting, reply in one short sentence. Never mention card ids, lane ids, or tool names.
-- If the user asks something unrelated to their board, answer briefly and helpfully.`;
 }

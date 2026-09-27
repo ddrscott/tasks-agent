@@ -1,4 +1,5 @@
 import { BASE } from "./base";
+import { Footer } from "./Footer";
 
 // Privacy policy and terms at /tasks/privacy and /tasks/terms. Public (no sign-in),
 // because Google and Microsoft link to them from their sign-in screens. Keep them
@@ -24,6 +25,7 @@ export function Legal({ page, onBack }: { page: LegalPage; onBack(): void }) {
           {" "}See also the <a href={`${BASE}/${page === "privacy" ? "terms" : "privacy"}`}>{page === "privacy" ? "terms of service" : "privacy policy"}</a>.
         </p>
       </main>
+      <Footer />
     </div>
   );
 }
@@ -41,7 +43,8 @@ function Privacy() {
         <h3 className="subhead">What we store</h3>
         <ul>
           <li><b>Your email address</b>, to sign you in and to tell your board apart from everyone else's. If you sign in with Google or Microsoft, we receive your verified email from them and keep only that.</li>
-          <li><b>Your board</b>: lanes, cards, notes, and due dates, plus the last 30 changes so you can undo them.</li>
+          <li><b>Your board</b>: lanes, cards, notes, and due dates, plus the last 30 changes so you can undo them, and a search index of your card titles and notes.</li>
+          <li><b>Files you attach</b> to cards, up to 250 MB per account. When you remove a file or delete its card, we delete the file once undo can no longer bring it back, usually within a day or two and at most a few weeks later.</li>
           <li><b>Your assistant chat</b>: up to the last 120 messages, and a daily count of how many you've sent.</li>
           <li><b>Sign-in records</b>: one-time sign-in codes (kept 10 minutes) and sessions (30 days). We store only scrambled versions (hashes) of these, not the codes themselves.</li>
           <li><b>Connected agents</b>: access tokens you create and apps you allow to reach your board. Tokens are stored only as hashes.</li>
@@ -53,7 +56,7 @@ function Privacy() {
       <section>
         <h3 className="subhead">Who handles it for us</h3>
         <ul>
-          <li><b>Cloudflare</b> hosts the app and stores your data. When you use the assistant, your message, recent chat, and board are processed by Cloudflare Workers AI to write a reply and update the board. Cloudflare also sends sign-in emails and runs Turnstile, which checks that sign-ins come from people rather than bots.</li>
+          <li><b>Cloudflare</b> hosts the app and stores your data, including attached files. When you use the assistant, your message, recent chat, and board are processed by Cloudflare Workers AI to write a reply and update the board. Card titles and notes are also processed by Workers AI to power search by meaning. Cloudflare also sends sign-in emails and runs Turnstile, which checks that sign-ins come from people rather than bots.</li>
           <li><b>Stripe</b> processes payments for Pro.</li>
           <li><b>Google or Microsoft</b>, only if you choose to sign in with them.</li>
           <li><b>Agents you connect</b> (such as Claude, ChatGPT, or Glean) can read and change your board once you allow them. Their own privacy policies cover what they do with it. You can disconnect them at any time on the Connect page.</li>

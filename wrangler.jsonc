@@ -40,6 +40,9 @@
   // OAuth clients, grants, and tokens for outside agents (@cloudflare/workers-oauth-provider).
   // Created by the first deploy's auto-provisioning ("todo-agent-oauth-kv").
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "97d2042e9ac84425ac8b7ca68945aef5" }],
+  // Card attachments, stored as <user id>/<attachment id>. Created by the first deploy
+  // that included them, then pinned here.
+  "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "todo-agent-attachments" }],
   "durable_objects": {
     "bindings": [{ "name": "TodoAgent", "class_name": "TodoAgent" }]
   },
@@ -62,6 +65,11 @@
     // Assistant messages per user per day. The board and MCP are never capped.
     "FREE_DAILY_CHATS": "30",
     "PRO_DAILY_CHATS": "150",
+    // Attachment storage per user, and the largest single file.
+    "ATTACHMENT_QUOTA_MB": "250",
+    "ATTACHMENT_MAX_MB": "25",
+    // Workers AI embedding model for semantic search. Changing it re-embeds every card.
+    "EMBEDDING_MODEL": "@cf/baai/bge-small-en-v1.5",
     // Stripe price for the Pro subscription (price_…). Billing stays off until this and
     // the STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET secrets are set.
     "STRIPE_PRICE_ID": "",

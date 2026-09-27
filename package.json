@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "db:migrate:local": "wrangler d1 migrations apply todo-agent-auth --local",
     "db:migrate:remote": "wrangler d1 migrations apply todo-agent-auth --remote",
-    "dev:local": "LOCAL_ONLY=1 vite dev"
+    "dev:local": "LOCAL_ONLY=1 vite dev",
+    "bench": "node bench/run.mjs",
+    "bench:needle": "node bench/needle.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.112",

@@ -2,6 +2,15 @@
 // Every mutation goes through these functions, so drag-and-drop, buttons, and the
 // chat agent's tools all change the board the same way.
 
+/** A file on a card. The bytes live in R2 under `<user id>/<attachment id>`; only this metadata is in the board. */
+export type Attachment = {
+  id: string;
+  name: string;
+  size: number; // bytes
+  type: string; // MIME type as uploaded
+  addedAt: string;
+};
+
 export type Card = {
   id: string;
   title: string;
@@ -10,7 +19,10 @@ export type Card = {
   due: string | null; // YYYY-MM-DD
   createdAt: string;
   updatedAt: string;
+  attachments?: Attachment[]; // missing on cards made before attachments existed
 };
+
+export const MAX_ATTACHMENTS_PER_CARD = 20;
 
 export type Lane = { id: string; name: string };
 
@@ -18,6 +30,8 @@ export type Board = {
   lanes: Lane[];
   cards: Card[]; // array order is display order within each lane
   theme: string;
+  /** True once the user picks a theme on this account; until then a new account keeps the browser's. */
+  themeChosen?: boolean;
 };
 
 export const THEME_IDS = [
@@ -126,6 +140,28 @@ export function moveCard(b: Board, id: string, laneRef: string, index?: number):
   return { ...b, cards: rest };
 }
 
+export function addAttachment(b: Board, cardId: string, att: Attachment): Board {
+  const card = requireCard(b, cardId);
+  const list = card.attachments ?? [];
+  if (list.length >= MAX_ATTACHMENTS_PER_CARD) throw new Error(`A card can hold ${MAX_ATTACHMENTS_PER_CARD} attachments`);
+  const next = { ...card, attachments: [...list, att], updatedAt: now() };
+  return { ...b, cards: b.cards.map((c) => (c.id === cardId ? next : c)) };
+}
+
+/** Take a file off a card. The R2 object stays until nothing, including undo history, points at it. */
+export function removeAttachment(b: Board, cardId: string, attId: string): Board {
+  const card = requireCard(b, cardId);
+  const list = card.attachments ?? [];
+  if (!list.some((a) => a.id === attId)) throw new Error(`No attachment "${attId}" on that card`);
+  const next = { ...card, attachments: list.filter((a) => a.id !== attId), updatedAt: now() };
+  return { ...b, cards: b.cards.map((c) => (c.id === cardId ? next : c)) };
+}
+
+/** Every attachment id a board refers to. */
+export function attachmentIds(b: Board): string[] {
+  return b.cards.flatMap((c) => (c.attachments ?? []).map((a) => a.id));
+}
+
 export function deleteCards(b: Board, ids: string[]): Board {
   ids.forEach((id) => requireCard(b, id));
   return { ...b, cards: b.cards.filter((c) => !ids.includes(c.id)) };
@@ -182,7 +218,8 @@ export function describeBoard(b: Board): string {
       const cards = laneCards(b, l.id);
       const lines = cards.map(
         (c) =>
-          `  - [${c.id}] ${c.title}${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}`,
+          `  - [${c.id}] ${c.title}${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
+          (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
       return `${l.name} (lane id ${l.id}, ${cards.length} cards)\n${lines.join("\n") || "  (empty)"}`;
     })

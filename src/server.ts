@@ -1,5 +1,6 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { getAgentByName } from "agents";
+import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
@@ -24,7 +25,7 @@ const app: ExportedHandler<Env> = {
     if (sub.startsWith("/api/")) {
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
-        ?? (await handleBilling(req, env, sub))
+        ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 

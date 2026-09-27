@@ -9,8 +9,10 @@ import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
+import { Footer } from "./Footer";
 import { Legal } from "./Legal";
-import { IconChat, IconUndo, IconUser } from "./icons";
+import { SearchBox } from "./Search";
+import { IconChat, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
 import { ThemePicker } from "./ThemePicker";
@@ -61,7 +63,7 @@ export function App() {
 function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(): void }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [flash, setFlash] = useState<Set<string>>(new Set());
-  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+  const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
   const [editing, setEditing] = useState<string | null>(null);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -69,13 +71,16 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [chatOpen, setChatOpen] = useState(() => {
     try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
   });
-  const [toast, setToast] = useState<{ text: string; undo: boolean; key: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number } | null>(null);
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
   const pending = useRef<Board | null>(null);
   const agentBusy = useRef(false);
   const chatInput = useRef<HTMLTextAreaElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  // receive() runs before `agent` exists in this render, so it reaches the agent through a ref.
+  const agentRef = useRef<{ stub: { setTheme(theme: string): Promise<unknown> } } | null>(null);
   boardRef.current = board;
 
   // Server state lands here. Changes animate with a view transition, unless a drag
@@ -83,7 +88,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const receive = useCallback((next: Board) => {
     if (dragging.current) { pending.current = next; return; }
     const prev = boardRef.current;
-    applyTheme(next.theme);
+    // A new account (another sign-in email) starts on Auto. Until the user picks a theme
+    // on it, keep the one this browser already uses instead of switching under them.
+    const cached = readCachedTheme();
+    if (!prev && !next.themeChosen && cached !== next.theme) {
+      applyTheme(cached);
+      void agentRef.current?.stub.setTheme(cached);
+    } else {
+      applyTheme(next.theme);
+    }
     if (prev && agentBusy.current) {
       const before = new Map(prev.cards.map((c) => [c.id, c]));
       const changed = next.cards.filter((c) => { const b = before.get(c.id); return !b || b.updatedAt !== c.updatedAt || b.laneId !== c.laneId; });
@@ -106,6 +119,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     basePath: "tasks/agent", // the Worker picks your board from the session cookie
     onStateUpdate: (s) => receive(s),
   });
+  agentRef.current = agent;
 
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -132,22 +146,28 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     else say(data.error ?? "Billing is having trouble. Try again in a minute.");
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep the undo button's label current.
+  // Keep the Undo and Redo buttons' labels current.
   useEffect(() => {
     if (!board) return;
-    agent.stub.canUndo().then(setUndoLabel).catch(() => {});
+    agent.stub.undoRedo().then(setStack).catch(() => {});
   }, [board, agent]);
 
-  const say = useCallback((text: string, undo = false) => setToast({ text, undo, key: Date.now() }), []);
+  const say = useCallback((text: string, undo = false) => setToast({ text, action: undo ? "undo" : null, key: Date.now() }), []);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(t);
   }, [toast]);
 
+  const redo = useCallback(async () => {
+    const label = await agent.stub.redo();
+    setToast({ text: label ? `Redid: ${label.toLowerCase()}` : "Nothing to redo", action: label ? "undo" : null, key: Date.now() });
+  }, [agent]);
+
   const undo = useCallback(async () => {
     const label = await agent.stub.undo();
-    say(label ? `Undid: ${label.toLowerCase()}` : "Nothing to undo");
+    // Offer Redo right where the eye already is, in case the undo was an accident.
+    setToast({ text: label ? `Undid: ${label.toLowerCase()}` : "Nothing to undo", action: label ? "redo" : null, key: Date.now() });
   }, [agent, say]);
 
   const actions: Actions = useMemo(() => ({
@@ -166,12 +186,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     if (open) setTimeout(() => chatInput.current?.focus(), 50);
   }, []);
 
-  // Keyboard: n new card, / chat, t theme, ⌘Z undo.
+  // Keyboard: n new card, / chat, t theme, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       const typing = el.closest("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]");
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && !typing) { e.preventDefault(); void undo(); return; }
+      const isRedo = (e.metaKey || e.ctrlKey) && ((e.key.toLowerCase() === "z" && e.shiftKey) || (e.ctrlKey && e.key.toLowerCase() === "y"));
+      if (isRedo && !typing) { e.preventDefault(); void redo(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInput.current?.focus(); searchInput.current?.select(); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "n" && boardRef.current?.lanes[0]) { e.preventDefault(); setQuickAddLane(boardRef.current.lanes[0].id); }
       if (e.key === "/") { e.preventDefault(); setChat(true); }
@@ -179,7 +202,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [undo, setChat]);
+  }, [undo, redo, setChat]);
 
   // Auto theme follows the OS as it changes.
   useEffect(() => {
@@ -188,6 +211,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  const searchCards = useCallback((query: string) => agent.stub.search({ query, limit: 12 }), [agent]);
 
   const onBusy = useCallback((b: boolean) => {
     agentBusy.current = b;
@@ -219,10 +244,16 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             {overdue > 0 && <span className="overdue"><b>{overdue}</b> overdue</span>}
           </div>
           <span className="spacer" />
+          <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
-            <button className="btn" onClick={() => void undo()} disabled={!undoLabel} title={undoLabel ? `Undo ${undoLabel.toLowerCase()} (⌘Z)` : "Nothing to undo"}>
-              <IconUndo /><span className="hide-sm">Undo</span>
-            </button>
+            <div className="btn-pair">
+              <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"}>
+                <IconUndo /><span className="hide-sm">Undo</span>
+              </button>
+              <button className="btn icon" onClick={() => void redo()} disabled={!stack.redo} title={stack.redo ? `Redo ${stack.redo.toLowerCase()} (⇧⌘Z)` : "Nothing to redo"} aria-label="Redo">
+                <IconRedo />
+              </button>
+            </div>
             <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => void agent.stub.setTheme(t)} />
             <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)">
               <IconChat />Assistant
@@ -262,10 +293,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           }}
           toast={say}
         />
+        <Footer />
       </div>
 
       <Chat
-        agent={agent} open={chatOpen} model={me.model} onClose={() => setChat(false)} onBusy={onBusy} inputRef={chatInput}
+        agent={agent} board={board} open={chatOpen} model={me.model} onClose={() => setChat(false)} onBusy={onBusy} inputRef={chatInput}
         usage={usage} onUpgrade={() => void billing("checkout")}
       />
       {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
@@ -276,6 +308,17 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           onSave={(patch) => void agent.stub.updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER)}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true)); }}
+          isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
+          onToggleDone={board.lanes.length > 1 ? () => {
+            const reopen = editingCard.laneId === doneLane;
+            const target = reopen ? board.lanes[0].id : doneLane;
+            void agent.stub.moveCard(editingCard.id, target, reopen ? 0 : Number.MAX_SAFE_INTEGER)
+              .then(() => say(reopen ? `Reopened "${editingCard.title}"` : `Done: "${editingCard.title}"`, true));
+          } : undefined}
+          onRemoveAttachment={(id) => {
+            const name = editingCard.attachments?.find((a) => a.id === id)?.name ?? "file";
+            void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true));
+          }}
           onClose={() => setEditing(null)}
         />
       )}
@@ -283,7 +326,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       {toast && (
         <div className="toast" role="status" key={toast.key}>
           <span>{toast.text}</span>
-          {toast.undo && <button onClick={() => { setToast(null); void undo(); }}>Undo</button>}
+          {toast.action === "undo" && <button onClick={() => { setToast(null); void undo(); }}>Undo</button>}
+          {toast.action === "redo" && <button onClick={() => { setToast(null); void redo(); }}>Redo</button>}
         </div>
       )}
     </div>

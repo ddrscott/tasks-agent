@@ -4,3 +4,5 @@ dist/
 .dev.vars*
 !.dev.vars.example
 
+bench/results/
+bench/.bench-key

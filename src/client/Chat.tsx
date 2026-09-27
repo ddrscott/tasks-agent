@@ -2,6 +2,8 @@ import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { useEffect, useRef, useState } from "react";
 import type { Usage } from "../billing";
 import { IconClose, IconSend, IconStop } from "./icons";
+import { useNeedle } from "./needle";
+import type { Board } from "../shared";
 
 const SUGGESTIONS = [
   "Add groceries, call the dentist, and file taxes by Friday",
@@ -12,6 +14,7 @@ const SUGGESTIONS = [
 
 type Props = {
   agent: Parameters<typeof useAgentChat>[0]["agent"];
+  board: Board | null;
   open: boolean;
   model: string;
   onClose(): void;
@@ -23,15 +26,30 @@ type Props = {
 
 type ToolOutput = { ok?: boolean; summary?: string };
 
-export function Chat({ agent, open, model, onClose, onBusy, inputRef, usage, onUpgrade }: Props) {
+function engineTitle(status: ReturnType<typeof useNeedle>["status"], model: string, last: { path: string; note: string } | null): string {
+  const head = status.state === "ready" ? `Needle 3 runs in this tab (${status.mode} build${status.cached ? ", cached" : ""}): plain one-step commands are handled here, free, in about a quarter second. ${model} handles the rest.`
+    : status.state === "failed" ? `The local model couldn't load (${status.error}); ${model} handles everything.`
+    : status.state === "loading" ? "The local model is downloading (35 MB, once); until it's here, the cloud model handles everything."
+    : `Cloudflare Workers AI model ${model}.`;
+  return last ? `${head}\nLast message: ${last.path === "local" ? "handled in this tab" : "sent to the cloud model"} (${last.note}).` : head;
+}
+
+export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usage, onUpgrade }: Props) {
   const { messages, sendMessage, status, stop, clearHistory, error } = useAgentChat({
     agent,
     body: () => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
   });
   const [text, setText] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
-  const busy = status === "submitted" || status === "streaming";
+  // The local model loads once the chat has been opened; until then the big model does everything.
+  const [wanted, setWanted] = useState(false);
+  useEffect(() => { if (open) setWanted(true); }, [open]);
+  const needle = useNeedle(wanted);
+  const [localBusy, setLocalBusy] = useState(false);
+  const [last, setLast] = useState<{ path: "local" | "model"; note: string } | null>(null);
+  const busy = status === "submitted" || status === "streaming" || localBusy;
   const capped = !!usage && usage.used >= usage.limit;
+  const localReady = needle.status.state === "ready";
   const canUpgrade = !!usage?.billing && usage.plan === "free";
 
   useEffect(() => onBusy(busy), [busy, onBusy]);
@@ -42,15 +60,34 @@ export function Chat({ agent, open, model, onClose, onBusy, inputRef, usage, onU
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, status]);
 
-  function send(t: string) {
+  async function send(t: string) {
     const v = t.trim();
-    if (!v || busy || capped) return;
+    if (!v || busy || (capped && !localReady)) return;
     setText("");
+    // First the model in this tab: free, a quarter second, and only when it's sure. Then the big one.
+    if (localReady && board) {
+      setLocalBusy(true);
+      try {
+        const r = await needle.run(board, v);
+        if (r.ok) {
+          const stub = (agent as unknown as { stub: { applyLocal(turn: unknown): Promise<unknown> } }).stub;
+          await stub.applyLocal({ text: v, calls: r.calls, engine: "needle-rs", confidence: r.confidence, ms: r.ms });
+          setLast({ path: "local", note: `in this tab · ${r.ms ?? "?"} ms · ${Math.round(r.confidence * 100)}% sure` });
+          return;
+        }
+        setLast({ path: "model", note: r.reason });
+      } catch {
+        setLast({ path: "model", note: "local model error" });
+      } finally {
+        setLocalBusy(false);
+      }
+    }
+    if (capped) return;
     void sendMessage({ role: "user", parts: [{ type: "text", text: v }] });
   }
 
-  const last = messages[messages.length - 1];
-  const waiting = busy && (last?.role === "user" || !last?.parts.some((p) => p.type === "text" && p.text.trim()));
+  const lastMsg = messages[messages.length - 1];
+  const waiting = busy && (lastMsg?.role === "user" || !lastMsg?.parts.some((p) => p.type === "text" && p.text.trim()));
 
   return (
     <aside className={`chat${open ? "" : " closed"}`} aria-label="Assistant">
@@ -100,7 +137,7 @@ export function Chat({ agent, open, model, onClose, onBusy, inputRef, usage, onU
           <div className="cap-note" role="status">
             <p>
               <b>That's today's {usage.limit} assistant messages.</b> The board, drag and drop, and connected
-              agents keep working. The count resets at midnight UTC.
+              agents keep working{localReady ? ", and so do plain commands like \"finished the taxes\", which the model in this tab handles for free" : ""}. The count resets at midnight UTC.
             </p>
             {canUpgrade && <button className="btn primary" onClick={onUpgrade}>Upgrade to Pro</button>}
           </div>
@@ -125,11 +162,17 @@ export function Chat({ agent, open, model, onClose, onBusy, inputRef, usage, onU
           {busy ? (
             <button type="button" className="btn icon" title="Stop" onClick={() => stop()}><IconStop /></button>
           ) : (
-            <button className="btn primary icon" title="Send" disabled={!text.trim() || capped}><IconSend /></button>
+            <button className="btn primary icon" title="Send" disabled={!text.trim() || (capped && !localReady)}><IconSend /></button>
           )}
         </form>
         <div className="foot">
-          <span><kbd>/</kbd> to focus · <kbd>⇧↵</kbd> newline</span>
+          <span className="engine" title={engineTitle(needle.status, model, last)}>
+            <span className="prompt">$</span>{" "}
+            {needle.status.state === "ready" ? `needle-rs in this tab · ${model.split("/").pop()} behind it`
+              : needle.status.state === "loading" ? `loading the local model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}`
+              : model.split("/").pop()}
+            {last && <span className="path"> · last: {last.path === "local" ? "this tab" : "cloud"}</span>}
+          </span>
           {usage ? (
             <span className={`meter${capped ? " full" : ""}`} title={`${usage.plan === "pro" ? "Pro" : "Free"} plan · ${model.split("/").pop()}`}>
               {usage.used}/{usage.limit} today{usage.plan === "pro" ? " · pro" : ""}
