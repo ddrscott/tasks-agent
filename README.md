@@ -4,6 +4,12 @@ Live at **https://askscottpierce.com/tasks**. Tasks is a kanban-style task board
 thing, add taxes for Friday" and the cards move while you watch. It runs entirely on
 Cloudflare, and you sign in with an emailed code.
 
+The point of the project is to show a simple task manager run by AI agents, where small,
+fast models do the everyday work and a big LLM is only the backup. Needle 3 runs right in the
+browser tab and handles plain commands for free. Jev, a fast classifier, is benchmarked for
+the same job (see `// ROUTING_BENCH`). Anything either one isn't sure about goes to GLM on
+Workers AI.
+
 ## // STACK
 
 | Piece | Cloudflare product |
