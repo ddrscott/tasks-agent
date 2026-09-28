@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Card, Lane } from "../shared";
 import { Attachments } from "./Attachments";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
@@ -29,6 +29,16 @@ export function CardEditor({ card, lanes, onSave, onMove, onDelete, onRemoveAtta
     ref.current?.showModal();
   }, []);
 
+  // CSS `field-sizing: content` grows the notes to fit. Where it's missing (Firefox), size it by hand;
+  // min-height and max-height in the stylesheet still clamp the result.
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = notesRef.current;
+    if (!el || CSS.supports("field-sizing", "content")) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [notes]);
+
   function close() {
     const { title: t, notes: n, due: d } = latest.current;
     const patch: { title?: string; notes?: string; due?: string | null } = {};
@@ -53,7 +63,7 @@ export function CardEditor({ card, lanes, onSave, onMove, onDelete, onRemoveAtta
         />
         <label>
           Notes
-          <textarea className="field" value={notes} placeholder="Details, links, anything…" onChange={(e) => setNotes(e.target.value)} />
+          <textarea ref={notesRef} className="field" value={notes} placeholder="Details, links, anything…" onChange={(e) => setNotes(e.target.value)} />
         </label>
         <div className="dialog-row">
           <label>
