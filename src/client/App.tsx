@@ -413,7 +413,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
       {encOpen && (
         <EncryptionDialog
-          view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} stub={encStub} say={(t: string) => say(t)}
+          view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} email={me.email} stub={encStub} say={(t: string) => say(t)}
           onEnabled={unlockWith} onDisabled={lock} onClose={() => setEncOpen(false)}
         />
       )}

@@ -19,6 +19,18 @@ export type EncryptionStub = {
 
 const RESET_WORD = "START OVER";
 
+// Password managers and browsers find a passphrase by the markup: a <form>, type="password"
+// with autocomplete current-password or new-password, and a username field in the same form
+// to file it under. The account email plays that part here.
+const RULES = { passwordrules: `minlength: ${MIN_PASSPHRASE};` }; // Safari's generator reads this
+
+function AccountField({ email }: { email: string }) {
+  return <input className="sr-only" type="email" name="username" autoComplete="username" value={email} readOnly tabIndex={-1} aria-hidden="true" />;
+}
+
+/** Keeps password managers from filling or saving a field that isn't a secret. */
+const NOT_A_SECRET = { autoComplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "", "data-form-type": "other" };
+
 export function Unlock({ seal, userId, email, onUnlocked, onReset, onSignOut }: {
   seal: SealInfo; userId: string; email: string;
   onUnlocked(k: BoardKey): void; onReset(): Promise<void>; onSignOut(): void;
@@ -50,9 +62,10 @@ export function Unlock({ seal, userId, email, onUnlocked, onReset, onSignOut }: 
       <div className="login-card">
         <h1 className="wordmark">tasks<span>.</span></h1>
         <p>This board is end-to-end encrypted. Enter your passphrase to open it on this device.</p>
-        <form onSubmit={unlock}>
+        <form onSubmit={unlock} action="#" method="post">
+          <AccountField email={email} />
           <input
-            className="field" type="password" autoFocus autoComplete="current-password" value={pass}
+            className="field" type="password" id="passphrase" name="passphrase" autoFocus autoComplete="current-password" value={pass}
             placeholder="Passphrase" aria-label="Passphrase" onChange={(e) => setPass(e.target.value)}
           />
           <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this device</label>
@@ -68,7 +81,7 @@ export function Unlock({ seal, userId, email, onUnlocked, onReset, onSignOut }: 
         ) : (
           <div className="forgot">
             <p>Without the passphrase, nobody can open this board. That's the point, and it means it can't be recovered. You can throw it away, files included, and start over with an empty board.</p>
-            <input className="field" autoComplete="off" value={confirm} placeholder={`Type ${RESET_WORD}`} aria-label={`Type ${RESET_WORD} to confirm`} onChange={(e) => setConfirm(e.target.value)} />
+            <input className="field" type="text" name="confirm-reset" {...NOT_A_SECRET} value={confirm} placeholder={`Type ${RESET_WORD}`} aria-label={`Type ${RESET_WORD} to confirm`} onChange={(e) => setConfirm(e.target.value)} />
             <div className="login-foot">
               <button className="linkish" onClick={() => { setForgot(false); setConfirm(""); }}>Never mind</button>
               <button className="btn danger" disabled={confirm.trim().toUpperCase() !== RESET_WORD || busy} onClick={() => { setBusy(true); void onReset().catch((e) => { setError((e as Error).message); setBusy(false); }); }}>
@@ -90,6 +103,8 @@ type DialogProps = {
   raw: Board;
   vault: Vault | null;
   userId: string;
+  /** The signed-in email, as the "username" password managers file the passphrase under. */
+  email: string;
   stub: EncryptionStub;
   onEnabled(k: BoardKey): void;
   onDisabled(): void;
@@ -97,7 +112,7 @@ type DialogProps = {
   say(text: string): void;
 };
 
-export function EncryptionDialog({ view, raw, vault, userId, stub, onEnabled, onDisabled, onClose, say }: DialogProps) {
+export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabled, onClose, say }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   return (
@@ -105,8 +120,8 @@ export function EncryptionDialog({ view, raw, vault, userId, stub, onEnabled, on
       <div className="dialog-body">
         <h2 className="h">END_TO_END_ENCRYPTION</h2>
         {view.sealed && vault
-          ? <Manage view={view} raw={raw} vault={vault} userId={userId} stub={stub} onDisabled={onDisabled} say={say} onClose={onClose} />
-          : <TurnOn view={view} userId={userId} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} />}
+          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabled={onDisabled} say={say} onClose={onClose} />
+          : <TurnOn view={view} userId={userId} email={email} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} />}
       </div>
       <div className="dialog-foot">
         <span className="spacer" />
@@ -116,7 +131,7 @@ export function EncryptionDialog({ view, raw, vault, userId, stub, onEnabled, on
   );
 }
 
-function TurnOn({ view, userId, stub, onEnabled, say, onClose }: Pick<DialogProps, "view" | "userId" | "stub" | "onEnabled" | "say" | "onClose">) {
+function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<DialogProps, "view" | "userId" | "email" | "stub" | "onEnabled" | "say" | "onClose">) {
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [remember, setRemember] = useState(true);
@@ -161,27 +176,30 @@ function TurnOn({ view, userId, stub, onEnabled, say, onClose }: Pick<DialogProp
         <li>Undo history and the chat are cleared, so no plain copy is left behind.</li>
         <li><b>If you forget the passphrase, the board can't be recovered.</b></li>
       </ul>
+      <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void go(); }}>
+      <AccountField email={email} />
       <label>
         Passphrase ({MIN_PASSPHRASE}+ characters; a few random words works well)
-        <input className="field" type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} />
+        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={pass} onChange={(e) => setPass(e.target.value)} />
       </label>
       {short && <div className="login-error">At least {MIN_PASSPHRASE} characters.</div>}
       <label>
         Same passphrase again
-        <input className="field" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void go(); }} />
+        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={again} onChange={(e) => setAgain(e.target.value)} />
       </label>
       {mismatch && <div className="login-error">Those don't match.</div>}
       <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this device</label>
       <label className="check"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> I understand a forgotten passphrase means a lost board</label>
       {error && <div className="login-error" role="alert">{error}</div>}
       <div className="enc-actions">
-        <button className="btn primary" disabled={!ready} onClick={() => void go()}>{busy ?? "Encrypt my board"}</button>
+        <button type="submit" className="btn primary" disabled={!ready}>{busy ?? "Encrypt my board"}</button>
       </div>
+      </form>
     </>
   );
 }
 
-function Manage({ view, raw, vault, userId, stub, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "stub" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
+function Manage({ view, raw, vault, userId, email, stub, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "email" | "stub" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
   const seal = raw.sealed!;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -239,12 +257,15 @@ function Manage({ view, raw, vault, userId, stub, onDisabled, say, onClose }: Pi
       <p className="enc-on"><span className="prompt">$</span> Encrypted since {new Date(seal.since).toLocaleDateString(undefined, { dateStyle: "medium" })}. Key <code>{seal.kid}</code>, wrapped with PBES2-HS512+A256KW ({PBES2_COUNT.toLocaleString()} rounds); fields are A256GCM JWE.</p>
 
       <h3 className="h">CHANGE_PASSPHRASE</h3>
-      <input className="field" type="password" autoComplete="current-password" placeholder="Current passphrase" aria-label="Current passphrase" value={current} onChange={(e) => setCurrent(e.target.value)} />
-      <input className="field" type="password" autoComplete="new-password" placeholder={`New passphrase (${MIN_PASSPHRASE}+ characters)`} aria-label="New passphrase" value={next} onChange={(e) => setNext(e.target.value)} />
-      <input className="field" type="password" autoComplete="new-password" placeholder="New passphrase again" aria-label="New passphrase again" value={again} onChange={(e) => setAgain(e.target.value)} />
-      <div className="enc-actions">
-        <button className="btn" disabled={!current || !next || !!busy} onClick={() => void change()}>{busy === "Changing…" ? busy : "Change passphrase"}</button>
-      </div>
+      <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void change(); }}>
+        <AccountField email={email} />
+        <input className="field" type="password" id="current-passphrase" name="current-passphrase" autoComplete="current-password" placeholder="Current passphrase" aria-label="Current passphrase" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} placeholder={`New passphrase (${MIN_PASSPHRASE}+ characters)`} aria-label="New passphrase" value={next} onChange={(e) => setNext(e.target.value)} />
+        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} placeholder="New passphrase again" aria-label="New passphrase again" value={again} onChange={(e) => setAgain(e.target.value)} />
+        <div className="enc-actions">
+          <button type="submit" className="btn" disabled={!current || !next || !!busy}>{busy === "Changing…" ? busy : "Change passphrase"}</button>
+        </div>
+      </form>
 
       <h3 className="h">BACKUP</h3>
       <p>The board exactly as the server holds it, still encrypted. <code>scripts/decrypt-board.mjs</code> or any JOSE library opens it with the passphrase. Files aren't in it; download those from their cards.</p>
