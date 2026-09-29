@@ -3,16 +3,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
-import type { Board, Card } from "../shared";
+import type { BoardKey } from "../sealed";
+import { clean, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
+import { EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
+import { localSearch } from "./localSearch";
+import { recallKey, Vault } from "./vault";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
-import { IconChat, IconRedo, IconUndo, IconUser } from "./icons";
+import { IconChat, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
 import { ThemePicker } from "./ThemePicker";
@@ -61,6 +65,11 @@ export function App() {
 }
 
 function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(): void }) {
+  async function signOut() {
+    await fetch(api("/api/auth/logout"), { method: "POST" });
+    onSignOut();
+  }
+
   const [board, setBoard] = useState<Board | null>(null);
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
@@ -68,6 +77,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [encOpen, setEncOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(() => {
     try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
   });
@@ -82,6 +92,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   // receive() runs before `agent` exists in this render, so it reaches the agent through a ref.
   const agentRef = useRef<{ stub: { setTheme(theme: string): Promise<unknown> } } | null>(null);
   boardRef.current = board;
+
+  // End-to-end encryption. `raw` is the board as the server holds it; on an encrypted board
+  // that's ciphertext, and `board` is the decrypted view. The vault holds the unlocked key.
+  const [raw, setRaw] = useState<Board | null>(null);
+  const rawRef = useRef<Board | null>(null);
+  const [vault, setVault] = useState<Vault | null>(null);
+  const vaultRef = useRef<Vault | null>(null);
+  const [recalling, setRecalling] = useState(true);
+  const seq = useRef(0);
 
   // Server state lands here. Changes animate with a view transition, unless a drag
   // is in progress; then the newest state waits until the card is dropped.
@@ -114,11 +133,57 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     }
   }, []);
 
+  // Every state update goes through here: plain boards straight to the UI, encrypted ones
+  // through the vault first. A newer update always wins over a slower decrypt.
+  const ingest = useCallback((s: Board) => {
+    rawRef.current = s;
+    setRaw(s);
+    const n = ++seq.current;
+    if (!s.sealed) { receive(s); return; }
+    const v = vaultRef.current;
+    if (!v || v.key.kid !== s.sealed.kid) { applyTheme(s.theme); boardRef.current = null; setBoard(null); return; }
+    void v.openBoard(s).then((view) => { if (n === seq.current) receive(view); });
+  }, [receive]);
+
+  const unlockWith = useCallback((k: BoardKey) => {
+    const v = new Vault(k);
+    vaultRef.current = v;
+    setVault(v);
+    if (rawRef.current) ingest(rawRef.current);
+  }, [ingest]);
+
+  const lock = useCallback(() => {
+    vaultRef.current = null;
+    setVault(null);
+  }, []);
+
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
     basePath: "tasks/agent", // the Worker picks your board from the session cookie
-    onStateUpdate: (s) => receive(s),
+    onStateUpdate: (s) => ingest(s),
   });
+
+  // A key this browser remembers opens the board without asking.
+  const sealedKid = raw?.sealed?.kid;
+  useEffect(() => {
+    if (!raw) return;
+    if (!sealedKid || vaultRef.current?.key.kid === sealedKid) { setRecalling(false); return; }
+    setRecalling(true);
+    void recallKey(me.id, sealedKid).then((k) => { if (k) unlockWith(k); }).finally(() => setRecalling(false));
+  }, [!!raw, sealedKid, me.id, unlockWith]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Encrypt text on its way out when the board is encrypted; pass it through when it isn't. */
+  const out = useCallback(async (text: string) => {
+    const v = vaultRef.current;
+    return rawRef.current?.sealed && v ? v.seal(text) : text;
+  }, []);
+  /** The server can't compare encrypted lane names, so the tab checks for a clash first. */
+  const laneClash = useCallback((name: string, except?: string) => {
+    const n = clean(name, 40).toLowerCase();
+    if (rawRef.current?.sealed && boardRef.current?.lanes.some((l) => l.id !== except && l.name.toLowerCase() === n)) {
+      throw new Error(`There is already a lane called "${clean(name, 40)}"`);
+    }
+  }, []);
   agentRef.current = agent;
 
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
@@ -171,14 +236,22 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   }, [agent, say]);
 
   const actions: Actions = useMemo(() => ({
-    addCard: (laneId, title, top) => agent.stub.addCard(laneId, title, top),
+    addCard: async (laneId, title, top) => agent.stub.addCard(laneId, await out(clean(title, 200)), top),
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index),
-    addLane: (name) => agent.stub.addLane(name),
-    renameLane: (id, name) => agent.stub.renameLane(id, name),
+    addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },
+    renameLane: async (id, name) => { laneClash(name, id); return agent.stub.renameLane(id, await out(clean(name, 40))); },
     deleteLane: (id) => agent.stub.deleteLane(id),
     moveLane: (id, index) => agent.stub.moveLane(id, index),
     clearLane: (id) => agent.stub.clearLane(id),
-  }), [agent]);
+  }), [agent, out, laneClash]);
+
+  const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null }) => {
+    const p: typeof patch = {};
+    if (patch.title !== undefined) p.title = await out(clean(patch.title, 200));
+    if (patch.notes !== undefined) p.notes = patch.notes ? await out(patch.notes.slice(0, 4000)) : "";
+    if (patch.due !== undefined) p.due = patch.due ? await out(patch.due) : null;
+    return agent.stub.updateCard(id, p);
+  }, [agent, out]);
 
   const setChat = useCallback((open: boolean) => {
     setChatOpen(open);
@@ -212,14 +285,27 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  const searchCards = useCallback((query: string) => agent.stub.search({ query, limit: 12 }), [agent]);
+  const searchCards = useCallback(async (query: string) => {
+    if (rawRef.current?.sealed) return boardRef.current ? localSearch(boardRef.current, query) : { hits: [], semantic: "off" as const };
+    return agent.stub.search({ query, limit: 12 });
+  }, [agent]);
 
   const onBusy = useCallback((b: boolean) => {
     agentBusy.current = b;
     if (!b) refreshUsage(); // a turn just finished, so the count moved
   }, [refreshUsage]);
 
-  if (!board) return <div className="splash">opening your board</div>;
+  const encStub = agent.stub as unknown as EncryptionStub;
+  if (raw?.sealed && !vault) {
+    if (recalling) return <div className="splash">opening your board</div>;
+    return (
+      <Unlock
+        seal={raw.sealed} userId={me.id} email={me.email} onUnlocked={unlockWith} onSignOut={() => void signOut()}
+        onReset={() => encStub.resetEncryptedBoard()}
+      />
+    );
+  }
+  if (!board || !raw) return <div className="splash">opening your board</div>;
 
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
   const open = board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1);
@@ -228,16 +314,17 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const overdue = open.filter((c) => c.due && c.due < today).length;
   const editingCard = board.cards.find((c) => c.id === editing);
 
-  async function signOut() {
-    await fetch(api("/api/auth/logout"), { method: "POST" });
-    onSignOut();
-  }
 
   return (
     <div className="app">
       <div className="main">
         <header className="topbar">
           <h1 className="wordmark">tasks<span>.</span></h1>
+          {board.sealed && (
+            <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" onClick={() => setEncOpen(true)}>
+              <IconLock /><span className="hide-sm">encrypted</span>
+            </button>
+          )}
           <div className="stats" aria-label="Summary">
             <span><b>{open.length}</b> open</span>
             {dueToday > 0 && <span className="due-today"><b>{dueToday}</b> due today</span>}
@@ -267,6 +354,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                     <button onClick={() => { setMenuOpen(false); setQuickAddLane(board.lanes[0]?.id ?? null); }}>New card <kbd>n</kbd></button>
                     <button onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
                     <button onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
+                    <button onClick={() => { setMenuOpen(false); setEncOpen(true); }}>{board.sealed ? "Encryption" : "Encrypt with a passphrase…"}</button>
                     <button onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
                     {usage?.billing && usage.plan === "free" && (
                       <button onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
@@ -297,15 +385,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       </div>
 
       <Chat
-        agent={agent} board={board} open={chatOpen} model={me.model} onClose={() => setChat(false)} onBusy={onBusy} inputRef={chatInput}
+        agent={agent} board={board} vault={board.sealed ? vault : null} open={chatOpen} model={me.model} onClose={() => setChat(false)} onBusy={onBusy} inputRef={chatInput}
         usage={usage} onUpgrade={() => void billing("checkout")}
       />
       {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {editingCard && (
         <CardEditor
-          key={editingCard.id} card={editingCard} lanes={board.lanes}
-          onSave={(patch) => void agent.stub.updateCard(editingCard.id, patch)}
+          key={editingCard.id} card={editingCard} lanes={board.lanes} vault={board.sealed ? vault : null}
+          onSave={(patch) => void updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER)}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true)); }}
           isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
@@ -320,6 +408,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true));
           }}
           onClose={() => setEditing(null)}
+        />
+      )}
+
+      {encOpen && (
+        <EncryptionDialog
+          view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} stub={encStub} say={(t: string) => say(t)}
+          onEnabled={unlockWith} onDisabled={lock} onClose={() => setEncOpen(false)}
         />
       )}
 

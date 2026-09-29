@@ -9,6 +9,9 @@ model in the browser does the everyday work and a big LLM is only the backup. Ne
 right in the tab through [needle-rs](https://github.com/ddrscott/needle-rs) and handles plain
 commands for free, with no API call. Anything it isn't sure about goes to GLM on Workers AI.
 
+A board can also be end-to-end encrypted with a passphrase (`// END_TO_END_ENCRYPTION`). Then
+the server holds only ciphertext and the in-browser model is the whole assistant.
+
 ## // STACK
 
 | Piece | Cloudflare product |
@@ -21,6 +24,7 @@ commands for free, with no API call. Anything it isn't sure about goes to GLM on
 | Bot protection | Turnstile on the email sign-in form, checked with Siteverify before any email goes out |
 | Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
+| End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -77,6 +81,75 @@ run ahead of whatever serves the zone.
   shows a meter and an upgrade button at the cap. The board and MCP are never capped.
   Sign-in is limited by `ALLOWED_EMAILS` and protected by Turnstile.
 
+## // END_TO_END_ENCRYPTION
+
+User menu → **Encrypt with a passphrase…** encrypts the board in the browser. From then on the
+server, the cloud model, outside agents, and anyone reading the database see only ciphertext.
+Any device opens the board with the passphrase, and nobody opens it without one.
+
+**Format.** It's all open standards, so the data never depends on this app (`src/sealed.ts`):
+
+- The board key is a random 256-bit AES key, written as a JWK (RFC 7517).
+- The **envelope** is that JWK encrypted to the passphrase as a compact JWE (RFC 7516) with
+  `alg: PBES2-HS512+A256KW`, `enc: A256GCM`, `p2c: 600000` (RFC 7518 §4.8, PBKDF2-HMAC-SHA512).
+  The passphrase is NFC-normalized UTF-8. The envelope sits on the board as `sealed.envelope`,
+  next to `sealed.kid`.
+- Every lane name, card title, note, due date, attachment name and type, and chat message is its
+  own compact JWE: `alg: dir`, `enc: A256GCM`, `kid` = the board key's id, with a fresh random IV.
+- Attachments are uploaded as the same kind of JWE, with name and type in `X-Sealed-Name` and
+  `X-Sealed-Type`. R2 keeps no name, type, or card for them. The real file size is computed
+  exactly from the stored size (`sealedFileSize`).
+
+**Getting data out.** Encryption → **Download encrypted backup** saves the board exactly as the
+server holds it. Then:
+
+```sh
+TASKS_PASSPHRASE='…' node scripts/decrypt-board.mjs < tasks-encrypted-2026-09-29.json > board.json
+```
+
+It reads stdin and writes the plain board to stdout, and asks on the terminal if
+`TASKS_PASSPHRASE` isn't set. Any JOSE library works the same way. Python's `jwcrypto` was checked
+against a real board, but it caps PBES2 at 16,384 rounds, so raise
+`jwcrypto.jwa.default_max_pbkdf2_iterations` first.
+
+**What the server does.** The ops in `src/shared.ts` pass sealed values through, so moves,
+deletes, reordering, and undo work on ids without reading anything. `assertSealedBoard` runs on
+every change and rejects any field that isn't a JWE under the board's `kid`. That's what keeps
+plaintext off an encrypted board from any path: MCP, the cloud model, a stale tab, or a bug.
+
+- **Turning it on or off** re-encrypts (or decrypts) every field and file in the tab. Files are
+  re-uploaded with `?stage=1`, and the whole board goes to `enableEncryption` or
+  `disableEncryption` in one call. The agent checks that it's the same board by id
+  (`sameShape`), swaps it in, and erases the undo and redo history, the chat, the search index,
+  and every R2 object the new board doesn't use.
+- **Changing the passphrase** only rewraps the key (`changePassphrase`). Fields aren't
+  re-encrypted. Undo never brings an old envelope back.
+- **Forgotten passphrase:** the unlock screen can throw the board away (`resetEncryptedBoard`),
+  files included, and start over empty. That's the only recovery there is.
+- **Remember on this device** keeps the key in IndexedDB as a non-extractable `CryptoKey`, so
+  scripts can use it but can't read it. Without it, the key lives in memory until the tab closes.
+
+**What changes on an encrypted board.**
+
+- The assistant is Needle in the tab only. It runs on the decrypted board, and its tool calls
+  and your message are encrypted before `applyLocal`. `onChatMessage` refuses to run the cloud
+  model, and it drops any plaintext message a client sends anyway.
+- Search runs in the browser (`src/client/localSearch.ts`) and matches keywords with prefixes,
+  not meaning.
+- MCP tools all answer with an error that says the board is encrypted.
+- Lane name clashes are checked in the tab, since the server can't compare names.
+
+**What it doesn't hide.** Your email, the number of lanes, cards, and files, file sizes,
+timestamps, card order, your theme, and usage and billing records. Also: Durable Objects allow
+neither `PRAGMA secure_delete` nor `VACUUM` (both were tried), so rows erased when encryption
+goes on can linger in free pages of the database file, and Cloudflare keeps 30 days of
+point-in-time recovery. Text stored **before** encryption was turned on can outlive the switch
+there. Text written after encryption is on is never plaintext on the server. For a board that
+never had plaintext, turn encryption on before adding anything.
+
+The server stores the envelope, so whoever runs it could try to guess weak passphrases offline.
+That's the reason for the 12-character minimum and the 600,000 rounds.
+
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
@@ -107,6 +180,7 @@ agent) shows the server URL, setup steps for each client, connected apps, and to
   `/.well-known/oauth-protected-resource/tasks/*` here. Nothing else on the domain
   can use them.
 - MCP calls don't hit Workers AI, so the daily chat cap doesn't apply to them.
+- An end-to-end encrypted board is closed to agents. Every tool returns an error saying so.
 
 ## // SEARCH
 
@@ -129,6 +203,8 @@ TodoAgent (`src/search.ts`), so results never cross between users.
   `search_cards` tool. All three call `TodoAgent.search`.
 - Without Workers AI (`npm run dev:local`), search falls back to keyword matches and
   says so.
+- On an end-to-end encrypted board the server has nothing to index. The tables are emptied, and
+  ⌘K searches the decrypted board in the tab instead (`src/client/localSearch.ts`, keyword only).
 
 ## // ATTACHMENTS
 

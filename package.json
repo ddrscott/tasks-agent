@@ -25,6 +25,7 @@
     "@modelcontextprotocol/server": "2.0.0",
     "agents": "^0.24.0",
     "ai": "^7.0.109",
+    "jose": "^6.2.12",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "workers-ai-provider": "^4.0.0",

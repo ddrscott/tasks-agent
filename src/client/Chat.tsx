@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import type { Usage } from "../billing";
 import { IconClose, IconSend, IconStop } from "./icons";
 import { useNeedle } from "./needle";
-import type { Board } from "../shared";
+import type { LocalCall } from "../needle-tools";
+import { clean, hasSealedText, type Board } from "../shared";
+import type { Vault } from "./vault";
 
 const SUGGESTIONS = [
   "Add groceries, call the dentist, and file taxes by Friday",
@@ -12,9 +14,38 @@ const SUGGESTIONS = [
   "Plan my Saturday: laundry, gym, and meal prep",
 ];
 
+// On an encrypted board the cloud model can't read anything, so only the model in this tab runs.
+const SEALED_SUGGESTIONS = ["Add groceries due tomorrow", "Add call the dentist"];
+
+/** Encrypt the text in a local turn's tool calls. Ids and lane ids stay as they are; the server moves things by id. */
+async function sealCall(vault: Vault, c: LocalCall): Promise<LocalCall> {
+  const input = c.input as Record<string, unknown>;
+  const opt = async (v: unknown, f = (x: string) => x) => (typeof v === "string" && v ? vault.seal(f(v)) : v);
+  if (c.name === "add_cards") {
+    const cards = input.cards as Record<string, unknown>[];
+    return { name: c.name, input: { cards: await Promise.all(cards.map(async (k) => ({ ...k, title: await opt(k.title, (t) => clean(t, 200)), notes: await opt(k.notes), due: await opt(k.due) }))) } };
+  }
+  if (c.name === "update_card") {
+    return { name: c.name, input: { ...input, title: await opt(input.title, (t) => clean(t, 200)), notes: await opt(input.notes), due: await opt(input.due) } };
+  }
+  return c;
+}
+
+/** A chat line with any encrypted text in it decrypted, once the vault gets to it. */
+function Plain({ text, vault }: { text: string; vault: Vault | null }) {
+  const [shown, setShown] = useState(() => (vault ? vault.revealKnown(text) : text));
+  useEffect(() => {
+    if (vault && hasSealedText(text)) void vault.reveal(text).then(setShown);
+    else setShown(text);
+  }, [text, vault]);
+  return <>{shown}</>;
+}
+
 type Props = {
   agent: Parameters<typeof useAgentChat>[0]["agent"];
   board: Board | null;
+  /** Set on an encrypted board. */
+  vault: Vault | null;
   open: boolean;
   model: string;
   onClose(): void;
@@ -34,7 +65,7 @@ function engineTitle(status: ReturnType<typeof useNeedle>["status"], model: stri
   return last ? `${head}\nLast message: ${last.path === "local" ? "handled in this tab" : "sent to the cloud model"} (${last.note}).` : head;
 }
 
-export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usage, onUpgrade }: Props) {
+export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputRef, usage, onUpgrade }: Props) {
   const { messages, sendMessage, status, stop, clearHistory, error } = useAgentChat({
     agent,
     body: () => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
@@ -47,6 +78,7 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
   const needle = useNeedle(wanted);
   const [localBusy, setLocalBusy] = useState(false);
   const [last, setLast] = useState<{ path: "local" | "model"; note: string } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const busy = status === "submitted" || status === "streaming" || localBusy;
   const capped = !!usage && usage.used >= usage.limit;
   const localReady = needle.status.state === "ready";
@@ -62,7 +94,10 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
 
   async function send(t: string) {
     const v = t.trim();
-    if (!v || busy || (capped && !localReady)) return;
+    if (!v || busy) return;
+    setNotice(null);
+    if (vault) return sendSealed(v);
+    if (capped && !localReady) return;
     setText("");
     // First the model in this tab: free, a quarter second, and only when it's sure. Then the big one.
     if (localReady && board) {
@@ -86,6 +121,37 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
     void sendMessage({ role: "user", parts: [{ type: "text", text: v }] });
   }
 
+  /** An encrypted board: the model in this tab or nothing. The message and the tool calls go out encrypted. */
+  async function sendSealed(v: string) {
+    if (!board || !vault) return;
+    if (!localReady) {
+      setNotice(needle.status.state === "failed"
+        ? `The assistant in this tab couldn't load (${needle.status.error}). On an encrypted board the cloud assistant can't read your cards, so change the board directly.`
+        : "The assistant in this tab is still loading. On an encrypted board it's the only one that can read your cards.");
+      return;
+    }
+    setText("");
+    setLocalBusy(true);
+    try {
+      const r = await needle.run(board, v);
+      if (!r.ok) {
+        setLast({ path: "local", note: `not handled: ${r.reason}` });
+        setText(v);
+        setNotice(`That's more than the assistant in this tab can do on its own (${r.reason}). The cloud assistant can't read an encrypted board, so try one plain step, like "finished the taxes" or "add call mom due Friday", or change the card directly.`);
+        return;
+      }
+      const calls = await Promise.all(r.calls.map((c) => sealCall(vault, c)));
+      const stub = (agent as unknown as { stub: { applyLocal(turn: unknown): Promise<unknown> } }).stub;
+      await stub.applyLocal({ text: await vault.seal(v), calls, engine: "needle-rs", confidence: r.confidence, ms: r.ms });
+      setLast({ path: "local", note: `in this tab · ${r.ms ?? "?"} ms · ${Math.round(r.confidence * 100)}% sure` });
+    } catch (e) {
+      setText(v);
+      setNotice(`That didn't work: ${(e as Error).message}`);
+    } finally {
+      setLocalBusy(false);
+    }
+  }
+
   const lastMsg = messages[messages.length - 1];
   const waiting = busy && (lastMsg?.role === "user" || !lastMsg?.parts.some((p) => p.type === "text" && p.text.trim()));
 
@@ -101,9 +167,11 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
       <div className="chat-log" ref={logRef} aria-live="polite">
         {messages.length === 0 && (
           <div className="chat-empty">
-            <p>Tell me what's on your plate, what you finished, or what changed. I'll update the board.</p>
+            {vault
+              ? <p>Your board is encrypted, so the assistant runs only in this tab, and nothing you type here leaves it unencrypted. It handles one plain step at a time: add a card, finish, start, move, set a date, or delete.</p>
+              : <p>Tell me what's on your plate, what you finished, or what changed. I'll update the board.</p>}
             <div className="suggestions">
-              {SUGGESTIONS.map((s) => <button key={s} className="suggestion" onClick={() => send(s)}>{s}</button>)}
+              {(vault ? SEALED_SUGGESTIONS : SUGGESTIONS).map((s) => <button key={s} className="suggestion" onClick={() => send(s)}>{s}</button>)}
             </div>
           </div>
         )}
@@ -111,7 +179,7 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
           m.parts.map((part, i) => {
             const key = `${m.id}-${i}`;
             if (part.type === "text") {
-              return part.text.trim() ? <div key={key} className={`msg ${m.role}`}>{part.text.trim()}</div> : null;
+              return part.text.trim() ? <div key={key} className={`msg ${m.role}`}><Plain text={part.text.trim()} vault={vault} /></div> : null;
             }
             if (part.type.startsWith("tool-") && "state" in part) {
               if (part.state === "output-available") {
@@ -119,7 +187,7 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
                 return (
                   <div key={key} className={`tool-line${out.ok === false ? " fail" : ""}`}>
                     <span className="mark">{out.ok === false ? "✗" : "✓"}</span>
-                    <span>{out.summary ?? "Done"}</span>
+                    <span><Plain text={out.summary ?? "Done"} vault={vault} /></span>
                   </div>
                 );
               }
@@ -132,6 +200,7 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
           }),
         )}
         {waiting && <div className="working">thinking</div>}
+        {notice && <div className="msg notice" role="status">{notice}</div>}
         {error && !capped && <div className="msg error">Something went wrong: {error.message}</div>}
         {capped && (
           <div className="cap-note" role="status">
@@ -162,13 +231,14 @@ export function Chat({ agent, board, open, model, onClose, onBusy, inputRef, usa
           {busy ? (
             <button type="button" className="btn icon" title="Stop" onClick={() => stop()}><IconStop /></button>
           ) : (
-            <button className="btn primary icon" title="Send" disabled={!text.trim() || (capped && !localReady)}><IconSend /></button>
+            <button className="btn primary icon" title="Send" disabled={!text.trim() || (capped && !localReady && !vault)}><IconSend /></button>
           )}
         </form>
         <div className="foot">
           <span className="engine" title={engineTitle(needle.status, model, last)}>
             <span className="prompt">$</span>{" "}
-            {needle.status.state === "ready" ? `needle-rs in this tab · ${model.split("/").pop()} behind it`
+            {vault ? (needle.status.state === "ready" ? "needle-rs in this tab · encrypted, cloud off" : needle.status.state === "loading" ? `loading the local model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}` : "encrypted · cloud off")
+              : needle.status.state === "ready" ? `needle-rs in this tab · ${model.split("/").pop()} behind it`
               : needle.status.state === "loading" ? `loading the local model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}`
               : model.split("/").pop()}
             {last && <span className="path"> · last: {last.path === "local" ? "this tab" : "cloud"}</span>}

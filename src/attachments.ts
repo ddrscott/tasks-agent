@@ -4,6 +4,11 @@
 //
 // Upload:   POST /tasks/api/attachments?card=<card id>   body = the file,
 //           X-Filename: <url-encoded name>, Content-Type, Content-Length required
+//           ?stage=1 instead of ?card= stores the file without adding it to a card; turning
+//           encryption on or off re-uploads every file that way, then swaps the board.
+// Encrypted boards: the body is a compact JWE the browser made (sealed.ts), and the name and
+//           type arrive the same way in X-Sealed-Name and X-Sealed-Type. The Worker stores
+//           ciphertext and never learns either.
 // Download: GET  /tasks/api/attachments/<attachment id>[?download=1]
 //
 // Removing an attachment only drops it from the board, so undo can bring it back.
@@ -11,7 +16,7 @@
 
 import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
-import type { Attachment } from "./shared";
+import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
 
@@ -46,8 +51,14 @@ async function usedBytes(env: Env, user: User): Promise<number> {
 }
 
 async function upload(req: Request, env: Env, user: User): Promise<Response> {
-  const cardId = new URL(req.url).searchParams.get("card");
-  if (!cardId) return json({ error: "Which card? Missing ?card=" }, 400);
+  const q = new URL(req.url).searchParams;
+  const cardId = q.get("card");
+  const staged = q.get("stage") === "1";
+  if (!cardId && !staged) return json({ error: "Which card? Missing ?card=" }, 400);
+  const sealedName = req.headers.get("X-Sealed-Name");
+  const sealedType = req.headers.get("X-Sealed-Type");
+  const sealed = sealedName !== null || sealedType !== null;
+  if (sealed && !(isSealed(sealedName) && isSealed(sealedType))) return json({ error: "The file's name and type have to be encrypted too." }, 400);
   const size = Number(req.headers.get("Content-Length"));
   const max = limit(env.ATTACHMENT_MAX_MB, 25);
   if (!req.body || !Number.isFinite(size) || size <= 0) return json({ error: "That file is empty." }, 400);
@@ -59,19 +70,20 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
 
   const att: Attachment = {
     id: `a${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    name: cleanName(req.headers.get("X-Filename")),
+    name: sealed ? sealedName! : cleanName(req.headers.get("X-Filename")),
     size,
-    type: cleanType(req.headers.get("Content-Type")),
+    type: sealed ? sealedType! : cleanType(req.headers.get("Content-Type")),
     addedAt: new Date().toISOString(),
   };
   const key = `${user.id}/${att.id}`;
-  await env.ATTACHMENTS.put(key, req.body, {
-    httpMetadata: { contentType: att.type },
-    customMetadata: { name: att.name, card: cardId },
-  });
+  // An encrypted file keeps nothing readable in R2: no name, no type, no card.
+  await env.ATTACHMENTS.put(key, req.body, sealed
+    ? { httpMetadata: { contentType: "application/jose" }, customMetadata: { sealed: "1" } }
+    : { httpMetadata: { contentType: att.type }, customMetadata: { name: att.name, ...(cardId ? { card: cardId } : {}) } });
+  if (staged) return json({ attachment: att });
 
   const agent = await getAgentByName(env.TodoAgent, user.id);
-  const r = await agent.attach(cardId, att);
+  const r = await agent.attach(cardId!, att);
   if (!r.ok) {
     await env.ATTACHMENTS.delete(key);
     return json({ error: r.error }, 400);
@@ -84,6 +96,16 @@ async function download(req: Request, env: Env, user: User, id: string): Promise
   const obj = await env.ATTACHMENTS.get(`${user.id}/${id}`);
   if (!obj) return json({ error: "That file is gone." }, 404);
 
+  // Ciphertext goes back as is, for the browser to decrypt. Never inline.
+  if (obj.customMetadata?.sealed === "1") {
+    return new Response(obj.body, {
+      headers: {
+        "Content-Type": "application/jose", "Content-Length": String(obj.size), "Content-Disposition": `attachment; filename="${id}.jwe"`,
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", ETag: obj.httpEtag,
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+      },
+    });
+  }
   const type = obj.httpMetadata?.contentType ?? "application/octet-stream";
   const inline = INLINE.has(type) && new URL(req.url).searchParams.get("download") !== "1";
   const name = obj.customMetadata?.name ?? id;

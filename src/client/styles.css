@@ -652,6 +652,20 @@ a.att-name:hover { color: var(--accent); }
 .or { display: flex; align-items: center; gap: 10px; font: 11px var(--font-mono); color: var(--muted); }
 .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 
+.login-stack { width: min(400px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.login-stack .login-card { width: 100%; }
+.login-security {
+  padding: 20px 24px; border: var(--border-w) solid var(--line); border-radius: var(--radius);
+  display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px;
+}
+.login-security ol { margin: 0; padding: 0; list-style: none; counter-reset: sec; display: flex; flex-direction: column; gap: 10px; }
+.login-security li { counter-increment: sec; display: grid; grid-template-columns: 22px 1fr; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.login-security li::before { content: counter(sec, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent); }
+.login-security li b { color: var(--ink); font-weight: 600; }
+.login-security .sorry { margin: 0; padding-top: 12px; border-top: 1px dashed var(--line); font: 12px/1.6 var(--font-mono); color: var(--muted); }
+.login-security .sorry .prompt { color: var(--accent); }
+.login-security .sorry b { color: var(--accent); font-weight: 600; }
+
 .splash { height: 100%; display: grid; place-items: center; font: 13px var(--font-mono); color: var(--muted); }
 .splash::before { content: "$ "; color: var(--accent); }
 .splash::after { content: "_"; color: var(--accent); animation: blink 1s steps(1) infinite; }
@@ -767,3 +781,25 @@ a.att-name:hover { color: var(--accent); }
   .topbar .actions { gap: 4px; }
   .theme-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ============================================================ end-to-end encryption */
+.sealed-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px;
+  font: 600 11px var(--font-mono); text-transform: lowercase; color: var(--accent);
+  background: transparent; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); cursor: pointer;
+}
+.sealed-chip svg { width: 13px; height: 13px; }
+label.check, .dialog-body label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; font: 13px var(--font-ui); color: var(--ink); }
+.enc-dialog { width: min(560px, calc(100vw - 32px)); }
+.enc-dialog .dialog-body p { margin: 0; font-size: 14px; line-height: 1.55; }
+.enc-dialog .dialog-body h3.h { margin-top: 8px; }
+.enc-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.enc-list b { color: var(--ink); }
+.enc-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.enc-dialog .dialog-body .enc-on { font: 12px/1.6 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.enc-on .prompt { color: var(--accent); }
+.forgot { display: flex; flex-direction: column; gap: 10px; }
+.forgot p { font-size: 13px; }
+.msg.notice { font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); padding: 8px 10px; }
+button.att-thumb { padding: 0; cursor: pointer; }
+button.att-name { background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }

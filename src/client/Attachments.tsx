@@ -2,13 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment } from "../shared";
 import { api } from "./base";
 import { IconClip, IconClose } from "./icons";
+import { openSealedFile, uploadSealed } from "./migrate";
+import type { Vault } from "./vault";
 
 // The attachments section of the card editor. Files upload straight to the Worker,
 // which stores them in R2 and adds them to the card; the new list then arrives with
 // the synced board like any other change.
+//
+// On an encrypted board the file is encrypted here first, and opening one downloads the
+// ciphertext and decrypts it in the tab. Only types that can't run scripts open inline.
 
 const fileUrl = (a: Attachment, download = false) => api(`/api/attachments/${a.id}${download ? "?download=1" : ""}`);
 const isImage = (a: Attachment) => /^image\/(png|jpeg|gif|webp|avif)$/.test(a.type);
+// Matches the Worker's INLINE list: a decrypted file of any other type is only ever saved, never opened here.
+const INLINE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf", "text/plain"]);
+const THUMB_MAX = 8 * 1024 * 1024;
+
+function save(url: string, name: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+}
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -30,13 +45,14 @@ async function upload(cardId: string, file: File): Promise<void> {
 
 type Props = {
   cardId: string;
+  vault: Vault | null;
   attachments: Attachment[];
   onRemove(id: string): void;
   /** The element that accepts dropped and pasted files, usually the whole dialog. */
   dropTarget: React.RefObject<HTMLElement | null>;
 };
 
-export function Attachments({ cardId, attachments, onRemove, dropTarget }: Props) {
+export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }: Props) {
   const [pending, setPending] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
@@ -49,14 +65,15 @@ export function Attachments({ cardId, attachments, onRemove, dropTarget }: Props
     setPending((p) => [...p, ...files.map((f) => f.name)]);
     for (const f of files) {
       try {
-        await upload(cardId, f);
+        if (vault) await uploadSealed(vault, { name: f.name, type: f.type, bytes: new Uint8Array(await f.arrayBuffer()) }, cardId);
+        else await upload(cardId, f);
       } catch (e) {
         setError((e as Error).message);
       } finally {
         setPending((p) => { const i = p.indexOf(f.name); return i < 0 ? p : [...p.slice(0, i), ...p.slice(i + 1)]; });
       }
     }
-  }, [cardId]);
+  }, [cardId, vault]);
 
   useEffect(() => {
     const el = dropTarget.current;
@@ -102,7 +119,8 @@ export function Attachments({ cardId, attachments, onRemove, dropTarget }: Props
       )}
       {(attachments.length > 0 || pending.length > 0) && (
         <ul>
-          {attachments.map((a) => (
+          {vault && attachments.map((a) => <SealedFile key={a.id} a={a} vault={vault} onRemove={onRemove} onError={setError} />)}
+          {!vault && attachments.map((a) => (
             <li key={a.id}>
               <a className="att-thumb" href={fileUrl(a)} target="_blank" rel="noreferrer" title={`Open ${a.name}`}>
                 {isImage(a) ? <img src={fileUrl(a)} alt="" loading="lazy" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
@@ -124,5 +142,48 @@ export function Attachments({ cardId, attachments, onRemove, dropTarget }: Props
       )}
       {error && <div className="login-error" role="alert">{error}</div>}
     </div>
+  );
+}
+
+/** One file on an encrypted board: decrypted in the tab when it's opened, saved, or shown as a thumbnail. */
+function SealedFile({ a, vault, onRemove, onError }: { a: Attachment; vault: Vault; onRemove(id: string): void; onError(e: string): void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+  const inline = INLINE.has(a.type);
+  const load = useCallback(async () => {
+    if (urlRef.current) return urlRef.current;
+    const bytes = await openSealedFile(vault.key, a.id);
+    urlRef.current = URL.createObjectURL(new Blob([bytes as BlobPart], { type: inline ? a.type : "application/octet-stream" }));
+    setUrl(urlRef.current);
+    return urlRef.current;
+  }, [vault, a.id, a.type, inline]);
+  useEffect(() => {
+    if (isImage(a) && a.size < THUMB_MAX) load().catch(() => {});
+    return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function open(download: boolean) {
+    // Open the tab now, while the click still counts, and point it at the file once it's decrypted.
+    const w = inline && !download ? window.open("", "_blank") : null;
+    try {
+      const u = await load();
+      if (w) w.location.href = u;
+      else save(u, a.name);
+    } catch {
+      w?.close();
+      onError(`Couldn't decrypt ${a.name}.`);
+    }
+  }
+
+  return (
+    <li>
+      <button type="button" className="att-thumb" onClick={() => void open(false)} title={`Open ${a.name}`}>
+        {isImage(a) && url ? <img src={url} alt="" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
+      </button>
+      <button type="button" className="att-name linkish" onClick={() => void open(false)}>{a.name}</button>
+      <span className="att-size">{formatBytes(a.size)}</span>
+      <button type="button" className="btn ghost" onClick={() => void open(true)} title="Download">↓</button>
+      <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
+    </li>
   );
 }

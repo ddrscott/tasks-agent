@@ -5,7 +5,7 @@ import { Footer } from "./Footer";
 // because Google and Microsoft link to them from their sign-in screens. Keep them
 // in step with what the app actually stores; README → // PRIVACY_AND_TERMS.
 
-const UPDATED = "September 22, 2026";
+const UPDATED = "September 29, 2026";
 const CONTACT = "hey@askscottpierce.com";
 
 export type LegalPage = "privacy" | "terms";
@@ -54,9 +54,15 @@ function Privacy() {
       </section>
 
       <section>
+        <h3 className="subhead">End-to-end encryption</h3>
+        <p>If you turn on encryption with a passphrase (user menu → Encrypt with a passphrase), your browser encrypts your lane names, cards, notes, due dates, attached files and their names, and assistant messages before they're sent. We store only the encrypted form and can't read it, and neither can Cloudflare, the cloud assistant, or connected agents. Your passphrase never leaves your browser, so we can't recover a board if you forget it.</p>
+        <p>What stays readable to us on an encrypted board: your email, how many lanes, cards, and files you have and their sizes, when things were created or changed, your theme, and the sign-in, subscription, and usage records above. Turning encryption on erases the plain-text board, undo history, chat, and search index from the live database, but copies of what you stored <i>before</i> turning it on can remain in Cloudflare's storage backups for up to 30 days.</p>
+      </section>
+
+      <section>
         <h3 className="subhead">Who handles it for us</h3>
         <ul>
-          <li><b>Cloudflare</b> hosts the app and stores your data, including attached files. When you use the assistant, your message, recent chat, and board are processed by Cloudflare Workers AI to write a reply and update the board. Card titles and notes are also processed by Workers AI to power search by meaning. Cloudflare also sends sign-in emails and runs Turnstile, which checks that sign-ins come from people rather than bots.</li>
+          <li><b>Cloudflare</b> hosts the app and stores your data, including attached files. On a board without encryption, when you use the cloud assistant, your message, recent chat, and board are processed by Cloudflare Workers AI to write a reply and update the board. Card titles and notes are also processed by Workers AI to power search by meaning. Cloudflare also sends sign-in emails and runs Turnstile, which checks that sign-ins come from people rather than bots.</li>
           <li><b>Stripe</b> processes payments for Pro.</li>
           <li><b>Google or Microsoft</b>, only if you choose to sign in with them.</li>
           <li><b>Agents you connect</b> (such as Claude, ChatGPT, or Glean) can read and change your board once you allow them. Their own privacy policies cover what they do with it. You can disconnect them at any time on the Connect page.</li>

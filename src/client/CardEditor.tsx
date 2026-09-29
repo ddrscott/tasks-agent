@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Card, Lane } from "../shared";
 import { Attachments } from "./Attachments";
+import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
 type Props = {
   card: Card;
   lanes: Lane[];
+  /** Set on an encrypted board: files are encrypted before upload and decrypted to view. */
+  vault: Vault | null;
   onSave(patch: { title?: string; notes?: string; due?: string | null }): void;
   onMove(laneId: string): void;
   onDelete(): void;
@@ -17,7 +20,7 @@ type Props = {
 };
 
 /** Edit a card. Changes save when the dialog closes, however it closes. */
-export function CardEditor({ card, lanes, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -77,7 +80,7 @@ export function CardEditor({ card, lanes, onSave, onMove, onDelete, onRemoveAtta
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <Attachments cardId={card.id} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+        <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>

@@ -4,7 +4,8 @@ import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } 
 import { createWorkersAI } from "workers-ai-provider";
 import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
 import * as ops from "./shared";
-import { THEME_IDS, type Attachment, type Board } from "./shared";
+import { isSealed, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
+import { ENVELOPE_ALG, kidOf } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { CardIndex } from "./search";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
@@ -35,7 +36,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`CREATE TABLE IF NOT EXISTS redo (
       id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, chats INTEGER NOT NULL)`;
-    this.index.backfill(this.state);
+    if (!this.state.sealed) this.index.backfill(this.state);
   }
 
   // Keyword and semantic search over this board (search.ts).
@@ -50,6 +51,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /** Keep the search index in step with a board change. Embeddings update in the background. */
   private reindex(before: Board | null, after: Board) {
+    if (after.sealed) return; // the server can't read an encrypted board, so it can't index one
     this.index.sync(before, after);
     this.index.refreshVectors(after).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
   }
@@ -57,6 +59,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Search titles and notes. For the UI (callable), the assistant, and MCP (RPC). */
   @callable()
   async search(input: unknown): Promise<SearchResult> {
+    if (this.state.sealed) throw new Error("This board is end-to-end encrypted, so only the app can search it, in your browser.");
     return this.index.search(this.state, SEARCH_TOOL.inputSchema.parse(input));
   }
 
@@ -71,6 +74,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private mutate(label: string, fn: (b: Board) => Board, group?: string): Board {
     const before = this.state;
     const after = fn(before);
+    ops.assertSealedBoard(after);
     const top = this.sql<{ grp: string | null }>`SELECT grp FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!group || top?.grp !== group) {
       this.sql`INSERT INTO history (grp, label, board) VALUES (${group ?? null}, ${label}, ${JSON.stringify(before)})`;
@@ -195,7 +199,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Swap in a board from the undo or redo stack, keeping preferences, which aren't undoable. */
   private restore(board: Board) {
     const before = this.state;
-    this.setState({ ...board, theme: before.theme, themeChosen: before.themeChosen });
+    // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
+    this.setState({ ...board, theme: before.theme, themeChosen: before.themeChosen, sealed: before.sealed });
     this.reindex(before, this.state);
     const kept = new Set(ops.attachmentIds(this.state));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
@@ -258,8 +263,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
   }
 
+  /** Whether the board is end-to-end encrypted, for MCP. */
+  isSealed(): boolean {
+    return !!this.state.sealed;
+  }
+
   /** The board as plain text, the same view the chat model gets. */
   describe(): string {
+    if (this.state.sealed) return SEALED_NOTICE;
     return ops.describeBoard(this.state);
   }
 
@@ -271,7 +282,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   @callable()
   async applyLocal(turn: { text: string; calls: { name: ToolName; input: unknown }[]; engine: string; confidence: number; ms?: number }): Promise<{ outcomes: ToolOutcome[]; reply: string }> {
-    const text = String(turn.text ?? "").trim().slice(0, 2000);
+    const sealed = this.state.sealed;
+    const text = sealed ? String(turn.text ?? "") : String(turn.text ?? "").trim().slice(0, 2000);
+    // On an encrypted board the transcript is stored too, so the message has to arrive encrypted.
+    if (sealed && !(isSealed(text) && kidOf(text) === sealed.kid)) throw new Error("This board is encrypted; the message has to be too.");
     const calls = Array.isArray(turn.calls) ? turn.calls.slice(0, 8) : [];
     if (!text || !calls.length) throw new Error("Nothing to apply.");
     const group = crypto.randomUUID();
@@ -293,6 +307,113 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return { outcomes, reply };
   }
 
+  // ---------- end-to-end encryption (sealed.ts) ----------
+  //
+  // The browser encrypts or decrypts the whole board and hands it back. The server checks
+  // that it's the same board (same lanes and cards, by id), that every field is ciphertext
+  // (or, turning it off, plaintext), then swaps it in and erases everything that held the
+  // old form: undo and redo history, the chat transcript, the search index, and the old
+  // attachment files in R2.
+
+  @callable()
+  async enableEncryption(input: { kid: string; envelope: string; board: Board }) {
+    if (this.state.sealed) throw new Error("This board is already encrypted.");
+    const seal = checkEnvelope(input?.kid, input?.envelope);
+    const next = await this.adopt(input?.board, seal);
+    ops.assertSealedBoard(next);
+    await this.swapBoard(next);
+  }
+
+  @callable()
+  async disableEncryption(input: { board: Board }) {
+    if (!this.state.sealed) throw new Error("This board isn't encrypted.");
+    const next = await this.adopt(input?.board, undefined);
+    if (ops.boardTexts(next).some(isSealed)) throw new Error("Some of the board is still encrypted.");
+    await this.swapBoard(next);
+    this.index.clear();
+    this.index.sync(null, next);
+    this.index.refreshVectors(next).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+  }
+
+  /** A new envelope for the same key, under a new passphrase. `previous` guards against two tabs racing. */
+  @callable()
+  changePassphrase(input: { previous: string; envelope: string }) {
+    const seal = this.state.sealed;
+    if (!seal) throw new Error("This board isn't encrypted.");
+    if (input?.previous !== seal.envelope) throw new Error("The passphrase was changed somewhere else. Reload and try again.");
+    const next = checkEnvelope(seal.kid, input.envelope);
+    this.setState({ ...this.state, sealed: { ...seal, envelope: next.envelope } });
+  }
+
+  /** For a forgotten passphrase: throw the encrypted board away and start over with an empty, unencrypted one. */
+  @callable()
+  async resetEncryptedBoard() {
+    if (!this.state.sealed) throw new Error("This board isn't encrypted.");
+    await this.swapBoard({ ...ops.newBoard(), theme: this.state.theme, themeChosen: this.state.themeChosen });
+    this.index.clear();
+  }
+
+  /**
+   * Rebuild a board the client sent from known fields only, and check it against the live one.
+   * Timestamps come from the live board; attachment sizes come from R2.
+   */
+  private async adopt(raw: Board | undefined, seal: SealInfo | undefined): Promise<Board> {
+    const cur = this.state;
+    if (!raw || !Array.isArray(raw.lanes) || !Array.isArray(raw.cards)) throw new Error("That isn't a board.");
+    if (!ops.sameShape(cur, raw)) throw new Error("The board changed while this was running. Try again.");
+    const live = new Map(cur.cards.map((c) => [c.id, c]));
+    const wantSealed = !!seal;
+    const cards: Card[] = [];
+    for (const c of raw.cards) {
+      const was = live.get(c.id)!;
+      const attachments: Attachment[] = [];
+      for (const a of c.attachments ?? []) {
+        if (!/^a[0-9a-f]{16}$/.test(a.id)) throw new Error("Bad attachment id.");
+        const obj = await this.env.ATTACHMENTS.head(`${this.name}/${a.id}`);
+        if (!obj) throw new Error("An attachment didn't finish uploading. Try again.");
+        if ((obj.customMetadata?.sealed === "1") !== wantSealed) throw new Error("An attachment is in the wrong form. Try again.");
+        attachments.push({ id: a.id, name: String(a.name), type: String(a.type), size: obj.size, addedAt: String(a.addedAt ?? was.createdAt) });
+      }
+      cards.push({
+        id: c.id, laneId: c.laneId, title: String(c.title), notes: String(c.notes ?? ""), due: c.due == null ? null : String(c.due),
+        createdAt: was.createdAt, updatedAt: was.updatedAt, ...(attachments.length || was.attachments ? { attachments } : {}),
+      });
+    }
+    const lanes = raw.lanes.map((l) => ({ id: l.id, name: String(l.name) }));
+    if (!wantSealed) {
+      // Plain text follows the same limits as any other edit.
+      for (const l of lanes) l.name = ops.clean(l.name, 40);
+      for (const c of cards) { c.title = ops.clean(c.title, 200); c.notes = c.notes.slice(0, 4000); }
+      if (lanes.some((l) => !l.name) || cards.some((c) => !c.title)) throw new Error("A lane or card came back empty.");
+    }
+    return { lanes, cards, theme: cur.theme, themeChosen: cur.themeChosen, ...(seal ? { sealed: seal } : {}) };
+  }
+
+  /**
+   * Swap in a board and erase every copy of the old one: history, redo, chat, search index, and
+   * unreferenced files. Durable Objects allow neither PRAGMA secure_delete nor VACUUM, so deleted
+   * rows can linger in free pages until SQLite reuses them, and Cloudflare keeps 30 days of
+   * point-in-time recovery. What was stored in plain text before this call can outlive it there.
+   */
+  private async swapBoard(next: Board) {
+    this.sql`DELETE FROM history`;
+    this.sql`DELETE FROM redo`;
+    this.index.clear();
+    this.resetTurnState();
+    await this.persistMessages([], [], { _deleteStaleRows: true });
+    this.setState(next);
+    const keep = new Set(ops.attachmentIds(next));
+    const prefix = `${this.name}/`;
+    const doomed: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.ATTACHMENTS.list({ prefix, cursor });
+      for (const obj of page.objects) if (!keep.has(obj.key.slice(prefix.length))) doomed.push(obj.key);
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    for (let i = 0; i < doomed.length; i += 1000) await this.env.ATTACHMENTS.delete(doomed.slice(i, i + 1000));
+  }
+
   // ---------- chat agent ----------
 
   private today = () => new Date().toISOString().slice(0, 10);
@@ -306,6 +427,13 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   async onChatMessage(_onFinish: unknown, options?: { requestId: string; abortSignal?: AbortSignal; body?: Record<string, unknown> }) {
+    // The cloud model would have to read the board and the message. On an encrypted board it
+    // never runs, and the plaintext message the SDK just stored is dropped again.
+    if (this.state.sealed) {
+      const keep = this.messages.filter((m) => m.role !== "user" || m.parts.every((p) => p.type !== "text" || isSealed(p.text)));
+      await this.persistMessages(keep, [], { _deleteStaleRows: true });
+      return new Response(SEALED_NOTICE, { status: 409 });
+    }
     const day = this.today();
     const { plan, used, limit, billing } = await this.usage();
     if (used >= limit) {
@@ -352,4 +480,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
     return result.toUIMessageStreamResponse();
   }
+}
+
+const SEALED_NOTICE =
+  "This board is end-to-end encrypted. Only the app, unlocked with the owner's passphrase, can read or change it, " +
+  "so outside agents and the cloud assistant can't.";
+
+/** Check an envelope's header (it's a JWE the browser made; the server can't open it) and build the seal info. */
+function checkEnvelope(kid: unknown, envelope: unknown): SealInfo {
+  if (typeof kid !== "string" || !/^[A-Za-z0-9_-]{8,32}$/.test(kid)) throw new Error("Bad key id.");
+  if (typeof envelope !== "string" || envelope.length > 4000 || !/^eyJ[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){4}$/.test(envelope)) throw new Error("Bad key envelope.");
+  let h: { alg?: string; enc?: string; p2c?: number; kid?: string };
+  try {
+    h = JSON.parse(atob(envelope.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
+  } catch {
+    throw new Error("Bad key envelope.");
+  }
+  if (h.alg !== ENVELOPE_ALG || h.enc !== "A256GCM" || !(Number(h.p2c) >= 210_000) || h.kid !== kid) throw new Error("The key envelope has to use PBES2-HS512+A256KW with at least 210,000 rounds.");
+  return { v: 1, kid, envelope, since: new Date().toISOString() };
 }

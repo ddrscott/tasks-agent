@@ -27,13 +27,15 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
   const agent = await getAgentByName(env.TodoAgent, user.id);
 
   const handler = createMcpHandler(() => {
+    // Every tool answers the same way on an end-to-end encrypted board: the server can't read it, so neither can an agent.
+    const locked = async () => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
     const server = new McpServer({ name: "tasks", title: "Tasks", version: "1.0.0" }, { instructions: INSTRUCTIONS });
 
     server.registerTool("get_board", {
       title: "Get board",
       description: "Show every lane and card on the board, with ids, due dates, and notes.",
       annotations: { readOnlyHint: true },
-    }, async () => text(await agent.describe()));
+    }, async () => (await locked()) ?? text(await agent.describe()));
 
     server.registerTool(SEARCH_TOOL.name, {
       title: "Search cards",
@@ -41,6 +43,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: SEARCH_TOOL.inputSchema,
       annotations: { readOnlyHint: true },
     }, async (input: unknown) => {
+      const no = await locked();
+      if (no) return no;
       try {
         return text(describeHits((await agent.search(input)) as SearchResult));
       } catch (e) {
@@ -55,6 +59,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         inputSchema: t.inputSchema,
         annotations: { readOnlyHint: false, destructiveHint: !!t.destructive, idempotentHint: false, openWorldHint: false },
       }, async (input: unknown) => {
+        const no = await locked();
+        if (no) return no;
         const r = (await agent.runTool(name, input)) as ToolOutcome;
         return r.ok ? text(`${r.summary}\n\nBoard now:\n${r.board}`) : text(r.summary, true);
       });

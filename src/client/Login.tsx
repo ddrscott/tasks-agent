@@ -160,6 +160,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <main className="login">
+      <div className="login-stack">
       <div className="login-card">
         <h1 className="wordmark">tasks<span>.</span></h1>
         {step === "email" ? (
@@ -219,8 +220,39 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         {/* Stays mounted across both steps so "Resend code" gets a fresh token too. */}
         {turnstile && <div ref={tsBox} className="turnstile-box" />}
       </div>
+      {step === "email" && !next && <Security />}
+      </div>
       <Footer />
     </main>
+  );
+}
+
+/** What the sign-in page promises about security. Keep it true: README → // END_TO_END_ENCRYPTION. */
+function Security() {
+  return (
+    <section className="login-security" aria-labelledby="security-h">
+      <h2 className="h" id="security-h">SECURITY</h2>
+      <ol>
+        <li><div>
+          <b>End-to-end encryption, if you want it.</b> Set a passphrase and your board is encrypted in
+          your browser before it leaves. Cards, notes, dates, files, chat. We store ciphertext and
+          nothing else.
+        </div></li>
+        <li><div>
+          <b>Open standards, no lock-in.</b> JWE with AES-256-GCM, and PBKDF2 at 600,000 rounds for the
+          passphrase. Download an encrypted backup and open it with any JOSE library, no Tasks required.
+        </div></li>
+        <li><div>
+          <b>The assistant runs in your tab.</b> On an encrypted board, a small model in the browser reads
+          your cards. No cloud model, no outside agent, and no server sees them.
+        </div></li>
+        <li><div>
+          <b>No passwords to leak.</b> Sign in with an emailed code, Google, or Microsoft. We keep only
+          hashes of codes and sessions.
+        </div></li>
+      </ol>
+      <p className="sorry"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
+    </section>
   );
 }
 

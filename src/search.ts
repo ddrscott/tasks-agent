@@ -70,6 +70,12 @@ export class CardIndex {
     if (n === 0 && board.cards.length) this.sync(null, board);
   }
 
+  /** Drop every indexed title, note, and embedding, e.g. when the board is encrypted. */
+  clear() {
+    this.sql.exec("DELETE FROM card_fts");
+    this.sql.exec("DELETE FROM card_vec");
+  }
+
   /** Update the keyword index for what changed between two boards. Only touched cards are rewritten. */
   sync(before: Board | null, after: Board) {
     const old = new Map((before?.cards ?? []).map((c) => [c.id, c]));
