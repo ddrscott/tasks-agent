@@ -16,6 +16,26 @@ export { TodoAgent } from "./agent";
 // wrangler.jsonc lists them.
 const BASE = "/tasks";
 
+/**
+ * A browser request sent from another origin. The session cookie is SameSite=Lax, which
+ * still lets a sibling subdomain (same site) open the agent WebSocket or POST with it, so
+ * everything that acts on the cookie checks this too. Browsers send Origin on POSTs and
+ * WebSocket upgrades, and Sec-Fetch-Site on everything; tools like curl send neither and
+ * carry no ambient cookie, so they pass. It can't stop scripts on askscottpierce.com itself
+ * (README → Accepted risk: a shared origin).
+ */
+function fromElsewhere(req: Request): boolean {
+  const origin = req.headers.get("Origin");
+  if (origin !== null && origin !== new URL(req.url).origin) return true;
+  const site = req.headers.get("Sec-Fetch-Site");
+  return site !== null && site !== "same-origin" && site !== "none";
+}
+
+const forbidden = () => Response.json({ error: "Requests have to come from Tasks itself." }, { status: 403 });
+
+/** Stripe calls this from its servers, and it's authenticated by its signature, not a cookie. */
+const NO_ORIGIN_CHECK = new Set(["/api/stripe/webhook"]);
+
 const app: ExportedHandler<Env> = {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
@@ -23,17 +43,26 @@ const app: ExportedHandler<Env> = {
     const sub = path.slice(BASE.length);
 
     if (sub.startsWith("/api/")) {
+      // GETs stay open: sign-in redirects back from Google and Microsoft arrive cross-site, and
+      // a cross-origin page can't read what a GET returns anyway.
+      const writes = req.method !== "GET" && req.method !== "HEAD";
+      if (writes && !NO_ORIGIN_CHECK.has(sub) && fromElsewhere(req)) return forbidden();
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 
-    if (path === AUTHORIZE_PATH) return handleAuthorize(req, env);
+    // Agents send people to the consent page from anywhere (GET); the Allow button posts from it.
+    if (path === AUTHORIZE_PATH) {
+      if (req.method === "POST" && fromElsewhere(req)) return forbidden();
+      return handleAuthorize(req, env);
+    }
 
     // The client connects to /tasks/agent (WebSocket plus a few HTTP calls). The
     // session decides which Durable Object it reaches, so users never name one.
     if (sub === "/agent" || sub.startsWith("/agent/")) {
+      if (fromElsewhere(req)) return forbidden();
       const user = await currentUser(req, env);
       if (!user) return new Response("Sign in first", { status: 401 });
       const agent = await getAgentByName(env.TodoAgent, user.id);

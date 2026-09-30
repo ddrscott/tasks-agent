@@ -168,6 +168,19 @@ never had plaintext, turn encryption on before adding anything.
 The server stores the envelope, so whoever runs it could try to guess weak passphrases offline.
 That's the reason for the 12-character minimum and the 600,000 rounds.
 
+**Accepted risk: a shared origin.** Tasks lives at `askscottpierce.com/tasks` on purpose, so
+its pages build traffic for the main domain. `Path=/tasks` on the cookie isn't a security
+boundary, though. Any script on `askscottpierce.com` (an XSS bug in another app, a compromised
+dependency, a third-party script) runs as the visitor. It can call the Tasks API with their
+session, mint an access token, and use a key they chose to remember on this device to decrypt
+their board. "Remember on this device" is on by default anyway, for convenience across these
+apps. Keep third-party scripts off the domain, and treat every app on it as part of the Tasks
+security boundary. The fix, if that ever changes, is a separate origin such as
+`tasks.askscottpierce.com`. What does help on a shared origin: the agent WebSocket, every non-GET
+`/api/*` call, and the consent form refuse requests whose `Origin` or `Sec-Fetch-Site` says
+they came from anywhere else, including sibling subdomains that `SameSite=Lax` lets through
+(`fromElsewhere` in `src/server.ts`). The Stripe webhook is exempt, and MCP uses bearer tokens.
+
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
