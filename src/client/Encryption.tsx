@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createBoardKey, MIN_PASSPHRASE, PBES2_COUNT, rewrapBoardKey, unlockBoardKey, type BoardKey, type SealInfo } from "../sealed";
+import { createBoardKey, keyProof, MIN_PASSPHRASE, PBES2_COUNT, rewrapBoardKey, unlockBoardKey, type BoardKey, type SealInfo } from "../sealed";
 import type { Board } from "../shared";
 import { plainWholeBoard, sealWholeBoard } from "./migrate";
 import { Footer } from "./Footer";
@@ -11,9 +11,11 @@ import { forgetKey, recallKey, rememberKey, Vault } from "./vault";
 // encrypted backup, and turns it off. The passphrase never leaves this tab.
 
 export type EncryptionStub = {
-  enableEncryption(input: { kid: string; envelope: string; board: Board }): Promise<void>;
-  disableEncryption(input: { board: Board }): Promise<void>;
-  changePassphrase(input: { previous: string; envelope: string }): Promise<void>;
+  enableEncryption(input: { kid: string; envelope: string; board: Board; proof: string }): Promise<void>;
+  beginDisable(input: { proof: string }): Promise<void>;
+  disableEncryption(input: { board: Board; proof: string }): Promise<void>;
+  changePassphrase(input: { previous: string; envelope: string; proof: string }): Promise<void>;
+  ensureKeyCheck(proof: string): Promise<boolean>;
   resetEncryptedBoard(): Promise<void>;
 };
 
@@ -107,12 +109,14 @@ type DialogProps = {
   email: string;
   stub: EncryptionStub;
   onEnabled(k: BoardKey): void;
+  /** Called just before this tab turns encryption off (true) or when that fails (false), so the plain board that follows isn't taken for a downgrade. */
+  onDisabling(active: boolean): void;
   onDisabled(): void;
   onClose(): void;
   say(text: string): void;
 };
 
-export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabled, onClose, say }: DialogProps) {
+export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabling, onDisabled, onClose, say }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   return (
@@ -120,7 +124,7 @@ export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnab
       <div className="dialog-body">
         <h2 className="h">END_TO_END_ENCRYPTION</h2>
         {view.sealed && vault
-          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabled={onDisabled} say={say} onClose={onClose} />
+          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabling={onDisabling} onDisabled={onDisabled} say={say} onClose={onClose} />
           : <TurnOn view={view} userId={userId} email={email} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} />}
       </div>
       <div className="dialog-foot">
@@ -151,7 +155,7 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
       const vault = new Vault(boardKey);
       const sealed = await sealWholeBoard(view, vault, (d, t) => setBusy(t ? `Encrypting files ${d} of ${t}…` : "Encrypting…"));
       setBusy("Saving…");
-      await stub.enableEncryption({ kid: boardKey.kid, envelope, board: sealed });
+      await stub.enableEncryption({ kid: boardKey.kid, envelope, board: sealed, proof: await keyProof(boardKey) });
       if (remember) await rememberKey(userId, boardKey);
       onEnabled(boardKey);
       say("Your board is end-to-end encrypted now.");
@@ -199,7 +203,7 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
   );
 }
 
-function Manage({ view, raw, vault, userId, email, stub, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "email" | "stub" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
+function Manage({ view, raw, vault, userId, email, stub, onDisabling, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "email" | "stub" | "onDisabling" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
   const seal = raw.sealed!;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -217,7 +221,7 @@ function Manage({ view, raw, vault, userId, email, stub, onDisabled, say, onClos
     try {
       setBusy("Changing…");
       const envelope = await rewrapBoardKey(seal, current, next);
-      await stub.changePassphrase({ previous: seal.envelope, envelope });
+      await stub.changePassphrase({ previous: seal.envelope, envelope, proof: await keyProof(vault.key) });
       setCurrent(""); setNext(""); setAgain("");
       say("Passphrase changed. Other devices keep working until they're locked; after that they need the new one.");
     } catch (e) {
@@ -239,14 +243,18 @@ function Manage({ view, raw, vault, userId, email, stub, onDisabled, say, onClos
   async function turnOff() {
     setError(null);
     try {
+      const proof = await keyProof(vault.key);
+      await stub.beginDisable({ proof }); // opens the window for the plain re-uploads below
       const plain = await plainWholeBoard(view, vault.key, (d, t) => setBusy(t ? `Decrypting files ${d} of ${t}…` : "Decrypting…"));
       setBusy("Saving…");
-      await stub.disableEncryption({ board: plain });
+      onDisabling(true); // before the swap lands, so no tab warns about this change
+      await stub.disableEncryption({ board: plain, proof });
       await forgetKey(userId);
       onDisabled();
       say("Encryption is off. The server can read your board again.");
       onClose();
     } catch (e) {
+      onDisabling(false);
       setError((e as Error).message);
       setBusy(null);
     }
@@ -289,5 +297,27 @@ function Manage({ view, raw, vault, userId, email, stub, onDisabled, say, onClos
       )}
       {error && <div className="login-error" role="alert">{error}</div>}
     </>
+  );
+}
+
+/**
+ * Shown when a board this device knew as encrypted arrives unencrypted and no tab here turned
+ * it off: someone with the session reset it, or a server downgraded it. Until the person
+ * chooses, nothing they type goes anywhere.
+ */
+export function Downgraded({ email, onEncrypt, onAccept }: { email: string; onEncrypt(): void; onAccept(): void }) {
+  return (
+    <div className="login">
+      <div className="login-card">
+        <h1 className="wordmark">tasks<span>.</span></h1>
+        <p><b>This board isn't encrypted anymore.</b> It was end-to-end encrypted on this device, and it was turned off or reset somewhere else, not here.</p>
+        <p>If that wasn't you, someone else could sign in as <b>{email}</b>, and anyone who can read that inbox can. Secure the email account first. Anything you add here now can be read by the server.</p>
+        <div className="login-foot">
+          <button className="linkish" onClick={onAccept}>Continue without encryption</button>
+          <button className="btn primary" onClick={onEncrypt}>Encrypt it again</button>
+        </div>
+      </div>
+      <Footer />
+    </div>
   );
 }

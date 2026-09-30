@@ -16,6 +16,7 @@
 
 import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
+import { kidOf } from "./sealed";
 import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
@@ -59,6 +60,18 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   const sealedType = req.headers.get("X-Sealed-Type");
   const sealed = sealedName !== null || sealedType !== null;
   if (sealed && !(isSealed(sealedName) && isSealed(sealedType))) return json({ error: "The file's name and type have to be encrypted too." }, 400);
+
+  // What this board accepts. An encrypted board takes files encrypted under its key, and plain
+  // ones only while the owner is turning encryption off (beginDisable). A plain board takes
+  // encrypted files only as staged uploads, which is how turning encryption on works.
+  const agent = await getAgentByName(env.TodoAgent, user.id);
+  const policy = await agent.uploadPolicy();
+  if (policy.kid) {
+    if (!sealed && !(staged && policy.plainStaging)) return json({ error: "This board is encrypted, so files have to be too. Reload the page." }, 400);
+    if (sealed && (kidOf(sealedName!) !== policy.kid || kidOf(sealedType!) !== policy.kid)) return json({ error: "That file was encrypted with a different key. Reload the page." }, 400);
+  } else if (sealed && !staged) {
+    return json({ error: "This board isn't encrypted. Reload the page." }, 400);
+  }
   const size = Number(req.headers.get("Content-Length"));
   const max = limit(env.ATTACHMENT_MAX_MB, 25);
   if (!req.body || !Number.isFinite(size) || size <= 0) return json({ error: "That file is empty." }, 400);
@@ -76,13 +89,22 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
     addedAt: new Date().toISOString(),
   };
   const key = `${user.id}/${att.id}`;
+  let body: ReadableStream | Uint8Array = req.body;
+  if (sealed) {
+    // Check it's really ciphertext under the same key before storing it, not a plain file with sealed headers.
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.length !== size || !isSealedFile(bytes, kidOf(sealedName!)!)) return json({ error: "That file isn't encrypted the way this board expects." }, 400);
+    body = bytes;
+  }
   // An encrypted file keeps nothing readable in R2: no name, no type, no card.
-  await env.ATTACHMENTS.put(key, req.body, sealed
+  await env.ATTACHMENTS.put(key, body, sealed
     ? { httpMetadata: { contentType: "application/jose" }, customMetadata: { sealed: "1" } }
     : { httpMetadata: { contentType: att.type }, customMetadata: { name: att.name, ...(cardId ? { card: cardId } : {}) } });
-  if (staged) return json({ attachment: att });
+  if (staged) {
+    await agent.noteStaged(); // collected later if the board swap never happens
+    return json({ attachment: att });
+  }
 
-  const agent = await getAgentByName(env.TodoAgent, user.id);
   const r = await agent.attach(cardId!, att);
   if (!r.ok) {
     await env.ATTACHMENTS.delete(key);
@@ -131,4 +153,27 @@ export async function handleAttachments(req: Request, env: Env, path: string): P
   const id = path.slice("/api/attachments/".length);
   if (id && req.method === "GET") return download(req, env, user, id);
   return null;
+}
+
+/**
+ * Whether the bytes are one compact JWE with alg "dir", enc A256GCM, and `kid` in the header:
+ * base64url segments only, with the empty key segment "dir" has.
+ */
+function isSealedFile(bytes: Uint8Array, kid: string): boolean {
+  let dots = 0;
+  for (const b of bytes) {
+    if (b === 0x2e) { dots++; continue; }
+    const ok = (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) || b === 0x2d || b === 0x5f;
+    if (!ok) return false;
+  }
+  if (dots !== 4) return false;
+  const head = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 400)));
+  const [h, empty] = head.split(".");
+  if (empty !== "") return false;
+  try {
+    const header = JSON.parse(atob(h.replace(/-/g, "+").replace(/_/g, "/"))) as { alg?: string; enc?: string; kid?: string };
+    return header.alg === "dir" && header.enc === "A256GCM" && header.kid === kid;
+  } catch {
+    return false;
+  }
 }

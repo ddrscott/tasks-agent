@@ -80,6 +80,11 @@ run ahead of whatever serves the zone.
   on the free plan and `PRO_DAILY_CHATS` (150) with a Stripe subscription. The chat
   shows a meter and an upgrade button at the cap. The board and MCP are never capped.
   Sign-in is limited by `ALLOWED_EMAILS` and protected by Turnstile.
+- **Code guessing.** A sign-in code allows 5 tries, claimed in one atomic update so parallel
+  requests can't share a try, and only the request that deletes the code gets a session. Across
+  every code sent, an email gets 10 guesses an hour and 20 a day, and an IP gets 30 an hour
+  (`login_limits`, migration 0004). Sending a new code doesn't reset those. Someone who burns
+  an email's budget locks its code sign-in for up to a day; Google and Microsoft still work.
 
 ## // END_TO_END_ENCRYPTION
 
@@ -99,6 +104,10 @@ Any device opens the board with the passphrase, and nobody opens it without one.
 - Attachments are uploaded as the same kind of JWE, with name and type in `X-Sealed-Name` and
   `X-Sealed-Type`. R2 keeps no name, type, or card for them. The real file size is computed
   exactly from the stored size (`sealedFileSize`).
+- **Key proof:** AES-GCM over 32 zero bytes with an all-zero IV under the board key (`keyProof`).
+  The server keeps only its SHA-256 (`seal_meta.check` in the agent's SQLite), and turning
+  encryption off or changing the passphrase needs the proof. A signed-in session alone can't do
+  either. Boards encrypted before the check existed get one from the first tab that unlocks them.
 
 **Getting data out.** Encryption → **Download encrypted backup** saves the board exactly as the
 server holds it. Then:
@@ -119,21 +128,30 @@ plaintext off an encrypted board from any path: MCP, the cloud model, a stale ta
 
 - **Turning it on or off** re-encrypts (or decrypts) every field and file in the tab. Files are
   re-uploaded with `?stage=1`, and the whole board goes to `enableEncryption` or
-  `disableEncryption` in one call. The agent checks that it's the same board by id
+  `disableEncryption` in one call. An encrypted board refuses plain uploads, staged or not, except
+  for 15 minutes after `beginDisable`, which takes the key proof. Encrypted uploads must be one
+  JWE under the board's `kid`, checked before anything is stored. Staged files that never make it
+  onto the board are collected with the other orphans. The agent checks that it's the same board by id
   (`sameShape`), swaps it in, and erases the undo and redo history, the chat, the search index,
   and every R2 object the new board doesn't use.
 - **Changing the passphrase** only rewraps the key (`changePassphrase`). Fields aren't
   re-encrypted. Undo never brings an old envelope back.
 - **Forgotten passphrase:** the unlock screen can throw the board away (`resetEncryptedBoard`),
-  files included, and start over empty. That's the only recovery there is.
+  files included, and start over empty. That's the only recovery there is, so it can't need the
+  key. Instead, each device remembers the board was encrypted (`tasks-sealed:<user id>` in
+  localStorage). When a board comes back unencrypted and no tab on the device turned it off, the
+  app stops on a warning instead of showing it.
 - **Remember on this device** keeps the key in IndexedDB as a non-extractable `CryptoKey`, so
   scripts can use it but can't read it. Without it, the key lives in memory until the tab closes.
 
 **What changes on an encrypted board.**
 
 - The assistant is Needle in the tab only. It runs on the decrypted board, and its tool calls
-  and your message are encrypted before `applyLocal`. `onChatMessage` refuses to run the cloud
-  model, and it drops any plaintext message a client sends anyway.
+  and your message are encrypted before `applyLocal`. There, every call is parsed by its tool's
+  schema, and every string has to be an id on the board or ciphertext under its key.
+- The chat SDK stores whatever messages a client sends before any hook runs, so `TodoAgent`
+  wraps its `onMessage` and refuses chat requests, message writes, and tool results on an
+  encrypted board. `persistMessages` then keeps only messages the server built or already has.
 - Search runs in the browser (`src/client/localSearch.ts`) and matches keywords with prefixes,
   not meaning.
 - MCP tools all answer with an error that says the board is encrypted.

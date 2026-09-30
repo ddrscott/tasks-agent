@@ -118,6 +118,24 @@ export const sealText = (k: BoardKey, text: string) => sealBytes(k, enc.encode(t
 export const openText = async (k: BoardKey, jwe: string) => dec.decode(await openBytes(k, jwe));
 
 /**
+ * Proof that a caller holds the board key, without revealing it: AES-GCM over 32 zero bytes
+ * with an all-zero IV. Deterministic, so the server can keep a hash and compare later, and
+ * it only ever encrypts that one message under that IV. (Data fields use random 96-bit IVs;
+ * one landing on all zeros is a 2^-96 chance.) Turning encryption off and changing the
+ * passphrase need it, so a stolen session alone can't do either.
+ */
+export async function keyProof(k: BoardKey): Promise<string> {
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(12) }, k.key, new Uint8Array(32));
+  return b64url(new Uint8Array(ct));
+}
+
+/** What the server stores and compares: SHA-256 of the proof, hex. */
+export async function proofHash(proof: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", enc.encode(`tasks-key-proof:${proof}`));
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * A sealed file's plaintext size, from its stored size. A "dir" compact JWE is
  * header.(empty).iv.ciphertext.tag in base64url, and here the header, 12-byte IV, and 16-byte
  * tag are fixed lengths, so what's left is the ciphertext, which AES-GCM keeps the same size.

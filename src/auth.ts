@@ -7,6 +7,14 @@ import { verifyTurnstile } from "./turnstile";
 const CODE_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 30 * 1000;
 const MAX_ATTEMPTS = 5;
+// Guesses allowed across every code sent; resending doesn't reset these. At 20 a day, a
+// year of nonstop guessing against one account is 7,300 tries at a million codes, under 1%,
+// and the owner gets a code email every few minutes the whole time.
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const EMAIL_GUESSES_PER_HOUR = 10;
+const EMAIL_GUESSES_PER_DAY = 20;
+const IP_GUESSES_PER_HOUR = 30;
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const COOKIE = "sid";
 
@@ -77,6 +85,7 @@ export async function createSession(req: Request, env: Env, email: string): Prom
     env.DB.prepare("INSERT INTO sessions (token_hash, email, expires_at, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256(token), email, Date.now() + SESSION_TTL_S * 1000, Date.now()),
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(Date.now()),
+    env.DB.prepare("DELETE FROM login_limits WHERE window_start < ?").bind(Date.now() - DAY_MS),
   ]);
   return sessionCookie(req, token, SESSION_TTL_S);
 }
@@ -148,19 +157,51 @@ async function start(req: Request, env: Env): Promise<Response> {
   return json({ ok: true });
 }
 
+/**
+ * Count one guess against `key` and say whether it's within the hourly budget. One atomic
+ * statement, so parallel requests can't all read the same count.
+ */
+async function spendGuess(env: Env, key: string, max: number, windowMs: number): Promise<boolean> {
+  const now = Date.now();
+  const row = await env.DB.prepare(
+    `INSERT INTO login_limits (key, window_start, guesses) VALUES (?1, ?2, 1)
+     ON CONFLICT(key) DO UPDATE SET
+       guesses = CASE WHEN window_start <= ?3 THEN 1 ELSE guesses + 1 END,
+       window_start = CASE WHEN window_start <= ?3 THEN ?2 ELSE window_start END
+     RETURNING guesses`,
+  ).bind(key, now, now - windowMs).first<{ guesses: number }>();
+  return !!row && row.guesses <= max;
+}
+
 /** Returns the session cookie on success, or an error message. */
 async function check(req: Request, env: Env, email: string | null, code: string): Promise<{ cookie: string } | { error: string }> {
   if (!email || !/^\d{6}$/.test(code)) return { error: "Enter the 6-digit code from the email." };
-  const row = await env.DB.prepare("SELECT code_hash, expires_at, attempts FROM login_codes WHERE email = ?")
-    .bind(email).first<{ code_hash: string; expires_at: number; attempts: number }>();
-  if (!row || row.expires_at < Date.now()) return { error: "That code expired. Send a new one." };
-  if (row.attempts >= MAX_ATTEMPTS) return { error: "Too many tries. Send a new code." };
+  // Every guess spends from the email's and the IP's hourly budget before it's checked.
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  const within = (await spendGuess(env, `ip:${ip}`, IP_GUESSES_PER_HOUR, HOUR_MS))
+    && (await spendGuess(env, `email:${email}`, EMAIL_GUESSES_PER_HOUR, HOUR_MS))
+    && (await spendGuess(env, `email-day:${email}`, EMAIL_GUESSES_PER_DAY, DAY_MS));
+  if (!within) {
+    return { error: "Too many sign-in attempts. Wait a while and send a new code, or continue with Google or Microsoft." };
+  }
+  // Claim one attempt on this code atomically; a code that's expired or used up claims nothing.
+  const row = await env.DB.prepare(
+    `UPDATE login_codes SET attempts = attempts + 1
+     WHERE email = ? AND expires_at > ? AND attempts < ?
+     RETURNING code_hash, attempts`,
+  ).bind(email, Date.now(), MAX_ATTEMPTS).first<{ code_hash: string; attempts: number }>();
+  if (!row) {
+    const code_ = await env.DB.prepare("SELECT expires_at FROM login_codes WHERE email = ?").bind(email).first<{ expires_at: number }>();
+    return { error: !code_ || code_.expires_at < Date.now() ? "That code expired. Send a new one." : "Too many tries. Send a new code." };
+  }
   if ((await sha256(`${email}:${code}`)) !== row.code_hash) {
-    await env.DB.prepare("UPDATE login_codes SET attempts = attempts + 1 WHERE email = ?").bind(email).run();
-    const left = MAX_ATTEMPTS - row.attempts - 1;
+    const left = MAX_ATTEMPTS - row.attempts;
     return { error: left > 0 ? `That code isn't right. ${left} ${left === 1 ? "try" : "tries"} left.` : "Too many tries. Send a new code." };
   }
-  await env.DB.prepare("DELETE FROM login_codes WHERE email = ?").bind(email).run();
+  // Single use: only the request that deletes the row gets a session.
+  const used = await env.DB.prepare("DELETE FROM login_codes WHERE email = ? AND code_hash = ?").bind(email, row.code_hash).run();
+  if (used.meta.changes !== 1) return { error: "That code was just used. Send a new one." };
+  await env.DB.prepare("DELETE FROM login_limits WHERE key IN (?, ?)").bind(`email:${email}`, `email-day:${email}`).run();
   return { cookie: await createSession(req, env, email) };
 }
 

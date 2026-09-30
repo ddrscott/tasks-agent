@@ -5,7 +5,7 @@ import { createWorkersAI } from "workers-ai-provider";
 import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
 import * as ops from "./shared";
 import { isSealed, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
-import { ENVELOPE_ALG, kidOf } from "./sealed";
+import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { CardIndex } from "./search";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
@@ -28,7 +28,47 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   maxPersistedMessages = 120;
   messageConcurrency = "queue" as const;
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // AIChatAgent handles chat frames in the onMessage it installs in its own constructor, and
+    // stores whatever messages the client sends before any hook runs. On an encrypted board,
+    // stop those frames here, before the SDK sees them. The browser never sends them there:
+    // local turns go through applyLocal, which builds the transcript on the server.
+    const inner = this.onMessage.bind(this);
+    this.onMessage = (connection, message) => {
+      if (this.state?.sealed && typeof message === "string") {
+        const frame = chatFrame(message);
+        if (frame && CHAT_FRAMES_BLOCKED_WHEN_SEALED.has(frame.type)) {
+          if (frame.type === "cf_agent_use_chat_request") {
+            connection.send(JSON.stringify({ type: "cf_agent_use_chat_response", id: frame.id, body: SEALED_NOTICE, done: true, error: true }));
+          }
+          return;
+        }
+      }
+      return inner(connection, message);
+    };
+  }
+
+  /** Message arrays built on the server (applyLocal), the only ones an encrypted board accepts whole. */
+  private trusted = new WeakSet<object>();
+
+  /**
+   * On an encrypted board, keep only messages the server built or already has, byte for byte.
+   * Everything a client could slip in (a chat frame the gate above missed, a tool result) is
+   * dropped, so nothing unencrypted reaches the transcript by any path.
+   */
+  override async persistMessages(...args: Parameters<AIChatAgent<Env, Board>["persistMessages"]>) {
+    const [messages, exclude, options] = args;
+    if (!this.state.sealed || this.trusted.has(messages)) return super.persistMessages(messages, exclude, options);
+    const prior = new Map(this.messages.map((m) => [m.id, JSON.stringify(m)]));
+    const kept = messages.filter((m) => prior.get(m.id) === JSON.stringify(m));
+    // A dropped message mustn't also delete the stored ones it didn't list.
+    const opts = kept.length === messages.length ? options : { ...options, _deleteStaleRows: false };
+    return super.persistMessages(kept, exclude, opts);
+  }
+
   async onStart() {
+    this.sql`CREATE TABLE IF NOT EXISTS seal_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
     // Boards that were undone, newest last, so an accidental undo can be redone.
@@ -286,8 +326,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const text = sealed ? String(turn.text ?? "") : String(turn.text ?? "").trim().slice(0, 2000);
     // On an encrypted board the transcript is stored too, so the message has to arrive encrypted.
     if (sealed && !(isSealed(text) && kidOf(text) === sealed.kid)) throw new Error("This board is encrypted; the message has to be too.");
-    const calls = Array.isArray(turn.calls) ? turn.calls.slice(0, 8) : [];
-    if (!text || !calls.length) throw new Error("Nothing to apply.");
+    const raw = Array.isArray(turn.calls) ? turn.calls.slice(0, 8) : [];
+    if (!text || !raw.length) throw new Error("Nothing to apply.");
+    // The inputs are stored in the transcript as well, so on an encrypted board they have to be
+    // clean before anything runs: parsed by the tool's schema (unknown keys dropped), with every
+    // string either an id already on the board or ciphertext under the board's key.
+    const calls = sealed ? this.sealedCalls(raw, sealed.kid) : raw;
     const group = crypto.randomUUID();
     const outcomes = calls.map((c) => this.runTool(c.name, c.input, group));
     const done = outcomes.filter((o) => o.ok).map((o) => o.summary);
@@ -297,14 +341,37 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const assistant = {
       id: crypto.randomUUID(),
       role: "assistant" as const,
-      metadata: { createdAt: stamp, local: true, engine: turn.engine, confidence: turn.confidence, ms: turn.ms ?? null },
+      metadata: { createdAt: stamp, local: true, engine: turn.engine === "needle-rs" ? "needle-rs" : "local", confidence: clamp01(turn.confidence), ms: finiteOrNull(turn.ms) },
       parts: [
-        ...calls.map((c, i) => ({ type: `tool-${c.name}` as const, toolCallId: `local-${group}-${i}`, state: "output-available" as const, input: c.input, output: outcomes[i] })),
+        ...calls.map((c, i) => ({
+          type: `tool-${c.name}` as const, toolCallId: `local-${group}-${i}`, state: "output-available" as const,
+          // A call that failed didn't change anything, so there's no reason to keep what it was sent.
+          input: sealed && !outcomes[i].ok ? {} : c.input, output: outcomes[i],
+        })),
         { type: "text" as const, text: reply, state: "done" as const },
       ],
     };
-    await this.persistMessages([...this.messages, user, assistant] as typeof this.messages);
+    const next = [...this.messages, user, assistant] as typeof this.messages;
+    this.trusted.add(next);
+    await this.persistMessages(next);
     return { outcomes, reply };
+  }
+
+  /** Validate a local turn's tool calls for an encrypted board. Throws on anything that could be plaintext. */
+  private sealedCalls(calls: { name: ToolName; input: unknown }[], kid: string): { name: ToolName; input: unknown }[] {
+    const ids = new Set([...this.state.cards.map((c) => c.id), ...this.state.lanes.map((l) => l.id)]);
+    const clean = (v: unknown): boolean =>
+      typeof v === "string" ? ids.has(v) || (isSealed(v) && kidOf(v) === kid)
+        : Array.isArray(v) ? v.every(clean)
+        : v !== null && typeof v === "object" ? Object.values(v).every(clean)
+        : v === null || typeof v === "number" || typeof v === "boolean" || v === undefined;
+    return calls.map((c) => {
+      const t = BOARD_TOOLS[c.name];
+      if (!t) throw new Error(`Unknown tool ${String(c.name)}.`);
+      const parsed = t.inputSchema.safeParse(c.input);
+      if (!parsed.success || !clean(parsed.data)) throw new Error("This board is encrypted; a tool call carried text that wasn't.");
+      return { name: c.name, input: parsed.data };
+    });
   }
 
   // ---------- end-to-end encryption (sealed.ts) ----------
@@ -316,20 +383,49 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   // attachment files in R2.
 
   @callable()
-  async enableEncryption(input: { kid: string; envelope: string; board: Board }) {
+  async enableEncryption(input: { kid: string; envelope: string; board: Board; proof: string }) {
     if (this.state.sealed) throw new Error("This board is already encrypted.");
     const seal = checkEnvelope(input?.kid, input?.envelope);
+    const check = await proofHash(checkProof(input?.proof));
     const next = await this.adopt(input?.board, seal);
     ops.assertSealedBoard(next);
     await this.swapBoard(next);
+    this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+  }
+
+  /**
+   * Boards encrypted before the key check existed get one from the first unlocked tab.
+   * Returns whether the proof matches the stored check.
+   */
+  @callable()
+  async ensureKeyCheck(proof: string): Promise<boolean> {
+    if (!this.state.sealed) return false;
+    const hash = await proofHash(checkProof(proof));
+    const have = this.metaValue("check");
+    if (!have) this.sql`INSERT INTO seal_meta (k, v) VALUES ('check', ${hash})`;
+    return !have || have === hash;
+  }
+
+  /**
+   * Turning encryption off re-uploads every file unencrypted before the board swaps. Those
+   * uploads are refused on an encrypted board unless this opened a window for them, which
+   * takes proof of the key.
+   */
+  @callable()
+  async beginDisable(input: { proof: string }) {
+    if (!this.state.sealed) throw new Error("This board isn't encrypted.");
+    await this.requireProof(input?.proof);
+    this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('plain_staging_until', ${String(Date.now() + 15 * 60 * 1000)})`;
   }
 
   @callable()
-  async disableEncryption(input: { board: Board }) {
+  async disableEncryption(input: { board: Board; proof: string }) {
     if (!this.state.sealed) throw new Error("This board isn't encrypted.");
+    await this.requireProof(input?.proof);
     const next = await this.adopt(input?.board, undefined);
     if (ops.boardTexts(next).some(isSealed)) throw new Error("Some of the board is still encrypted.");
     await this.swapBoard(next);
+    this.sql`DELETE FROM seal_meta`;
     this.index.clear();
     this.index.sync(null, next);
     this.index.refreshVectors(next).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
@@ -337,9 +433,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /** A new envelope for the same key, under a new passphrase. `previous` guards against two tabs racing. */
   @callable()
-  changePassphrase(input: { previous: string; envelope: string }) {
+  async changePassphrase(input: { previous: string; envelope: string; proof: string }) {
     const seal = this.state.sealed;
     if (!seal) throw new Error("This board isn't encrypted.");
+    await this.requireProof(input?.proof);
     if (input?.previous !== seal.envelope) throw new Error("The passphrase was changed somewhere else. Reload and try again.");
     const next = checkEnvelope(seal.kid, input.envelope);
     this.setState({ ...this.state, sealed: { ...seal, envelope: next.envelope } });
@@ -350,7 +447,29 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async resetEncryptedBoard() {
     if (!this.state.sealed) throw new Error("This board isn't encrypted.");
     await this.swapBoard({ ...ops.newBoard(), theme: this.state.theme, themeChosen: this.state.themeChosen });
+    this.sql`DELETE FROM seal_meta`;
     this.index.clear();
+  }
+
+  /** What the upload endpoint may accept: files encrypted under `kid`, and plain ones only while turning encryption off. */
+  uploadPolicy(): { kid: string | null; plainStaging: boolean } {
+    const kid = this.state.sealed?.kid ?? null;
+    return { kid, plainStaging: !!kid && Number(this.metaValue("plain_staging_until") ?? 0) > Date.now() };
+  }
+
+  /** A staged upload that never makes it onto the board is collected with the other orphans. */
+  noteStaged() {
+    void this.scheduleCleanup(ATTACHMENT_GRACE_S);
+  }
+
+  private metaValue(k: string): string | undefined {
+    return this.sql<{ v: string }>`SELECT v FROM seal_meta WHERE k = ${k}`[0]?.v;
+  }
+
+  private async requireProof(proof: unknown) {
+    const have = this.metaValue("check");
+    if (!have) throw new Error("This board has no key check yet. Unlock it in the app first.");
+    if ((await proofHash(checkProof(proof))) !== have) throw new Error("That isn't this board's key.");
   }
 
   /**
@@ -499,3 +618,28 @@ function checkEnvelope(kid: unknown, envelope: unknown): SealInfo {
   if (h.alg !== ENVELOPE_ALG || h.enc !== "A256GCM" || !(Number(h.p2c) >= 210_000) || h.kid !== kid) throw new Error("The key envelope has to use PBES2-HS512+A256KW with at least 210,000 rounds.");
   return { v: 1, kid, envelope, since: new Date().toISOString() };
 }
+
+/** Proofs are base64url AES-GCM output over 32 bytes: 48 bytes, 64 characters. */
+function checkProof(proof: unknown): string {
+  if (typeof proof !== "string" || !/^[A-Za-z0-9_-]{64}$/.test(proof)) throw new Error("Bad key proof.");
+  return proof;
+}
+
+// Chat frames that carry message content from the client. On an encrypted board none of them
+// are accepted; clearing the chat, cancelling, and stream resume still work.
+const CHAT_FRAMES_BLOCKED_WHEN_SEALED = new Set([
+  "cf_agent_use_chat_request", "cf_agent_chat_messages", "cf_agent_tool_result", "cf_agent_tool_approval",
+]);
+
+function chatFrame(message: string): { type: string; id?: string } | null {
+  if (!message.includes("cf_agent_")) return null;
+  try {
+    const m = JSON.parse(message) as { type?: unknown; id?: unknown };
+    return typeof m.type === "string" ? { type: m.type, id: typeof m.id === "string" ? m.id : undefined } : null;
+  } catch {
+    return null;
+  }
+}
+
+const clamp01 = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
+const finiteOrNull = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.round(n) : null);

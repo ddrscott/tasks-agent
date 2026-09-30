@@ -3,14 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
-import type { BoardKey } from "../sealed";
+import { keyProof, type BoardKey } from "../sealed";
 import { clean, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
-import { EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
+import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
 import { Footer } from "./Footer";
@@ -102,6 +102,17 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [recalling, setRecalling] = useState(true);
   const seq = useRef(0);
 
+  // A marker in localStorage remembers that this account's board was encrypted on this
+  // device (the key id), or that a tab here is turning it off ("off:<time>"). A plain board
+  // arriving while the marker says encrypted is a downgrade nobody here asked for.
+  const markerKey = `tasks-sealed:${me.id}`;
+  const marker = {
+    get: () => { try { return localStorage.getItem(markerKey); } catch { return null; } },
+    set: (v: string) => { try { localStorage.setItem(markerKey, v); } catch { /* private window */ } },
+    clear: () => { try { localStorage.removeItem(markerKey); } catch { /* private window */ } },
+  };
+  const [downgraded, setDowngraded] = useState(false);
+
   // Server state lands here. Changes animate with a view transition, unless a drag
   // is in progress; then the newest state waits until the card is dropped.
   const receive = useCallback((next: Board) => {
@@ -139,7 +150,14 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     rawRef.current = s;
     setRaw(s);
     const n = ++seq.current;
-    if (!s.sealed) { receive(s); return; }
+    if (!s.sealed) {
+      const m = marker.get();
+      if (m && !m.startsWith("off:")) setDowngraded(true);
+      else if (m) marker.clear();
+      receive(s);
+      return;
+    }
+    marker.set(s.sealed.kid);
     const v = vaultRef.current;
     if (!v || v.key.kid !== s.sealed.kid) { applyTheme(s.theme); boardRef.current = null; setBoard(null); return; }
     void v.openBoard(s).then((view) => { if (n === seq.current) receive(view); });
@@ -152,6 +170,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     if (rawRef.current) ingest(rawRef.current);
   }, [ingest]);
 
+  /** This tab is about to turn encryption off or reset the board (true), or that failed (false). */
+  const expectPlain = useCallback((active: boolean) => {
+    const kid = rawRef.current?.sealed?.kid;
+    if (active) marker.set(`off:${Date.now()}`);
+    else if (kid) marker.set(kid);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const lock = useCallback(() => {
     vaultRef.current = null;
     setVault(null);
@@ -162,6 +187,12 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     basePath: "tasks/agent", // the Worker picks your board from the session cookie
     onStateUpdate: (s) => ingest(s),
   });
+
+  // Boards encrypted before key checks existed get one from the first tab that unlocks them.
+  useEffect(() => {
+    if (!vault || !raw?.sealed) return;
+    void keyProof(vault.key).then((p) => (agent.stub as unknown as EncryptionStub).ensureKeyCheck(p)).catch(() => {});
+  }, [vault, !!raw?.sealed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A key this browser remembers opens the board without asking.
   const sealedKid = raw?.sealed?.kid;
@@ -301,7 +332,19 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     return (
       <Unlock
         seal={raw.sealed} userId={me.id} email={me.email} onUnlocked={unlockWith} onSignOut={() => void signOut()}
-        onReset={() => encStub.resetEncryptedBoard()}
+        onReset={async () => {
+          expectPlain(true);
+          try { await encStub.resetEncryptedBoard(); } catch (e) { expectPlain(false); throw e; }
+        }}
+      />
+    );
+  }
+  if (downgraded) {
+    return (
+      <Downgraded
+        email={me.email}
+        onAccept={() => { marker.clear(); setDowngraded(false); }}
+        onEncrypt={() => { marker.clear(); setDowngraded(false); setEncOpen(true); }}
       />
     );
   }
@@ -414,7 +457,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       {encOpen && (
         <EncryptionDialog
           view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} email={me.email} stub={encStub} say={(t: string) => say(t)}
-          onEnabled={unlockWith} onDisabled={lock} onClose={() => setEncOpen(false)}
+          onEnabled={unlockWith} onDisabling={expectPlain} onDisabled={lock} onClose={() => setEncOpen(false)}
         />
       )}
 
