@@ -9,6 +9,7 @@
     "deploy": "vite build && wrangler deploy",
     "types": "wrangler types --env-file .dev.vars.example",
     "typecheck": "tsc --noEmit",
+    "check:markdown": "node scripts/check-markdown.mjs",
     "db:migrate:local": "wrangler d1 migrations apply todo-agent-auth --local",
     "db:migrate:remote": "wrangler d1 migrations apply todo-agent-auth --remote",
     "dev:local": "LOCAL_ONLY=1 vite dev",
