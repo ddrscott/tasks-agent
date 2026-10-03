@@ -329,7 +329,10 @@ kbd {
   width: 100%; padding: 10px 12px;
   background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm);
   outline: none; transition: border-color .15s;
+  /* Typed text is ink even inside a muted <label>; only the placeholder is muted. */
+  color: var(--ink);
 }
+.field::placeholder { color: var(--muted); opacity: 1; }
 .field:focus { border-color: var(--accent); }
 
 /* ============================================================ app shell */
