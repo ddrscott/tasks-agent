@@ -409,6 +409,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     ops.assertSealedBoard(next);
     await this.swapBoard(next);
     this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+    // An encrypted board keeps no session presence or claims (presence.ts): erase what's there.
+    await this.env.Presence.get(this.env.Presence.idFromName(this.name)).wipe()
+      .catch((e: Error) => console.warn("presence wipe failed", e.message));
   }
 
   /**
