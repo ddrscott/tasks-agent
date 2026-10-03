@@ -7,7 +7,9 @@
 // The first line after each connect is {"type":"hello","cards":[…]}: every open #agent
 // card, so nothing is missed while offline. After that, one line per change you make:
 // added, tagged, answered (#needs-ceo came off), edited, moved, deleted. Changes an agent
-// makes over MCP never show up here.
+// makes over MCP never show up here. After 5 failed connects in a row it prints one
+// {"type":"offline",…} line (a bad token looks the same as Tasks being unreachable), keeps
+// retrying, and passes on the next hello when it's back.
 //
 // Token: TASKS_TOKEN, or the first line of ~/.config/tasks/token (a personal access token
 // from Connect an agent → Tokens). URL: TASKS_URL, default wss://askscottpierce.com/tasks/events.
@@ -20,6 +22,7 @@ import { join } from "node:path";
 const URL_ = process.env.TASKS_URL ?? "wss://askscottpierce.com/tasks/events";
 const PING_MS = 30_000; // Cloudflare drops sockets that sit silent for about 100 seconds
 const MAX_BACKOFF_MS = 30_000;
+const OFFLINE_AFTER = 5; // failed connects in a row before saying so on stdout
 
 function token() {
   if (process.env.TASKS_TOKEN) return process.env.TASKS_TOKEN.trim();
@@ -37,11 +40,26 @@ const log = (msg) => process.stderr.write(`tasks-events: ${msg}\n`);
 const tok = token();
 let backoff = 1000;
 let lastHello = "";
+let failures = 0;
+
+function retry(why) {
+  failures++;
+  if (failures === OFFLINE_AFTER) {
+    say(JSON.stringify({ type: "offline", attempts: failures, reason: "can't connect: a revoked or wrong token, or Tasks is unreachable" }));
+    lastHello = ""; // say hello again once it's back
+  }
+  log(`${why}; retrying in ${Math.round(backoff / 1000)}s`);
+  setTimeout(connect, backoff);
+  backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+}
 
 function connect() {
   const ws = new WebSocket(URL_, ["tasks-events", tok]);
   let ping;
+  let opened = false;
   ws.onopen = () => {
+    opened = true;
+    failures = 0;
     backoff = 1000;
     log(`connected to ${URL_}`);
     ping = setInterval(() => ws.send("ping"), PING_MS);
@@ -59,12 +77,15 @@ function connect() {
   };
   ws.onclose = (e) => {
     clearInterval(ping);
-    if (e.code === 1008 || e.code === 4001) { log(`refused: ${e.reason || e.code}`); process.exit(1); }
-    log(`disconnected (${e.code}); retrying in ${Math.round(backoff / 1000)}s`);
-    setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+    if (opened) retry(`disconnected (${e.code})`);
   };
-  ws.onerror = () => {}; // onclose follows with the details
+  // A refused upgrade (401 for a bad token) fires only this, and onclose never comes.
+  // Detach first: closing a failed socket can fire error again.
+  ws.onerror = () => {
+    if (opened) return; // onclose follows
+    ws.onerror = ws.onclose = ws.onmessage = ws.onopen = null;
+    retry("couldn't connect");
+  };
 }
 
 connect();
