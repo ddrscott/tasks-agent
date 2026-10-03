@@ -234,6 +234,11 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
 agent definition (`~/.claude/agents/lead.md`) does this itself.
 
+- **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
+  `#agent`, and run one lead per repo. `tasks-events --tag receptionist` passes on only that
+  project's cards, so leads in different repos never hear each other's work. Filtering happens
+  in the script; the server sends every `#agent` change to every connection.
+
 - **Direction.** Your machine dials out to `wss://askscottpierce.com/tasks/events`, so nothing on
   it accepts connections: no tunnel, no open port.
 - **Auth.** A personal access token, in the `Authorization` header or, for WebSocket clients

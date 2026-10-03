@@ -2,7 +2,11 @@
 // Stream the changes you make to #agent cards on your Tasks board, one JSON object per
 // line on stdout. Built for Claude Code's Monitor tool, where each line wakes the session:
 //
-//   node scripts/tasks-events.mjs
+//   node scripts/tasks-events.mjs                     # every #agent card
+//   node scripts/tasks-events.mjs --tag receptionist  # only cards also tagged #receptionist
+//
+// --tag scopes the feed to one project, so several lead agents (one per repo) each hear
+// only their own cards. Repeat it to match any of several tags.
 //
 // The first line after each connect is {"type":"hello","cards":[…]}: every open #agent
 // card, so nothing is missed while offline. After that, one line per change you make:
@@ -37,6 +41,23 @@ function token() {
 const say = (line) => process.stdout.write(line + "\n");
 const log = (msg) => process.stderr.write(`tasks-events: ${msg}\n`);
 
+function tagsFromArgs(argv) {
+  const tags = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--tag" && argv[i + 1]) tags.push(argv[++i]);
+    else if (a.startsWith("--tag=")) tags.push(a.slice(6));
+    else if (a === "-h" || a === "--help") { console.error("usage: tasks-events [--tag <project>]..."); process.exit(0); }
+    else { console.error(`tasks-events: unknown argument ${a}`); process.exit(2); }
+  }
+  // Same cleaning as the board (cleanTag in src/shared.ts), so "#Receptionist" matches.
+  return tags.map((t) => t.trim().replace(/^#+/, "").toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "")).filter(Boolean);
+}
+
+// Arguments first, so --help and typos never open a connection.
+const only = tagsFromArgs(process.argv.slice(2));
+const mine = (card) => !only.length || only.some((t) => (card.tags ?? []).includes(t));
+
 const tok = token();
 let backoff = 1000;
 let lastHello = "";
@@ -66,8 +87,11 @@ function connect() {
   };
   ws.onmessage = (m) => {
     if (m.data === "pong") return;
-    let line;
-    try { line = JSON.stringify(JSON.parse(String(m.data))); } catch { return; }
+    let ev;
+    try { ev = JSON.parse(String(m.data)); } catch { return; }
+    if (ev.type === "hello") ev = { ...ev, cards: ev.cards.filter(mine) };
+    else if (ev.type !== "offline" && !mine(ev)) return;
+    const line = JSON.stringify(ev);
     // A reconnect resends the queue; only pass it on when it changed.
     if (line.startsWith('{"type":"hello"')) {
       if (line === lastHello) return;
