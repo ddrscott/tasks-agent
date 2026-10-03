@@ -48,6 +48,7 @@ function Privacy() {
           <li><b>Your assistant chat</b>: up to the last 120 messages, and a daily count of how many you've sent.</li>
           <li><b>Sign-in records</b>: one-time sign-in codes (kept 10 minutes) and sessions (30 days). We store only scrambled versions (hashes) of these, not the codes themselves.</li>
           <li><b>Connected agents</b>: access tokens you create and apps you allow to reach your board. Tokens are stored only as hashes.</li>
+          <li><b>Claude Code sessions</b>, only if you install the reporting hook: for each running session, its id, the folder it runs in, the machine's name, whether it's working, idle, or waiting on you, and one line about its last action (a tool and file name, or Claude's notification text). Never prompts, tool output, commands, or transcripts. Each session overwrites its own record, and records are deleted when the session ends or after 24 hours. An encrypted board keeps none.</li>
           <li><b>Subscription status</b>, if you upgrade: your Stripe customer ID and whether the subscription is active. We never see or store your card details.</li>
           <li><b>Your theme</b>, and a few display preferences kept in your own browser.</li>
         </ul>
