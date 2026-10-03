@@ -112,6 +112,8 @@ const TOOLS: [string, string, boolean?][] = [
   ["add_lane", "Add a lane"],
   ["rename_lane", "Rename a lane"],
   ["delete_lane", "Delete a lane and every card in it", true],
+  ["claim_card", "Claim a card for an agent session, so two agents never take the same one"],
+  ["release_card", "Give a claimed card back"],
 ];
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {

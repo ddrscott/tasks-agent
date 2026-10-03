@@ -19,6 +19,7 @@ import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
+import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 
 type Me = { email: string; id: string; model: string };
@@ -79,6 +80,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(() => {
     try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
@@ -218,6 +220,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     }
   }, []);
   agentRef.current = agent;
+
+  // Claude Code sessions reporting in, and the cards they hold. An encrypted board keeps none.
+  const presence = usePresence(!!raw && !raw.sealed);
 
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -392,6 +397,12 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <IconRedo />
               </button>
             </div>
+            {!board.sealed && (
+              <SessionsButton
+                presence={presence} open={sessionsOpen} setOpen={setSessionsOpen}
+                cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
+              />
+            )}
             <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => void agent.stub.setTheme(t)} />
             <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)">
               <IconChat />Assistant
@@ -421,6 +432,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
+        <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
@@ -433,6 +445,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           }}
           toast={say}
         />
+        </PresenceContext.Provider>
         <Footer />
       </div>
 

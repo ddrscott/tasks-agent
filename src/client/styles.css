@@ -421,6 +421,7 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 }
 .card-title { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
 .card.is-done .card-title { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .card-meta:empty { display: none; }
 .chip {
@@ -651,6 +652,36 @@ a.att-name:hover { color: var(--accent); }
 .theme-opt b { font-size: 12px; font-weight: 600; }
 .theme-opt small { font-size: 11px; color: var(--muted); margin-top: -4px; }
 
+/* // SESSIONS: Claude Code sessions reporting in. House style on every theme: mono, and an
+   orange $ on the rows that are live. */
+.sess-btn { position: relative; }
+.sess-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
+.sess-btn.waiting { border-color: var(--accent); }
+.sess-btn.waiting .sess-count { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.sessions { width: 400px; max-width: calc(100vw - 32px); max-height: min(70dvh, 620px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.sessions section { display: flex; flex-direction: column; gap: 6px; }
+.sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sess-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.sess-empty code { font: 12px var(--font-mono); color: var(--ink); }
+.sess-project { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.sess-project span { font-weight: 400; font-size: 11px; color: var(--muted); }
+.sess-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px/1.45 var(--font-mono); min-width: 0; }
+.sess-row.stale { opacity: .6; }
+.sess-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.sess-state { flex: none; display: inline-flex; gap: 6px; font-weight: 600; color: var(--ink); }
+.sess-mark { color: var(--accent); }
+.sess-state.is-needs-input { color: var(--accent); }
+.sess-state.is-idle, .sess-state.is-stale { color: var(--muted); font-weight: 400; }
+.sess-state.is-idle .sess-mark, .sess-state.is-stale .sess-mark { color: var(--muted); }
+.sess-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.sess-seen { flex: none; color: var(--muted); }
+.sess-last, .sess-card { color: var(--ink); overflow-wrap: anywhere; }
+.sess-card { color: var(--muted); }
+.sess-links { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.sess-links a, .sess-resume { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.sess-links a:hover, .sess-resume:hover { color: var(--accent); }
+.sess-id { color: var(--muted); }
+
 .menu { min-width: 220px; padding: 6px; display: flex; flex-direction: column; }
 .menu .who { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }
 .menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
@@ -809,6 +840,9 @@ a.att-name:hover { color: var(--accent); }
 }
 
 @media (max-width: 560px) {
+  /* The sessions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
+  .popover:has(> .sessions) { position: fixed; top: 62px; left: 16px; right: 16px; }
+  .sessions { width: auto; max-width: none; }
   .search { width: 34px; padding: 0; justify-content: center; }
   .search:focus-within { position: absolute; left: 12px; right: 12px; width: auto; padding: 0 10px; z-index: 20; }
   .search input { width: 0; }

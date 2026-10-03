@@ -326,6 +326,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return !!this.state.sealed;
   }
 
+  /** A card's title, for the claim tools (mcp.ts). Null when there's no such card or the board is encrypted. */
+  cardTitle(id: string): string | null {
+    if (this.state.sealed) return null;
+    return this.state.cards.find((c) => c.id === id)?.title ?? null;
+  }
+
   /** The board as plain text, the same view the chat model gets. */
   describe(tag?: string): string {
     if (this.state.sealed) return SEALED_NOTICE;
@@ -409,6 +415,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     ops.assertSealedBoard(next);
     await this.swapBoard(next);
     this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+    // An encrypted board keeps no session presence or claims (presence.ts): erase what's there.
+    await this.env.Presence.get(this.env.Presence.idFromName(this.name)).wipe()
+      .catch((e: Error) => console.warn("presence wipe failed", e.message));
   }
 
   /**

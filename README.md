@@ -25,6 +25,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
+| Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -32,6 +33,8 @@ askscottpierce.com/tasks/assets/*  ──▶ static assets (no Worker hop)
 askscottpierce.com/tasks/api/*     ──▶ Worker ──▶ D1 (codes, sessions), EMAIL.send
 askscottpierce.com/tasks/agent     ──▶ Worker ──session──▶ your TodoAgent (Durable Object)
                                           board state ⇄ UI · chat ─▶ Workers AI + board tools
+askscottpierce.com/tasks/api/presence ◀── Claude Code hooks ──token──▶ your Presence (Durable Object)
+askscottpierce.com/tasks/presence  ──▶ Worker ──session──▶ your Presence ─▶ the // SESSIONS list, live
 askscottpierce.com/tasks/mcp       ──▶ OAuth provider ──token──▶ your TodoAgent, over RPC ─▶ board tools
 askscottpierce.com/tasks/oauth/*   ──▶ OAuth provider (register, token) · consent screen (authorize)
 askscottpierce.com/.well-known/oauth-{authorization-server, protected-resource/tasks/*} ──▶ OAuth discovery
@@ -209,8 +212,9 @@ can work the board. The in-app page at **/tasks/connect** (user menu → Connect
 agent) shows the server URL, setup steps for each client, connected apps, and tokens.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`,
-  `search_cards`, and the seven board tools from `src/tools.ts`. MCP changes sync live and are undoable,
-  one undo step per call. `get_board` and `search_cards` take an optional `tag`, so an agent
+  `search_cards`, the seven board tools from `src/tools.ts`, and `claim_card` and `release_card`
+  (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
+  board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
   and `update_card` replaces the whole list.
 - **OAuth (most clients).** The client only needs the URL. It discovers the OAuth
@@ -269,6 +273,123 @@ agent definition (`~/.claude/agents/lead.md`) does this itself.
   `TodoAgent` and lets it call board actions; these sockets only ever receive event lines.
   Pings are answered without waking the object, so an idle connection costs nothing.
 - **Encrypted boards** have no feed, the same as MCP.
+- The other direction, sessions telling Tasks what they're doing, is `// SESSIONS` below.
+
+## // SESSIONS
+
+The Sessions button in the top bar lists every Claude Code session that's reporting in, on any
+machine: grouped by project, the ones waiting on you first. A row shows the state (working,
+needs input, idle), the agent and machine, one line about its last action, and how long ago it
+was heard from. After 5 quiet minutes a row is marked stale. "copy resume" copies
+`cd <folder> && claude --resume <id>` for the machine it runs on. A card that a lead agent has
+claimed shows the same state line under its title.
+
+**It's presence, not a log.** Each session overwrites one row. Nothing is appended, and no
+transcript, prompt, tool output, or Bash command is ever stored; Claude Code already keeps
+transcripts in `~/.claude/projects` on the machine that ran them.
+
+**What's stored**, per session: session id, project (the folder's name), the folder path (for the
+resume command), machine, agent kind, state, the last-action line, when it started, and when it
+was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
+call's description when it has one (never the command), or Claude's own notification text
+(`Claude needs your permission to use Bash`). Rows are deleted 24 hours after they were last
+updated, when the session ends, and all at once when the board turns encryption on. At most 200
+are kept.
+
+**Install the hook** on each machine (this goes in `~/.claude/settings.json`; merge it with any
+hooks already there). It uses the same token file as `// AGENT_EVENTS`:
+`~/.config/tasks/token`, or `TASKS_TOKEN`.
+
+```json
+{
+  "hooks": {
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "Notification":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }]
+  }
+}
+```
+
+`scripts/tasks-presence.mjs` reads the hook's JSON on stdin and posts about 200 bytes: session
+id, folder, event name, tool name, file path, and notification text. The rest of the payload
+never leaves the machine. It never prints, always exits 0, gives up after 3 seconds, and sends
+tool-use events at most once every 30 seconds per session. The two events that fire constantly
+(`UserPromptSubmit`, `PostToolUse`) run in the background with `async`. The rest run in line,
+which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
+`claude -p` run exits, so the row would be left saying "working".
+The machine name is the host's name, or `TASKS_MACHINE`. On a box without this repo, copy the one
+file; it has no dependencies beyond Node 22.
+
+**Or with no script, hooks of type `http`.** The same endpoint takes Claude Code's hook payload
+directly:
+
+```json
+{ "type": "http", "url": "https://askscottpierce.com/tasks/api/presence", "timeout": 5,
+  "headers": { "Authorization": "Bearer $TASKS_TOKEN", "X-Tasks-Machine": "$TASKS_MACHINE", "X-Tasks-Agent": "$CLAUDE_CODE_AGENT" },
+  "allowedEnvVars": ["TASKS_TOKEN", "TASKS_MACHINE", "CLAUDE_CODE_AGENT"] }
+```
+
+The trade: an `http` hook sends the **whole** payload, which for `PostToolUse` includes the tool's
+input and output, for `UserPromptSubmit` your prompt, and for `Stop` the assistant's last
+message. The Worker reads eight fields and drops the rest without storing it, but it does cross
+the wire, it isn't 200 bytes, and `http` hooks can't run in the background. `TASKS_TOKEN` and
+`TASKS_MACHINE` also have to be exported wherever `claude` starts, since Claude Code sends no
+host name. That's why the script is the default.
+
+**The endpoint.** `POST /tasks/api/presence` with `Authorization: Bearer tasks_…` (a personal
+access token; a cookie isn't accepted). The body is a hook payload; these fields are read and
+nothing else: `session_id`, `cwd`, `hook_event_name`, `tool_name`, `tool_input.file_path`,
+`tool_input.description`, `message`, `notification_type`. `X-Tasks-Machine`, `X-Tasks-Agent`,
+and `X-Tasks-Link` (an `https` link back to the session, shown instead of the resume command)
+are optional. A bad token gets 401. Everything else gets `200 {}` so a hook can never fail or
+slow a session; the `X-Tasks-Presence` response header says what happened (`stored`, `skipped`,
+`ended`, `sealed`, `not-json`, `no-session`).
+
+| Event | State | Last action |
+|---|---|---|
+| `SessionStart` | idle | session started |
+| `UserPromptSubmit` | working | got a prompt |
+| `PreToolUse`, `PostToolUse`, anything else | working | `Edit: server.ts` (at most one write per 30s while already working) |
+| `PermissionRequest` | needs input | wants to use Bash |
+| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
+| `Notification` (`auth_success`, `agent_completed`, `quota_…`) | unchanged | the notification's message |
+| `Stop` | idle | finished its turn |
+| `SessionEnd` | row deleted | |
+
+**Kept apart from the board.** Sessions and claims live in their own Durable Object, `Presence`
+(`src/presence.ts`), one per user, in its own SQLite tables. Nothing goes through
+`TodoAgent.mutate`, so a session reporting in never adds an undo step, flashes a card, reindexes
+search, or publishes an agent event. The browser reads the list over its own WebSocket,
+`/tasks/presence`, which takes the session cookie and refuses other origins like the board's.
+
+**Claiming cards.** Several lead agents can work one board. Before starting a card, a lead calls
+the MCP tool `claim_card` with the card's id and its session id (`CLAUDE_CODE_SESSION_ID` in
+Claude Code). The `Presence` object handles one call at a time, so of two leads asking at once,
+one gets the card and the other is told who has it. `get_board` ends with the list of claimed
+cards, and `release_card` gives one back. A claim holds for 15 minutes after its session was
+last heard from, which is longer than the 5-minute stale mark on purpose: a lead that's thinking
+keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
+being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
+on the card, so they don't show up in undo, notes, or search. For a lead agent's instructions:
+
+```
+Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
+agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
+card you're working at least every 10 minutes, and release_card when you move it to Done or
+hand it to Scott with needs-ceo.
+```
+
+**Encrypted boards keep no presence.** It's metadata about sessions, not card text, so it could
+have been allowed. It isn't, for three reasons. Someone who turned encryption on has said the
+server shouldn't hold anything readable about their work, and project names, file names, and
+"wants to use Bash" lines are readable descriptions of that work. Hooks have no key, so presence
+can't be encrypted the way card text is. And claims need MCP, which is already closed on an
+encrypted board. So reports to an encrypted board are dropped (`X-Tasks-Presence: sealed`), the
+Sessions button is hidden, and turning encryption on erases the rows that were there.
 
 ## // SEARCH
 
