@@ -23,7 +23,7 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [
-      "/tasks/api/*", "/tasks/agent", "/tasks/agent/*", "/tasks/mcp", "/tasks/oauth/*",
+      "/tasks/api/*", "/tasks/agent", "/tasks/agent/*", "/tasks/mcp", "/tasks/events", "/tasks/oauth/*",
       "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/*"
     ]
   },
@@ -44,9 +44,16 @@
   // that included them, then pinned here.
   "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "todo-agent-attachments" }],
   "durable_objects": {
-    "bindings": [{ "name": "TodoAgent", "class_name": "TodoAgent" }]
+    "bindings": [
+      { "name": "TodoAgent", "class_name": "TodoAgent" },
+      // Event sockets for agent sessions (src/events.ts), one per user, kept apart from the board's.
+      { "name": "TaskEvents", "class_name": "TaskEvents" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TodoAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TodoAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["TaskEvents"] }
+  ],
   "vars": {
     // Cheap Workers AI model with tool calling ($0.06 in / $0.40 out per M tokens).
     // Swap to "@cf/qwen/qwen3-30b-a3b-fp8" or "@cf/openai/gpt-oss-20b" if you prefer.

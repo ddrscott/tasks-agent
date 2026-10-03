@@ -221,6 +221,35 @@ agent) shows the server URL, setup steps for each client, connected apps, and to
 - MCP calls don't hit Workers AI, so the daily chat cap doesn't apply to them.
 - An end-to-end encrypted board is closed to agents. Every tool returns an error saying so.
 
+## // AGENT_EVENTS
+
+An agent session on your own machine can hear about your changes to `#agent` cards the
+moment you make them, so you can answer it from the app instead of hunting down a terminal.
+
+```sh
+echo 'tasks_…' > ~/.config/tasks/token && chmod 600 ~/.config/tasks/token
+node scripts/tasks-events.mjs     # one JSON object per line on stdout
+```
+
+In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
+agent definition (`~/.claude/agents/lead.md`) does this itself.
+
+- **Direction.** Your machine dials out to `wss://askscottpierce.com/tasks/events`, so nothing on
+  it accepts connections: no tunnel, no open port.
+- **Auth.** A personal access token, in the `Authorization` header or, for WebSocket clients
+  that can't set headers, as a second subprotocol after `tasks-events`. Never in the URL. The
+  Worker checks it and doesn't pass it on.
+- **Events.** First a `hello` with every open `#agent` card, on each connect, so nothing is lost
+  while offline. Then one line per change: `added`, `tagged`, `answered` (`#needs-ceo` came
+  off), `edited`, `moved`, `deleted`. Each carries the card's id, title, lane, and tags.
+- **Only your changes.** Edits from the app, its assistant, and Needle publish. Changes an agent
+  makes over MCP don't, so an agent never wakes itself (`actor` in `TodoAgent.mutate`).
+- **Kept apart from the board.** The sockets live in their own Durable Object, `TaskEvents`
+  (`src/events.ts`), one per user. The Agents SDK syncs the whole board to every socket on
+  `TodoAgent` and lets it call board actions; these sockets only ever receive event lines.
+  Pings are answered without waking the object, so an idle connection costs nothing.
+- **Encrypted boards** have no feed, the same as MCP.
+
 ## // SEARCH
 
 Search covers card titles and notes (not attachments yet). It runs inside each user's

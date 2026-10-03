@@ -7,6 +7,7 @@ import * as ops from "./shared";
 import { isSealed, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
+import { agentEvents, agentQueue, type TaskEvent } from "./events";
 import { CardIndex } from "./search";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -23,6 +24,9 @@ const ATTACHMENT_RECHECK_S = 7 * 24 * 60 * 60;
  * one of the board tools (tools.ts), both of which use the ops in shared.ts.
  * The tools are reached from the in-app chat and, over RPC, from the MCP endpoint.
  */
+/** Who made a change: you (the app, its assistant) or an outside agent over MCP. */
+type Actor = "you" | "agent";
+
 export class TodoAgent extends AIChatAgent<Env, Board> {
   initialState = ops.newBoard();
   maxPersistedMessages = 120;
@@ -111,7 +115,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * Apply a change and remember the previous board for undo. Changes that share
    * a `group` (every tool call in one chat turn) collapse into one undo step.
    */
-  private mutate(label: string, fn: (b: Board) => Board, group?: string): Board {
+  private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you"): Board {
     const before = this.state;
     const after = fn(before);
     ops.assertSealedBoard(after);
@@ -125,7 +129,20 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.reindex(before, after);
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
+    if (actor === "you") this.publish(agentEvents(before, after));
     return after;
+  }
+
+  /** Tell any listening agent session (events.ts) about changes you made to #agent cards. */
+  private publish(events: TaskEvent[]) {
+    if (!events.length) return;
+    const feed = this.env.TaskEvents.get(this.env.TaskEvents.idFromName(this.name));
+    this.ctx.waitUntil(feed.publish(events).catch((e: Error) => console.warn("event publish failed", e.message)));
+  }
+
+  /** The open #agent cards, sent to an event client when it connects. Null on an encrypted board. */
+  agentQueue(): TaskEvent | null {
+    return this.state.sealed ? null : agentQueue(this.state);
   }
 
   // ---------- attachments ----------
@@ -284,9 +301,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /**
    * Run one board tool. Calls sharing a `group` collapse into one undo step, so a
-   * whole chat turn undoes at once; each MCP call is its own step.
+   * whole chat turn undoes at once; each MCP call is its own step. MCP passes
+   * actor "agent", so an outside agent's own changes don't come back to it as events.
    */
-  runTool(name: ToolName, input: unknown, group?: string): ToolOutcome {
+  runTool(name: ToolName, input: unknown, group?: string, actor: Actor = "you"): ToolOutcome {
     const t = BOARD_TOOLS[name];
     if (!t) return { ok: false, summary: `Unknown tool ${name}` };
     try {
@@ -296,7 +314,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         const r = (t.apply as (b: Board, i: typeof args) => { board: Board; summary: string })(b, args);
         summary = r.summary;
         return r.board;
-      }, group);
+      }, group, actor);
       return { ok: true, summary, board: ops.describeBoard(board) };
     } catch (e) {
       return { ok: false, summary: (e as Error).message };

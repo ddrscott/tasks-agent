@@ -64,7 +64,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       }, async (input: unknown) => {
         const no = await locked();
         if (no) return no;
-        const r = (await agent.runTool(name, input)) as ToolOutcome;
+        const r = (await agent.runTool(name, input, undefined, "agent")) as ToolOutcome;
         return r.ok ? text(`${r.summary}\n\nBoard now:\n${r.board}`) : text(r.summary, true);
       });
     }

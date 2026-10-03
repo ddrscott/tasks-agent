@@ -5,10 +5,12 @@ import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
+import { EVENTS_PROTOCOL } from "./events";
 import { handleSso } from "./sso";
 import { handleTokens, tokenUser } from "./tokens";
 
 export { TodoAgent } from "./agent";
+export { TaskEvents } from "./events";
 
 // Everything lives under this path on askscottpierce.com. Static files are built
 // into dist/client/tasks/assets (see vite.config.ts), so only the API, the agent
@@ -69,9 +71,36 @@ const app: ExportedHandler<Env> = {
       return agent.fetch(req);
     }
 
+    // The live feed of your #agent card changes (events.ts), for an agent session on your machine.
+    if (sub === "/events") return handleEvents(req, env);
+
     return env.ASSETS.fetch(req);
   },
 };
+
+/**
+ * Open the event feed. It takes a personal access token, never a cookie: in the
+ * Authorization header, or for WebSocket clients that can't set headers (Claude Code's
+ * Monitor, browsers) as a second subprotocol after "tasks-events". Never in the URL,
+ * which ends up in logs.
+ */
+async function handleEvents(req: Request, env: Env): Promise<Response> {
+  if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
+  if (fromElsewhere(req)) return forbidden();
+  const offered = (req.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  let auth = req;
+  if (!req.headers.has("Authorization") && offered[0] === EVENTS_PROTOCOL && offered[1]) {
+    auth = new Request(req.url, { headers: { Authorization: `Bearer ${offered[1]}` } });
+  }
+  const user = await tokenUser(auth, env);
+  if (!user) return new Response("Send a personal access token (Connect an agent → Tokens).", { status: 401 });
+  const headers = new Headers(req.headers);
+  headers.delete("Authorization");
+  headers.set("x-user", user.id);
+  if (offered.length) headers.set("Sec-WebSocket-Protocol", EVENTS_PROTOCOL); // the token stops at the Worker
+  else headers.delete("Sec-WebSocket-Protocol");
+  return env.TaskEvents.get(env.TaskEvents.idFromName(user.id)).fetch(new Request(req.url, { headers }));
+}
 
 // The OAuth provider sits in front of the app. It answers OAuth discovery, client
 // registration, and the token endpoint itself, checks the bearer token on /tasks/mcp,
