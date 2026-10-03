@@ -2,7 +2,7 @@
 // project, the ones waiting on you first. The list arrives over its own WebSocket, apart from
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { STALE_MS, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
@@ -63,6 +63,24 @@ export function usePresence(enabled: boolean): Presence {
 
   if (!view) return EMPTY;
   return { sessions: view.sessions, claims: view.claims, now: Date.now() + skew.current };
+}
+
+/** So a card can show who holds it without the list being threaded through every lane. */
+export const PresenceContext = createContext<Presence>(EMPTY);
+
+/** The line on a card a session has claimed: its state, who and where, and when it was last heard from. */
+export function CardPresence({ cardId }: { cardId: string }) {
+  const { sessions, claims, now } = useContext(PresenceContext);
+  const claim = claims.find((c) => c.cardId === cardId);
+  const session = claim && sessions.find((s) => s.id === claim.sessionId);
+  if (!claim || !session) return null;
+  return (
+    <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
+      <StateMark session={session} now={now} />
+      <span className="sess-where">{claim.agent || session.agent || "agent"} · {session.machine}</span>
+      <span className="sess-seen">{ago(now - session.seenAt)}</span>
+    </div>
+  );
 }
 
 export const isStale = (s: Session, now: number) => now - s.seenAt > STALE_MS;

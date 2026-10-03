@@ -326,6 +326,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return !!this.state.sealed;
   }
 
+  /** A card's title, for the claim tools (mcp.ts). Null when there's no such card or the board is encrypted. */
+  cardTitle(id: string): string | null {
+    if (this.state.sealed) return null;
+    return this.state.cards.find((c) => c.id === id)?.title ?? null;
+  }
+
   /** The board as plain text, the same view the chat model gets. */
   describe(tag?: string): string {
     if (this.state.sealed) return SEALED_NOTICE;

@@ -421,6 +421,7 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 }
 .card-title { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
 .card.is-done .card-title { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .card-meta:empty { display: none; }
 .chip {

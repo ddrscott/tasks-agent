@@ -7,6 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useRef, useState } from "react";
 import { hasTag, laneCards, type Board, type Card, type Lane } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
+import { CardPresence } from "./Sessions";
 
 export type Actions = {
   addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
@@ -270,6 +271,7 @@ function CardFace(p: {
       )}
       <div>
         <div className="card-title">{card.title}</div>
+        <CardPresence cardId={card.id} />
         <div className="card-meta">
           {card.tags?.map((t) => (
             <button

@@ -19,7 +19,7 @@ import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
-import { SessionsButton, usePresence } from "./Sessions";
+import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 
 type Me = { email: string; id: string; model: string };
@@ -432,6 +432,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
+        <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
@@ -444,6 +445,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           }}
           toast={say}
         />
+        </PresenceContext.Provider>
         <Footer />
       </div>
 
