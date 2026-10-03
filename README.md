@@ -59,6 +59,21 @@ run ahead of whatever serves the zone.
   Click a tag on a card to fade out every card without it; click again, or the chip in
   the top bar, to clear. The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
+- **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
+  numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
+  bold, italic, strikethrough, quotes, and `---` rules. A single line break stays a line break.
+  Click the notes, press Enter or `e` on them, or use Edit to get the plain textarea; leaving it
+  (or ⌘/Ctrl+Enter) shows the rendered view again. Checkboxes can be ticked without editing.
+  A card with no notes opens on the textarea. Notes are still stored as plain text, so search,
+  MCP, and encryption see exactly what they did before; on an encrypted board the rendering
+  happens in the tab, after decryption. Card faces still show only the `notes` chip.
+  **Raw HTML is never rendered.** `src/client/Markdown.tsx` is a small renderer of its own that
+  builds React elements and never uses `innerHTML`, so a `<script>` or `onerror=` in a note is
+  just text, and links only take `http`, `https`, and `mailto` and open in a new tab with
+  `rel="noopener noreferrer"`. It's hand-rolled so there's no parser or sanitizer dependency to
+  trust on a shared origin (see "Accepted risk" below). `npm run check:markdown` renders a
+  hostile note and fails if anything but the renderer's own tags and attributes comes out. Run
+  it after touching the renderer.
 - **Live sync.** Board state is Agents SDK synced state, so every open tab
   updates at once. Changes animate with the View Transitions API. Cards the
   assistant touches flash briefly.
@@ -381,7 +396,7 @@ board, so one person gets the same board every time. `ALLOWED_EMAILS` still appl
 Locally, put the same four values in `.dev.vars` (see `.dev.vars.example`).
 
 Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
-card, arrows to move it · `Enter` edit a card · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
+card, arrows to move it · `Enter` edit a card (then `Enter` or `e` on the notes to edit them) · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
 creates one card per line.
 
 ## // DEVELOP
@@ -391,6 +406,8 @@ npm install
 npm run db:migrate:local
 npm run dev          # http://localhost:5173/tasks/ — Workers AI is always remote, so `npx wrangler login` first
 npm run dev:local    # no Cloudflare login needed; everything works except the assistant
+npm run typecheck
+npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
