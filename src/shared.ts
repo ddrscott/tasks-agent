@@ -19,6 +19,22 @@ export type Attachment = {
   addedAt: string;
 };
 
+/** The tag that says a card is waiting on a decision from the board's owner. */
+export const NEEDS_CEO_TAG = "needs-ceo";
+
+/** A question an agent put on a card (ask_ceo), answered with one tap in the app. */
+export type Ask = {
+  question: string;
+  options: string[]; // 2 to 4
+  recommended?: number; // index into options
+  askedAt: string;
+};
+
+/** The last answer given on a card. It stays until the next question, so an agent can read it back. */
+export type Answer = { question: string; answer: string; choice?: number; at: string };
+
+export const MAX_ASK_OPTIONS = 4;
+
 export type Card = {
   id: string;
   title: string;
@@ -29,6 +45,8 @@ export type Card = {
   updatedAt: string;
   attachments?: Attachment[]; // missing on cards made before attachments existed
   tags?: string[]; // missing on cards made before tags existed, and on cards with none
+  ask?: Ask; // an open question; never on an encrypted board
+  answer?: Answer;
 };
 
 export const MAX_ATTACHMENTS_PER_CARD = 20;
@@ -160,7 +178,57 @@ export function updateCard(
   if (patch.notes !== undefined) next.notes = tidyNotes(patch.notes);
   if (patch.due !== undefined) next.due = validDue(patch.due);
   if (patch.tags !== undefined) next = withTags(next, tidyTags(patch.tags));
+  // Taking #needs-ceo off by hand answers the question without picking an option, so it goes too.
+  if (next.ask && !hasTag(next, NEEDS_CEO_TAG)) delete next.ask;
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
+}
+
+/** Put a question on a card and mark it #needs-ceo. A new question replaces the old one and clears the last answer. */
+export function askCard(b: Board, id: string, input: { question: string; options: string[]; recommended?: number }): Board {
+  if (b.sealed) throw new Error("An encrypted board can't hold questions: they'd be stored unencrypted.");
+  const card = requireCard(b, id);
+  const question = clean(input.question, 240);
+  if (!question) throw new Error("A question needs some text");
+  const options = [...new Set(input.options.map((o) => clean(o, 140)).filter(Boolean))];
+  if (options.length < 2 || options.length > MAX_ASK_OPTIONS) throw new Error(`Give 2 to ${MAX_ASK_OPTIONS} different options`);
+  const rec = input.recommended;
+  if (rec !== undefined && (!Number.isInteger(rec) || rec < 0 || rec >= options.length)) throw new Error("recommended has to be one of the options");
+  const { answer: _, ...rest } = card;
+  const tags = tidyTags([...(card.tags ?? []), NEEDS_CEO_TAG]);
+  const next: Card = { ...withTags(rest, tags), updatedAt: now(), ask: { question, options, ...(rec !== undefined ? { recommended: rec } : {}), askedAt: now() } };
+  return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
+}
+
+/**
+ * Answer a card's question, with one of its options or with typed text. The answer is kept on
+ * the card and written as the first line of its notes, and #needs-ceo comes off, which is what
+ * tells a listening agent (events.ts).
+ */
+export function answerAsk(b: Board, id: string, input: { choice?: number; text?: string }): Board {
+  const card = requireCard(b, id);
+  const ask = card.ask;
+  if (!ask) throw new Error("That card has no open question");
+  const typed = clean(input.text ?? "", 500);
+  const choice = typed ? undefined : input.choice;
+  if (!typed && (choice === undefined || !Number.isInteger(choice) || choice < 0 || choice >= ask.options.length)) throw new Error("Pick one of the options, or type an answer");
+  const answer = typed || ask.options[choice!];
+  const at = now();
+  const { ask: _, ...rest } = card;
+  const line = `ANSWER: ${answer} (asked: ${ask.question}) — ${at.slice(0, 16).replace("T", " ")} UTC`;
+  const next: Card = {
+    ...withTags(rest, (card.tags ?? []).filter((t) => t !== NEEDS_CEO_TAG)),
+    notes: tidyNotes(card.notes ? `${line}\n\n${card.notes}` : line),
+    answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at },
+    updatedAt: at,
+  };
+  return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
+}
+
+/** A card's open question or last answer in one line, for agents. */
+export function describeAsk(c: Card): string {
+  if (c.ask) return ` — ASKING: ${c.ask.question} [${c.ask.options.map((o, i) => `${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`).join(" | ")}]`;
+  if (c.answer) return ` — ANSWERED: "${c.answer.answer}" to "${c.answer.question}"`;
+  return "";
 }
 
 /** Move a card into a lane at `index` among that lane's cards (end when omitted). */
@@ -259,7 +327,7 @@ export function describeBoard(b: Board, tag?: string): string {
       const lines = cards.map(
         (c) =>
           `  - [${c.id}] ${c.title}${c.tags?.length ? ` ${c.tags.map((t) => `#${t}`).join(" ")}` : ""}` +
-          `${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
+          `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
       return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards)\n${lines.join("\n") || "  (empty)"}`;
@@ -283,6 +351,7 @@ export function assertSealedBoard(b: Board): void {
     if (c.notes && !ok(c.notes)) bad("card notes");
     if (c.due !== null && !ok(c.due)) bad("due date");
     for (const t of c.tags ?? []) if (!ok(t)) bad("tag");
+    if (c.ask || c.answer) bad("question");
     for (const a of c.attachments ?? []) if (!ok(a.name) || !ok(a.type)) bad("attachment name");
   }
 }

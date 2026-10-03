@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
+import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
 import { Markdown, toggleTask } from "./Markdown";
 import type { Vault } from "./vault";
@@ -85,6 +86,8 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") close(); }}
         />
+        {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
+        <AskBlock card={card} before={close} />
         {editing ? (
           <label>
             Notes

@@ -11,16 +11,18 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
-import { hasTag, type Board, type Card } from "./shared";
+import { hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
 
 export const AGENT_TAG = "agent";
-export const NEEDS_CEO_TAG = "needs-ceo";
+export { NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
 
 type CardRef = { id: string; title: string; lane: string; tags: string[] };
 export type TaskEvent =
-  | ({ type: "added" | "tagged" | "answered" | "edited" | "moved" | "deleted" } & CardRef)
+  | ({ type: "added" | "tagged" | "edited" | "moved" | "deleted" } & CardRef)
+  // `answer` and `question` are there when the card had a question (ask_ceo) and you answered it with a tap.
+  | ({ type: "answered"; answer?: string; question?: string } & CardRef)
   | { type: "hello"; cards: CardRef[] };
 
 const ref = (b: Board, c: Card): CardRef => ({
@@ -44,7 +46,9 @@ export function agentEvents(before: Board, after: Board): TaskEvent[] {
     else if (hasTag(p, NEEDS_CEO_TAG) && !hasTag(c, NEEDS_CEO_TAG)) type = "answered";
     else if (p.laneId !== c.laneId) type = "moved";
     else if (p.title !== c.title || p.notes !== c.notes || p.due !== c.due || (p.tags ?? []).join() !== (c.tags ?? []).join()) type = "edited";
-    if (type) out.push({ type, ...ref(after, c) } as TaskEvent);
+    if (type === "answered" && p?.ask && c.answer && c.answer.at !== p.answer?.at) {
+      out.push({ type, ...ref(after, c), answer: c.answer.answer, question: c.answer.question });
+    } else if (type) out.push({ type, ...ref(after, c) } as TaskEvent);
   }
   const kept = new Set(after.cards.map((c) => c.id));
   for (const p of before.cards) if (hasTag(p, AGENT_TAG) && !kept.has(p.id)) out.push({ type: "deleted", ...ref(before, p) });

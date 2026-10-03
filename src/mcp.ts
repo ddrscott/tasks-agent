@@ -27,7 +27,11 @@ search_cards to see only those cards. The user can undo any change from the app.
 Several agent sessions can share this board. Before you start work on a card, call claim_card with
 your session id (CLAUDE_CODE_SESSION_ID in Claude Code). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
-release_card when you finish a card or give up on it.`;
+release_card when you finish a card or give up on it.
+
+When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
+options instead of writing the question into the notes. They answer with one tap, and get_board
+then shows the card as ANSWERED.`;
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
@@ -58,6 +62,27 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         lines.push(`  - [${c.cardId}] ${title} — claimed by ${describeSession(view.sessions.find((s) => s.id === c.sessionId) ?? null, view.now)}`);
       }
       return text(lines.length ? `${board}\nClaimed by a live session (skip these unless the session is yours):\n${lines.join("\n")}` : board);
+    });
+
+    server.registerTool("ask_ceo", {
+      title: "Ask the owner",
+      description:
+        "Ask the board's owner to decide something, as a multiple-choice question on a card. The card gets #needs-ceo and " +
+        "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
+        "the notes. The answer comes back in the `answered` event and shows in get_board as ANSWERED. Keep the question to " +
+        "one line, make the options complete actions, and put the reasoning in the card's notes. Don't wait on it: move on to other work.",
+      inputSchema: z.object({
+        id: z.string().describe("Card id like c1a2b"),
+        question: z.string().min(1).max(240).describe("One line, ending in a question mark"),
+        options: z.array(z.string().min(1).max(140)).min(2).max(4).describe("2 to 4 answers to choose from. The owner can also type something else"),
+        recommended: z.number().int().min(1).max(4).optional().describe("Which option you recommend, counting from 1"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    }, async (input: { id: string; question: string; options: string[]; recommended?: number }) => {
+      const no = await locked();
+      if (no) return no;
+      const r = (await agent.askCeo({ ...input, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
+      return r.ok ? text(`${r.summary}\n\nWaiting on the owner:\n${r.board}`) : text(r.summary, true);
     });
 
     server.registerTool("claim_card", {

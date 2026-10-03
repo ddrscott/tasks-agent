@@ -212,8 +212,8 @@ can work the board. The in-app page at **/tasks/connect** (user menu → Connect
 agent) shows the server URL, setup steps for each client, connected apps, and tokens.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`,
-  `search_cards`, the seven board tools from `src/tools.ts`, and `claim_card` and `release_card`
-  (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
+  `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
+  `claim_card` and `release_card` (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
   and `update_card` replaces the whole list.
@@ -263,6 +263,7 @@ agent definition (`~/.claude/agents/lead.md`) does this itself.
 - **Auth.** A personal access token, in the `Authorization` header or, for WebSocket clients
   that can't set headers, as a second subprotocol after `tasks-events`. Never in the URL. The
   Worker checks it and doesn't pass it on.
+- **Answers.** When the card had a question (`// QUESTIONS`), `answered` also carries `answer` and `question`.
 - **Events.** First a `hello` with every open `#agent` card, on each connect, so nothing is lost
   while offline. Then one line per change: `added`, `tagged`, `answered` (`#needs-ceo` came
   off), `edited`, `moved`, `deleted`. Each carries the card's id, title, lane, and tags.
@@ -274,6 +275,41 @@ agent definition (`~/.claude/agents/lead.md`) does this itself.
   Pings are answered without waking the object, so an idle connection costs nothing.
 - **Encrypted boards** have no feed, the same as MCP.
 - The other direction, sessions telling Tasks what they're doing, is `// SESSIONS` below.
+
+## // QUESTIONS
+
+When an agent needs you to decide something, it asks on the card and you answer with one tap.
+
+- **Asking.** The MCP tool `ask_ceo` takes a card id, a one-line question, 2 to 4 options, and
+  optionally which option the agent recommends (counting from 1). The card gets `#needs-ceo` and
+  holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
+  notes. Asking again replaces the question.
+- **Answering.** The card face shows the question with a button per option, the recommended one
+  outlined. The card editor shows the same plus a box for a typed answer. While anything is
+  open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
+  they can be cleared in a row. On a phone the count is all that shows.
+- **What an answer does.** It's one board change and one undo step ("Answer question"): the
+  question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
+  `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
+  Taking `#needs-ceo` off by hand clears the question without an answer.
+- **The agent hears it.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
+  and `question`, so the agent acts on it without reading the card:
+  `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?"}`.
+  `get_board` shows an open question as `ASKING: … [1) … | 2) …]` and the last answer as
+  `ANSWERED: "…" to "…"`, ahead of the notes. An `answered` event without `answer` still means
+  what it always did: you took `#needs-ceo` off yourself.
+- **Undo.** Undoing an answer puts the question back, but nothing tells the agent, the same as
+  every other undo. If it already acted, say so on the card.
+- **Encrypted boards** have no questions. They'd be stored unencrypted, and MCP is closed there.
+
+For a lead agent's instructions:
+
+```
+When you need Scott to decide something, call ask_ceo on the card with a one-line question and
+2 to 4 options that are each a complete action, and say which you recommend. Put the reasoning
+in the notes under the status line. Leave the card in Doing and move on. When an `answered`
+event arrives with an `answer`, act on that answer; without one, reread the card.
+```
 
 ## // SESSIONS
 

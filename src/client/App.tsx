@@ -19,6 +19,7 @@ import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
+import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 
@@ -81,6 +82,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [asksOpen, setAsksOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(() => {
     try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
@@ -292,6 +294,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     return agent.stub.updateCard(id, p);
   }, [agent, out]);
 
+  // One tap on a question an agent asked (ask_ceo). The answer lands on the card and in the agent's event feed.
+  const answerAsk: AnswerFn = useCallback((id, input) => {
+    const ask = boardRef.current?.cards.find((c) => c.id === id)?.ask;
+    const said = input.text?.trim() || (input.choice !== undefined ? ask?.options[input.choice] : "") || "";
+    agent.stub.answerAsk(id, input)
+      .then(() => say(`Answered: ${said.length > 60 ? `${said.slice(0, 60)}…` : said}`, true))
+      .catch((e: Error) => say(e.message));
+  }, [agent, say]);
+
   const setChat = useCallback((open: boolean) => {
     setChatOpen(open);
     try { localStorage.setItem("todo-chat", open ? "open" : "closed"); } catch {}
@@ -367,6 +378,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
 
   return (
+    <AskContext.Provider value={answerAsk}>
     <div className="app">
       <div className="main">
         <header className="topbar">
@@ -397,6 +409,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <IconRedo />
               </button>
             </div>
+            <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             {!board.sealed && (
               <SessionsButton
                 presence={presence} open={sessionsOpen} setOpen={setSessionsOpen}
@@ -491,5 +504,6 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         </div>
       )}
     </div>
+    </AskContext.Provider>
   );
 }

@@ -4,7 +4,7 @@ import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } 
 import { createWorkersAI } from "workers-ai-provider";
 import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
 import * as ops from "./shared";
-import { isSealed, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
+import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type TaskEvent } from "./events";
@@ -210,6 +210,23 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   updateCard(id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) {
     this.mutate("Edit card", (b) => ops.updateCard(b, id, patch));
+  }
+
+  /** Answer the question on a card (ask_ceo): one of its options by index, or typed text. */
+  @callable()
+  answerAsk(id: string, input: { choice?: number; text?: string }) {
+    this.mutate("Answer question", (b) => ops.answerAsk(b, id, input ?? {}));
+  }
+
+  /** An outside agent putting a question on a card, over MCP (mcp.ts). Not callable from the browser. */
+  askCeo(input: { id: string; question: string; options: string[]; recommended?: number }): ToolOutcome {
+    try {
+      const board = this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent");
+      const card = board.cards.find((c) => c.id === input.id)!;
+      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG) };
+    } catch (e) {
+      return { ok: false, summary: (e as Error).message };
+    }
   }
 
   @callable()

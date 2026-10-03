@@ -421,6 +421,36 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 }
 .card-title { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
 .card.is-done .card-title { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+/* A question an agent asked (ask_ceo): one button per option, answered with a tap. */
+.ask { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ask.compact { margin-top: 8px; gap: 6px; }
+.ask-q { display: flex; gap: 8px; font-size: 14px; line-height: 1.4; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.ask.compact .ask-q { font-size: 13px; }
+.ask-mark { flex: none; font-family: var(--font-mono); color: var(--accent); }
+.ask-options { display: flex; flex-direction: column; gap: 6px; }
+.ask-opt {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; min-height: 36px; padding: 8px 10px; text-align: left;
+  background: var(--surface); color: var(--ink); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm);
+  font-size: 13px; line-height: 1.4; transition: border-color .15s, background .15s;
+}
+.ask-opt:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ask-opt.rec { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.ask-n { flex: none; font: 600 11px var(--font-mono); color: var(--muted); }
+.ask-opt.rec .ask-n { color: var(--accent); }
+.ask-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.ask.compact .ask-rec { display: none; }
+.ask-other { display: flex; gap: 6px; }
+.ask-other .field { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px; }
+.asks-btn { border-color: var(--accent); }
+.asks-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--accent); color: var(--accent-ink); border-radius: var(--radius-sm); }
+.asks { width: 420px; max-width: calc(100vw - 32px); max-height: min(72dvh, 640px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+.asks section { display: flex; flex-direction: column; gap: 8px; }
+.asks section + section { padding-top: 14px; border-top: var(--border-w) solid var(--line); }
+.asks-card { align-self: flex-start; max-width: 100%; background: none; border: 0; padding: 0; text-align: left; font: 12px var(--font-mono); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.asks-card:hover { color: var(--accent); }
+.dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
+
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .card-meta:empty { display: none; }
@@ -841,8 +871,13 @@ a.att-name:hover { color: var(--accent); }
 
 @media (max-width: 560px) {
   /* The sessions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
-  .popover:has(> .sessions) { position: fixed; top: 62px; left: 16px; right: 16px; }
-  .sessions { width: auto; max-width: none; }
+  .popover:has(> .sessions), .popover:has(> .asks) { position: fixed; top: 62px; left: 16px; right: 16px; }
+  .sessions, .asks { width: auto; max-width: none; }
+  .asks-btn, .sess-btn { padding: 0 8px; }
+  /* Room for the questions and sessions buttons beside the rest of the bar on a phone. */
+  .topbar { gap: 6px; padding: 12px; }
+  .topbar .actions { gap: 4px; }
+  .ask-opt { min-height: 42px; }
   .search { width: 34px; padding: 0; justify-content: center; }
   .search:focus-within { position: absolute; left: 12px; right: 12px; width: auto; padding: 0 10px; z-index: 20; }
   .search input { width: 0; }
