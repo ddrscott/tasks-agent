@@ -21,6 +21,8 @@ type BoardTool<S extends z.ZodType> = {
 
 const define = <S extends z.ZodType>(t: BoardTool<S>) => t;
 
+const TAGS_HINT = "Short labels like agent or client, lower case, no #. Only when the user or your own instructions call for one.";
+
 export const BOARD_TOOLS = {
   add_cards: define({
     description: "Create one or more cards. Use this for every new task the user mentions.",
@@ -31,10 +33,11 @@ export const BOARD_TOOLS = {
         lane: z.string().optional().describe("Lane name or id; defaults to the first lane"),
         notes: z.string().optional(),
         due: z.string().optional().describe("YYYY-MM-DD, only if the user gave a date"),
+        tags: z.array(z.string()).optional().describe(TAGS_HINT),
       })).min(1),
     }),
     apply: (b, { cards }) => ({
-      board: cards.reduce((acc, c) => ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due }).board, b),
+      board: cards.reduce((acc, c) => ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due, tags: c.tags }).board, b),
       summary: `Added ${quoteList(cards.map((c) => c.title))}`,
     }),
   }),
@@ -51,13 +54,14 @@ export const BOARD_TOOLS = {
     }),
   }),
   update_card: define({
-    description: "Change a card's title, notes, or due date. Pass due: null to clear a due date.",
+    description: "Change a card's title, notes, due date, or tags. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
     label: "Agent edited a card",
     inputSchema: z.object({
       id: z.string(),
       title: z.string().optional(),
       notes: z.string().optional(),
       due: z.string().nullable().optional().describe("YYYY-MM-DD or null"),
+      tags: z.array(z.string()).optional().describe(TAGS_HINT),
     }),
     apply: (b, { id, ...patch }) => ({
       board: ops.updateCard(b, id, patch),
@@ -106,6 +110,7 @@ export const SEARCH_TOOL = {
     mode: z.enum(["hybrid", "keyword", "semantic"]).optional()
       .describe("hybrid (default) mixes exact words and meaning; keyword matches words; semantic matches meaning"),
     lane: z.string().optional().describe("Only search this lane (name or id)"),
+    tag: z.string().optional().describe("Only cards with this tag, like agent"),
     limit: z.number().int().min(1).max(50).optional().describe("Most results to return, default 10"),
   }),
 };

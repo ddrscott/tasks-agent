@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Card, Lane } from "../shared";
+import { cleanTag, type Card, type Lane } from "../shared";
 import { Attachments } from "./Attachments";
 import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
@@ -9,7 +9,7 @@ type Props = {
   lanes: Lane[];
   /** Set on an encrypted board: files are encrypted before upload and decrypted to view. */
   vault: Vault | null;
-  onSave(patch: { title?: string; notes?: string; due?: string | null }): void;
+  onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
   onMove(laneId: string): void;
   onDelete(): void;
   onRemoveAttachment(id: string): void;
@@ -25,8 +25,9 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
   const [due, setDue] = useState(card.due ?? "");
-  const latest = useRef({ title, notes, due });
-  latest.current = { title, notes, due };
+  const [tags, setTags] = useState((card.tags ?? []).join(" "));
+  const latest = useRef({ title, notes, due, tags });
+  latest.current = { title, notes, due, tags };
 
   useEffect(() => {
     ref.current?.showModal();
@@ -43,11 +44,13 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
   }, [notes]);
 
   function close() {
-    const { title: t, notes: n, due: d } = latest.current;
-    const patch: { title?: string; notes?: string; due?: string | null } = {};
+    const { title: t, notes: n, due: d, tags: g } = latest.current;
+    const patch: { title?: string; notes?: string; due?: string | null; tags?: string[] } = {};
     if (t.trim() && t.trim() !== card.title) patch.title = t;
     if (n !== card.notes) patch.notes = n;
     if ((d || null) !== card.due) patch.due = d || null;
+    const nextTags = [...new Set(g.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
+    if (nextTags.join(" ") !== (card.tags ?? []).join(" ")) patch.tags = nextTags;
     if (Object.keys(patch).length) onSave(patch);
     onClose();
   }
@@ -80,6 +83,14 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
+        <label>
+          Tags
+          <input
+            className="field mono" value={tags} placeholder="agent client" spellCheck={false} autoCapitalize="off"
+            onChange={(e) => setTags(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") close(); }}
+          />
+        </label>
         <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}

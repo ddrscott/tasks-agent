@@ -80,6 +80,7 @@ export async function sealWholeBoard(plain: Board, vault: Vault, progress: Progr
       title: await seal(c.title),
       notes: c.notes ? await seal(c.notes) : "",
       due: c.due === null ? null : await seal(c.due),
+      ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}),
       ...(c.attachments ? { attachments } : {}),
     });
   }

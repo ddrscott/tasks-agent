@@ -45,6 +45,7 @@ export class Vault {
       title: await this.field(c.title),
       notes: await this.field(c.notes),
       due: c.due === null ? null : await this.field(c.due),
+      ...(c.tags ? { tags: await Promise.all(c.tags.map(this.field)) } : {}),
       ...(c.attachments ? {
         attachments: await Promise.all(c.attachments.map(async (a): Promise<Attachment> => ({
           ...a, name: await this.field(a.name), type: await this.field(a.type),

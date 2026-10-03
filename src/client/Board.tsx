@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useRef, useState } from "react";
-import { laneCards, type Board, type Card, type Lane } from "../shared";
+import { hasTag, laneCards, type Board, type Card, type Lane } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 
 export type Actions = {
@@ -22,6 +22,9 @@ type Props = {
   board: Board;
   actions: Actions;
   flash: Set<string>;
+  /** Cards without this tag fade back. */
+  tagFilter: string | null;
+  onTag(tag: string): void;
   quickAddLane: string | null;
   setQuickAddLane(id: string | null): void;
   onOpen(card: Card): void;
@@ -206,7 +209,10 @@ function LaneView(props: Props & {
       <SortableContext id={lane.id} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="cards" ref={setNodeRef}>
           {cards.map((c) => (
-            <SortableCard key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.lanes.length > 1} />
+            <SortableCard
+              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.lanes.length > 1}
+              faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
+            />
           ))}
           {cards.length === 0 && !adding && (
             <div className="lane-empty">{props.index === 0 ? "Nothing here yet. Add a card, or ask the assistant." : "Drag cards here"}</div>
@@ -219,7 +225,10 @@ function LaneView(props: Props & {
   );
 }
 
-function SortableCard(p: { card: Card; isDone: boolean; flash: boolean; canToggle: boolean; onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void }) {
+function SortableCard(p: {
+  card: Card; isDone: boolean; flash: boolean; canToggle: boolean; faded: boolean; tagFilter: string | null;
+  onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void; onTag(tag: string): void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id });
   return (
     <div
@@ -241,9 +250,12 @@ function SortableCard(p: { card: Card; isDone: boolean; flash: boolean; canToggl
   );
 }
 
-function CardFace(p: { card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; onToggle?(c: Card): void }) {
+function CardFace(p: {
+  card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null;
+  onToggle?(c: Card): void; onTag?(tag: string): void;
+}) {
   const { card } = p;
-  const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging"].filter(Boolean).join(" ");
+  const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
       {/* Shown on hover and keyboard focus only; the lane already says whether a card is done. */}
@@ -259,6 +271,15 @@ function CardFace(p: { card: Card; isDone: boolean; flash?: boolean; overlay?: b
       <div>
         <div className="card-title">{card.title}</div>
         <div className="card-meta">
+          {card.tags?.map((t) => (
+            <button
+              key={t} className={`chip tag${p.tagFilter === t ? " active" : ""}`} tabIndex={-1}
+              title={p.tagFilter === t ? "Show every card" : `Show only #${t}`}
+              onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); p.onTag?.(t); }}
+            >#{t}</button>
+          ))}
           {card.due && <DueChip due={card.due} done={p.isDone} />}
           {card.notes && <span className="chip" title={card.notes}><IconNotes />notes</span>}
           {!!card.attachments?.length && (

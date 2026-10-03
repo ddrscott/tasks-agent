@@ -153,8 +153,9 @@ export class CardIndex {
     const limit = input.limit ?? 10;
     const lane = input.lane ? ops.findLane(board, input.lane) : undefined;
     if (input.lane && !lane) throw new Error(`No lane "${input.lane}". Lanes: ${board.lanes.map((l) => l.name).join(", ")}`);
-    const cards = new Map(board.cards.filter((c) => !lane || c.laneId === lane.id).map((c) => [c.id, c]));
-    const pool = lane ? Math.max(limit * 4, 50) : limit * 2; // filter after ranking, so over-fetch
+    const tag = input.tag ? ops.cleanTag(input.tag) : "";
+    const cards = new Map(board.cards.filter((c) => (!lane || c.laneId === lane.id) && (!tag || ops.hasTag(c, tag))).map((c) => [c.id, c]));
+    const pool = lane || tag ? Math.max(limit * 4, 50) : limit * 2; // filter after ranking, so over-fetch
 
     const kw = mode === "semantic" ? [] : this.keyword(input.query, pool, mode === "keyword").filter((r) => cards.has(r.card_id));
     let sem: string[] = [];

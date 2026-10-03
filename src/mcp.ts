@@ -8,6 +8,7 @@
 // any other change.
 
 import { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import { getAgentByName } from "agents";
 import { createMcpHandler } from "agents/mcp/server";
 import type { User } from "./auth";
@@ -19,7 +20,8 @@ const INSTRUCTIONS = `This is the user's personal task board, laid out as kanban
 lanes, cards, and card ids, or search_cards to find specific cards on a big board, then use the other
 tools to change it. The last lane is the
 done lane: move a card there when the user finished it rather than deleting it. Dates
-are YYYY-MM-DD. The user can undo any change from the app.`;
+are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
+search_cards to see only those cards. The user can undo any change from the app.`;
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
@@ -33,9 +35,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("get_board", {
       title: "Get board",
-      description: "Show every lane and card on the board, with ids, due dates, and notes.",
+      description: "Show every lane and card on the board, with ids, due dates, tags, and notes. Pass tag to list only the cards carrying it.",
+      inputSchema: z.object({ tag: z.string().optional().describe("Only cards with this tag, like agent") }),
       annotations: { readOnlyHint: true },
-    }, async () => (await locked()) ?? text(await agent.describe()));
+    }, async (input: { tag?: string }) => (await locked()) ?? text(await agent.describe(input?.tag)));
 
     server.registerTool(SEARCH_TOOL.name, {
       title: "Search cards",

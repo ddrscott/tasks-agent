@@ -428,6 +428,12 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .chip.today { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .chip.overdue { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
 .chip svg { width: 11px; height: 11px; }
+button.chip.tag { background: none; cursor: pointer; color: var(--ink); }
+button.chip.tag:hover { border-color: var(--accent); }
+.chip.tag.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.filter-chip { height: 28px; padding: 0 8px; }
+.card.faded { opacity: 0.35; }
+.card.faded:hover, .card.faded:focus-within { opacity: 0.7; }
 
 /* Mark done / reopen: hidden until the card is hovered or keyboard-focused. The lane
    carries the status, so a control on every card would only be noise. */

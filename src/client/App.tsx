@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, type Board, type Card } from "../shared";
+import { clean, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -16,7 +16,7 @@ import { recallKey, Vault } from "./vault";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
-import { IconChat, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
+import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { applyTheme, readCachedTheme } from "./themes";
 import { ThemePicker } from "./ThemePicker";
@@ -74,6 +74,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
   const [editing, setEditing] = useState<string | null>(null);
+  /** Show only cards with this tag; the rest fade back. Per tab, not saved. */
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -276,11 +278,12 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     clearLane: (id) => agent.stub.clearLane(id),
   }), [agent, out, laneClash]);
 
-  const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null }) => {
+  const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
     const p: typeof patch = {};
     if (patch.title !== undefined) p.title = await out(clean(patch.title, 200));
     if (patch.notes !== undefined) p.notes = patch.notes ? await out(patch.notes.slice(0, 4000)) : "";
     if (patch.due !== undefined) p.due = patch.due ? await out(patch.due) : null;
+    if (patch.tags !== undefined) p.tags = await Promise.all(tidyTags(patch.tags).map(out));
     return agent.stub.updateCard(id, p);
   }, [agent, out]);
 
@@ -373,6 +376,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             {dueToday > 0 && <span className="due-today"><b>{dueToday}</b> due today</span>}
             {overdue > 0 && <span className="overdue"><b>{overdue}</b> overdue</span>}
           </div>
+          {tagFilter && (
+            <button className="chip tag active filter-chip" onClick={() => setTagFilter(null)} title="Show every card">
+              #{tagFilter}<IconClose />
+            </button>
+          )}
           <span className="spacer" />
           <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
@@ -415,6 +423,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
         <BoardView
           board={board} actions={actions} flash={flash}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onOpen={(c: Card) => setEditing(c.id)}
           onOptimistic={(b) => setBoard(b)}

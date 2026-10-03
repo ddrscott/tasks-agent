@@ -28,9 +28,11 @@ export type Card = {
   createdAt: string;
   updatedAt: string;
   attachments?: Attachment[]; // missing on cards made before attachments existed
+  tags?: string[]; // missing on cards made before tags existed, and on cards with none
 };
 
 export const MAX_ATTACHMENTS_PER_CARD = 20;
+export const MAX_TAGS_PER_CARD = 10;
 
 export type Lane = { id: string; name: string };
 
@@ -94,16 +96,39 @@ export const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().s
 const tidy = (s: string, max: number) => (isSealed(s) ? s : clean(s, max));
 const tidyNotes = (s: string) => (isSealed(s) ? s : s.slice(0, 4000));
 
+/** One tag in its plain form: lower case, no leading #, spaces as dashes, letters, digits, - and _ only. */
+export const cleanTag = (s: string) =>
+  s.trim().replace(/^#+/, "").toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 32);
+
+/** Tidy a tag list: clean each plain tag, drop blanks and repeats. Sealed tags pass through. */
+export function tidyTags(tags: string[]): string[] {
+  const out: string[] = [];
+  for (const t of tags) {
+    const v = isSealed(t) ? t : cleanTag(t);
+    if (v && !out.includes(v)) out.push(v);
+  }
+  if (out.length > MAX_TAGS_PER_CARD) throw new Error(`A card can have ${MAX_TAGS_PER_CARD} tags`);
+  return out;
+}
+
+/** Set a card's tags, leaving the field off when there are none. */
+function withTags(c: Card, tags: string[]): Card {
+  const { tags: _, ...rest } = c;
+  return tags.length ? { ...rest, tags } : rest;
+}
+
+export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
+
 export function addCard(
   b: Board,
-  input: { title: string; laneId?: string; notes?: string; due?: string | null; top?: boolean },
+  input: { title: string; laneId?: string; notes?: string; due?: string | null; tags?: string[]; top?: boolean },
 ): { board: Board; card: Card } {
   const title = tidy(input.title, 200);
   if (!title) throw new Error("A card needs a title");
   const lane = input.laneId ? requireLane(b, input.laneId) : b.lanes[0];
   if (!lane) throw new Error("Add a lane first");
   const t = now();
-  const card: Card = {
+  const card: Card = withTags({
     id: shortId("c", new Set(b.cards.map((c) => c.id))),
     title,
     notes: tidyNotes(input.notes ?? ""),
@@ -111,7 +136,7 @@ export function addCard(
     due: validDue(input.due),
     createdAt: t,
     updatedAt: t,
-  };
+  }, tidyTags(input.tags ?? []));
   const cards = [...b.cards];
   if (input.top) {
     const first = cards.findIndex((c) => c.laneId === lane.id);
@@ -123,10 +148,10 @@ export function addCard(
 export function updateCard(
   b: Board,
   id: string,
-  patch: { title?: string; notes?: string; due?: string | null },
+  patch: { title?: string; notes?: string; due?: string | null; tags?: string[] },
 ): Board {
   const card = requireCard(b, id);
-  const next = { ...card, updatedAt: now() };
+  let next = { ...card, updatedAt: now() };
   if (patch.title !== undefined) {
     const title = tidy(patch.title, 200);
     if (!title) throw new Error("A card needs a title");
@@ -134,6 +159,7 @@ export function updateCard(
   }
   if (patch.notes !== undefined) next.notes = tidyNotes(patch.notes);
   if (patch.due !== undefined) next.due = validDue(patch.due);
+  if (patch.tags !== undefined) next = withTags(next, tidyTags(patch.tags));
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
 }
 
@@ -225,24 +251,25 @@ function validDue(due: string | null | undefined): string | null {
   return due;
 }
 
-/** Plain-text board for the model's context. */
-export function describeBoard(b: Board): string {
+/** Plain-text board for the model's context. With `tag`, only the cards carrying it. */
+export function describeBoard(b: Board, tag?: string): string {
   return b.lanes
     .map((l) => {
-      const cards = laneCards(b, l.id);
+      const cards = laneCards(b, l.id).filter((c) => !tag || hasTag(c, tag));
       const lines = cards.map(
         (c) =>
-          `  - [${c.id}] ${c.title}${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
+          `  - [${c.id}] ${c.title}${c.tags?.length ? ` ${c.tags.map((t) => `#${t}`).join(" ")}` : ""}` +
+          `${c.due ? ` (due ${c.due})` : ""}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
-      return `${l.name} (lane id ${l.id}, ${cards.length} cards)\n${lines.join("\n") || "  (empty)"}`;
+      return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards)\n${lines.join("\n") || "  (empty)"}`;
     })
     .join("\n");
 }
 
 /**
  * On an encrypted board, refuse anything that isn't ciphertext: lane names, titles, notes,
- * due dates, attachment names and types. This is what stops plaintext from reaching an
+ * due dates, tags, attachment names and types. This is what stops plaintext from reaching an
  * encrypted board by any path (an outside agent, the cloud model, or a client bug).
  */
 export function assertSealedBoard(b: Board): void {
@@ -255,6 +282,7 @@ export function assertSealedBoard(b: Board): void {
     if (!ok(c.title)) bad("card title");
     if (c.notes && !ok(c.notes)) bad("card notes");
     if (c.due !== null && !ok(c.due)) bad("due date");
+    for (const t of c.tags ?? []) if (!ok(t)) bad("tag");
     for (const a of c.attachments ?? []) if (!ok(a.name) || !ok(a.type)) bad("attachment name");
   }
 }
@@ -272,6 +300,6 @@ export const hasSealedText = (s: string) => new RegExp(SEALED_TOKEN_RE.source).t
 export function boardTexts(b: Board): string[] {
   return [
     ...b.lanes.map((l) => l.name),
-    ...b.cards.flatMap((c) => [c.title, c.notes, c.due ?? "", ...(c.attachments ?? []).flatMap((a) => [a.name, a.type])]),
+    ...b.cards.flatMap((c) => [c.title, c.notes, c.due ?? "", ...(c.tags ?? []), ...(c.attachments ?? []).flatMap((a) => [a.name, a.type])]),
   ].filter(Boolean);
 }

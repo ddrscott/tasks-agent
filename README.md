@@ -53,6 +53,12 @@ run ahead of whatever serves the zone.
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
   screens.
+- **Tags.** A card can carry up to 10 tags, like `#agent` for work an AI agent owns.
+  Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
+  (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
+  Click a tag on a card to fade out every card without it; click again, or the chip in
+  the top bar, to clear. The filter belongs to the tab and isn't saved. On an
+  encrypted board each tag is its own JWE like every other field.
 - **Live sync.** Board state is Agents SDK synced state, so every open tab
   updates at once. Changes animate with the View Transitions API. Cards the
   assistant touches flash briefly.
@@ -189,7 +195,9 @@ agent) shows the server URL, setup steps for each client, connected apps, and to
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`,
   `search_cards`, and the seven board tools from `src/tools.ts`. MCP changes sync live and are undoable,
-  one undo step per call.
+  one undo step per call. `get_board` and `search_cards` take an optional `tag`, so an agent
+  can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
+  and `update_card` replaces the whole list.
 - **OAuth (most clients).** The client only needs the URL. It discovers the OAuth
   server, registers itself (Dynamic Client Registration, or a Client ID Metadata
   Document), and sends the person to `/tasks/oauth/authorize`. They sign in if

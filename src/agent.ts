@@ -191,7 +191,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   @callable()
-  updateCard(id: string, patch: { title?: string; notes?: string; due?: string | null }) {
+  updateCard(id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) {
     this.mutate("Edit card", (b) => ops.updateCard(b, id, patch));
   }
 
@@ -309,9 +309,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** The board as plain text, the same view the chat model gets. */
-  describe(): string {
+  describe(tag?: string): string {
     if (this.state.sealed) return SEALED_NOTICE;
-    return ops.describeBoard(this.state);
+    return ops.describeBoard(this.state, tag ? ops.cleanTag(tag) : undefined);
   }
 
   /**
@@ -493,16 +493,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         if ((obj.customMetadata?.sealed === "1") !== wantSealed) throw new Error("An attachment is in the wrong form. Try again.");
         attachments.push({ id: a.id, name: String(a.name), type: String(a.type), size: obj.size, addedAt: String(a.addedAt ?? was.createdAt) });
       }
+      const tags = Array.isArray(c.tags) ? c.tags.map(String) : [];
+      if (tags.length > ops.MAX_TAGS_PER_CARD) throw new Error(`A card can have ${ops.MAX_TAGS_PER_CARD} tags`);
       cards.push({
         id: c.id, laneId: c.laneId, title: String(c.title), notes: String(c.notes ?? ""), due: c.due == null ? null : String(c.due),
         createdAt: was.createdAt, updatedAt: was.updatedAt, ...(attachments.length || was.attachments ? { attachments } : {}),
+        ...(tags.length ? { tags } : {}),
       });
     }
     const lanes = raw.lanes.map((l) => ({ id: l.id, name: String(l.name) }));
     if (!wantSealed) {
       // Plain text follows the same limits as any other edit.
       for (const l of lanes) l.name = ops.clean(l.name, 40);
-      for (const c of cards) { c.title = ops.clean(c.title, 200); c.notes = c.notes.slice(0, 4000); }
+      for (const c of cards) {
+        c.title = ops.clean(c.title, 200); c.notes = c.notes.slice(0, 4000);
+        if (c.tags) { const t = ops.tidyTags(c.tags); if (t.length) c.tags = t; else delete c.tags; }
+      }
       if (lanes.some((l) => !l.name) || cards.some((c) => !c.title)) throw new Error("A lane or card came back empty.");
     }
     return { lanes, cards, theme: cur.theme, themeChosen: cur.themeChosen, ...(seal ? { sealed: seal } : {}) };
