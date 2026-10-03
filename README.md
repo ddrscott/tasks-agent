@@ -298,12 +298,12 @@ hooks already there). It uses the same token file as `// AGENT_EVENTS`:
 ```json
 {
   "hooks": {
-    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
-    "Notification":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
-    "Stop":              [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "Notification":      [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }],
     "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "node ~/code/todo-agent/scripts/tasks-presence.mjs" }] }]
   }
 }
@@ -311,8 +311,11 @@ hooks already there). It uses the same token file as `// AGENT_EVENTS`:
 
 `scripts/tasks-presence.mjs` reads the hook's JSON on stdin and posts about 200 bytes: session
 id, folder, event name, tool name, file path, and notification text. The rest of the payload
-never leaves the machine. It runs in the background (`async`), never prints, always exits 0,
-gives up after 3 seconds, and sends tool-use events at most once every 30 seconds per session.
+never leaves the machine. It never prints, always exits 0, gives up after 3 seconds, and sends
+tool-use events at most once every 30 seconds per session. The two events that fire constantly
+(`UserPromptSubmit`, `PostToolUse`) run in the background with `async`. The rest run in line,
+which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
+`claude -p` run exits, so the row would be left saying "working".
 The machine name is the host's name, or `TASKS_MACHINE`. On a box without this repo, copy the one
 file; it has no dependencies beyond Node 22.
 
