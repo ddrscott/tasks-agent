@@ -17,31 +17,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 
-export type SessionState = "working" | "needs-input" | "idle";
+import { STALE_MS, type Claim, type PresenceView, type Session, type SessionState } from "./presence-shared";
 
-export type Session = {
-  id: string;
-  project: string;
-  machine: string;
-  /** What kind of agent it is, like "lead", when the session says. */
-  agent: string;
-  state: SessionState;
-  /** One line: the last tool, or what it's waiting on. */
-  last: string;
-  /** The folder it runs in, so `cd <cwd> && claude --resume <id>` can be copied. */
-  cwd: string;
-  /** A Remote Control link, when the session sent one. */
-  link: string;
-  startedAt: number;
-  seenAt: number;
-};
+export { STALE_MS, type Claim, type PresenceView, type Session, type SessionState };
 
-export type Claim = { cardId: string; sessionId: string; agent: string; claimedAt: number };
-
-export type PresenceView = { sessions: Session[]; claims: Claim[]; now: number };
-
-/** After this long without a report, the panel marks a session stale. */
-export const STALE_MS = 5 * 60 * 1000;
 /** A claim holds this long after its session was last seen. Longer than stale, so a lead that's thinking keeps its card. */
 export const CLAIM_LIVE_MS = 15 * 60 * 1000;
 /** Rows nobody has updated in this long are deleted. */
