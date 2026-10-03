@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { Attachments } from "./Attachments";
+import { Markdown, toggleTask } from "./Markdown";
 import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
@@ -26,6 +27,8 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
   const [notes, setNotes] = useState(card.notes);
   const [due, setDue] = useState(card.due ?? "");
   const [tags, setTags] = useState((card.tags ?? []).join(" "));
+  // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
+  const [editing, setEditing] = useState(!card.notes.trim());
   const latest = useRef({ title, notes, due, tags });
   latest.current = { title, notes, due, tags };
 
@@ -41,7 +44,22 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
     if (!el || CSS.supports("field-sizing", "content")) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-  }, [notes]);
+  }, [notes, editing]);
+
+  // When the person asks to edit, focus the textarea with the cursor at the end of the note.
+  // A card that opens with no notes shows the textarea too, but leaves focus on the title.
+  const wantFocus = useRef(false);
+  function edit() {
+    wantFocus.current = true;
+    setEditing(true);
+  }
+  useEffect(() => {
+    const el = notesRef.current;
+    if (!editing || !el || !wantFocus.current) return;
+    wantFocus.current = false;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
 
   function close() {
     const { title: t, notes: n, due: d, tags: g } = latest.current;
@@ -67,10 +85,45 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") close(); }}
         />
-        <label>
-          Notes
-          <textarea ref={notesRef} className="field" value={notes} placeholder="Details, links, anything…" onChange={(e) => setNotes(e.target.value)} />
-        </label>
+        {editing ? (
+          <label>
+            Notes
+            <textarea
+              ref={notesRef} className="field" value={notes} placeholder="Details, links, anything…"
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={(e) => {
+                // A click on Close, Mark done, or Delete is about to end the dialog; swapping the
+                // view first would move the button out from under the pointer.
+                if (e.relatedTarget instanceof Element && e.relatedTarget.closest(".dialog-foot")) return;
+                if (latest.current.notes.trim()) setEditing(false);
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && latest.current.notes.trim()) setEditing(false); }}
+            />
+          </label>
+        ) : (
+          <div className="notes-read">
+            <div className="notes-head">
+              <span id="notes-label">Notes</span>
+              <button type="button" className="notes-edit" onClick={edit}>Edit</button>
+            </div>
+            <div
+              className="field md-view" tabIndex={0} role="group" aria-labelledby="notes-label"
+              title="Click to edit"
+              onClick={(e) => {
+                // Links and checkboxes do their own thing, and dragging to select text isn't a click.
+                if ((e.target as Element).closest("a, input")) return;
+                if (getSelection()?.toString()) return;
+                edit();
+              }}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === "e") { e.preventDefault(); edit(); }
+              }}
+            >
+              <Markdown text={notes} onToggle={(line) => setNotes((n) => toggleTask(n, line))} />
+            </div>
+          </div>
+        )}
         <div className="dialog-row">
           <label>
             Lane
