@@ -146,6 +146,7 @@ export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
   const { sessions, claims, now } = presence;
   const live = sessions.filter((s) => !isStale(s, now));
   const waiting = live.filter((s) => s.state === "needs-input").length;
+  const summary = waiting ? `${waiting} session${waiting === 1 ? "" : "s"} waiting on you` : `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {
     const by = new Map<string, Session[]>();
     for (const s of [...sessions].sort(order(now))) by.set(s.project, [...(by.get(s.project) ?? []), s]);
@@ -156,14 +157,15 @@ export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
   return (
     <div className="anchor">
       <button
-        className={`btn sess-btn${waiting ? " waiting" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}
-        title={waiting ? `${waiting} session${waiting === 1 ? "" : "s"} waiting on you` : `${live.length} live session${live.length === 1 ? "" : "s"}`}
+        className={`btn sess-btn${waiting ? " waiting" : ""}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
+        // The label can be down to a bare count when the bar is tight, so the name is spelled out.
+        title={summary} aria-label={`Sessions: ${summary}`}
       >
         <IconSessions /><span className="hide-sm label">Sessions</span>
         {sessions.length > 0 && <span className="sess-count">{waiting || live.length}</span>}
       </button>
       {open && (
-        <Popover onClose={() => setOpen(false)}>
+        <Popover label="Sessions" onClose={() => setOpen(false)}>
           <div className="sessions">
             <h2 className="h">SESSIONS</h2>
             {groups.length === 0 && (

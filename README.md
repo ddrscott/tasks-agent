@@ -89,6 +89,14 @@ run ahead of whatever serves the zone.
   summary goes, and last the tag filter chip moves to its own row under the bar. A phone
   always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
   attribute, and `styles.css` does the rest.
+- **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
+  `aria-label` (the account button is "Account", not the email address). The account and
+  lane menus are `role="menu"` with `menuitem` children, the other popovers are
+  `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
+  popover moves focus into it, Esc or a click outside gives focus back to its button, and in
+  a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
+  `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
+  it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.

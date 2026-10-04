@@ -276,7 +276,7 @@ export function Connect({ onBack }: { onBack(): void }) {
                     <tr key={g.id}>
                       <td>{g.name}</td>
                       <td className="mono">{ago(g.createdAt)}</td>
-                      <td><button className="btn danger" onClick={() => void disconnect(g)} title={`Disconnect ${g.name}`}><IconTrash /><span className="hide-sm">Disconnect</span></button></td>
+                      <td><button className="btn danger" onClick={() => void disconnect(g)} title={`Disconnect ${g.name}`} aria-label={`Disconnect ${g.name}`}><IconTrash /><span className="hide-sm">Disconnect</span></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -317,7 +317,7 @@ export function Connect({ onBack }: { onBack(): void }) {
                       <td>{t.name}</td>
                       <td className="mono">{ago(t.createdAt)}</td>
                       <td className="mono">{ago(t.lastUsedAt)}</td>
-                      <td><button className="btn danger" onClick={() => void revoke(t)} title={`Revoke ${t.name}`}><IconTrash /><span className="hide-sm">Revoke</span></button></td>
+                      <td><button className="btn danger" onClick={() => void revoke(t)} title={`Revoke ${t.name}`} aria-label={`Revoke ${t.name}`}><IconTrash /><span className="hide-sm">Revoke</span></button></td>
                     </tr>
                   ))}
                 </tbody>

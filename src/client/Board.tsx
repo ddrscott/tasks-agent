@@ -4,7 +4,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { hasTag, laneCards, SORTS, sortedIds, type Board, type Card, type Lane, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
@@ -197,28 +197,28 @@ function LaneView(props: Props & {
         <span className="spacer" />
         <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
         <div className="anchor">
-          <button className="btn ghost icon" title="Lane options" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><IconDots /></button>
+          <button className="btn ghost icon" title="Lane options" aria-label={`${lane.name} lane options`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><IconDots /></button>
           {menu && (
-            <Popover onClose={() => setMenu(false)}>
+            <Popover menu label={`${lane.name} lane options`} onClose={() => setMenu(false)}>
               <div className="menu">
-                <button onClick={() => { setMenu(false); setRenaming(true); }}>Rename</button>
-                {props.index > 0 && <button onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
-                {props.index < props.lanes.length - 1 && <button onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
+                <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename</button>
+                {props.index > 0 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
+                {props.index < props.lanes.length - 1 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
                 {cards.length > 1 && (
                   <div className="menu-group" role="group" aria-label="Sort by">
                     <div className="menu-label">Sort by</div>
                     {SORTS.map((o) => (
-                      <button key={o.by} onClick={() => sort(o.by, o.say)}>{o.label}</button>
+                      <button key={o.by} role="menuitem" onClick={() => sort(o.by, o.say)}>{o.label}</button>
                     ))}
                   </div>
                 )}
                 {cards.length > 0 && (
-                  <button className="danger" onClick={() => { setMenu(false); void actions.clearLane(lane.id).then(() => props.toast(`Cleared ${cards.length} from ${lane.name}`, true)); }}>
+                  <button className="danger" role="menuitem" onClick={() => { setMenu(false); void actions.clearLane(lane.id).then(() => props.toast(`Cleared ${cards.length} from ${lane.name}`, true)); }}>
                     {props.isDone ? "Clear finished cards" : "Clear all cards"}
                   </button>
                 )}
                 {props.lanes.length > 1 && (
-                  <button className="danger" onClick={() => { setMenu(false); void actions.deleteLane(lane.id).then(() => props.toast(`Deleted lane ${lane.name}`, true)); }}>Delete lane</button>
+                  <button className="danger" role="menuitem" onClick={() => { setMenu(false); void actions.deleteLane(lane.id).then(() => props.toast(`Deleted lane ${lane.name}`, true)); }}>Delete lane</button>
                 )}
               </div>
             </Popover>
@@ -376,11 +376,11 @@ function AddLane({ onAdd, full }: { onAdd(name: string): Promise<unknown>; full:
   if (full) return null;
   return (
     <div className="add-lane anchor">
-      <button className="btn icon" title="Add lane" aria-label="Add lane" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button className="btn icon" title="Add lane" aria-label="Add lane" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <IconPlus />
       </button>
       {open && (
-        <Popover onClose={() => setOpen(false)}>
+        <Popover label="Add lane" onClose={() => setOpen(false)}>
           <div className="add-lane-form">
             <input
               className="field" autoFocus placeholder="New lane, e.g. Waiting" maxLength={40} aria-label="New lane name"
@@ -396,7 +396,21 @@ function AddLane({ onAdd, full }: { onAdd(name: string): Promise<unknown>; full:
   );
 }
 
-export function Popover({ children, onClose }: { children: React.ReactNode; onClose(): void }) {
+type PopoverProps = {
+  children: React.ReactNode;
+  onClose(): void;
+  /** What a screen reader calls it. */
+  label: string;
+  /** A list of commands: role="menu", with role="menuitem" on the buttons inside. Anything else is a dialog. */
+  menu?: boolean;
+};
+
+/**
+ * A panel that hangs off the button before it. Opening it moves keyboard focus inside, and closing
+ * it gives focus back, so a keyboard or screen reader user lands in what they just opened and
+ * isn't dropped at the top of the page afterwards.
+ */
+export function Popover({ children, onClose, label, menu }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const down = (e: PointerEvent) => { if (!ref.current?.parentElement?.contains(e.target as Node)) onClose(); };
@@ -405,5 +419,55 @@ export function Popover({ children, onClose }: { children: React.ReactNode; onCl
     document.addEventListener("keydown", key);
     return () => { document.removeEventListener("pointerdown", down); document.removeEventListener("keydown", key); };
   }, [onClose]);
-  return <div className="popover" ref={ref}>{children}</div>;
+
+  // A layout effect, so its cleanup runs while the panel is still in the page and can tell
+  // whether focus was inside it.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const at = document.activeElement;
+    const opener = at instanceof HTMLElement && at !== document.body ? at : null;
+    const button = el.parentElement?.querySelector<HTMLElement>(":scope > [aria-expanded]") ?? null;
+    // A field with autoFocus already has it. Otherwise: a menu's first item, the option that's
+    // already picked (the theme list previews whatever takes focus), or the panel itself, so a
+    // long list doesn't scroll to its first link.
+    if (!el.contains(at)) {
+      const first = menu
+        ? el.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
+        : el.querySelector<HTMLElement>('[aria-checked="true"]');
+      (first ?? el).focus();
+    }
+    return () => {
+      // Focus that has already moved somewhere else on purpose stays there.
+      const now = document.activeElement;
+      if (now && now !== document.body && !el.contains(now)) return;
+      // Back to whatever had focus when it opened, or the button it hangs off. The opener can be
+      // gone or hidden by now (the Theme button on a phone), and focus() on it does nothing then.
+      for (const target of [opener, button]) {
+        if (!target?.isConnected) continue;
+        target.focus();
+        if (document.activeElement === target) return;
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (!menu) return;
+    // Tab leaves a menu, the way it does in a native one; focus goes back to the button first.
+    if (e.key === "Tab") { onClose(); return; }
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (!step && e.key !== "Home" && e.key !== "End") return;
+    const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + step + items.length) % items.length;
+    items[next].focus();
+  }
+
+  return (
+    <div className="popover" ref={ref} role={menu ? "menu" : "dialog"} aria-label={label} tabIndex={-1} onKeyDown={onKeyDown}>
+      {children}
+    </div>
+  );
 }

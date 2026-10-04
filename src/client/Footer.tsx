@@ -24,14 +24,14 @@ function Version() {
   return (
     <span className="anchor version">
       <button
-        className="version-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}
+        className="version-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}
         title={`Built ${built.toLocaleString()}. Click for recent changes`}
       >
         <span className="version-mark" aria-hidden="true">$</span>
         {version ? `v${version} · ${sha}` : `${sha} · ${short(built)}`}
       </button>
       {open && (
-        <Popover onClose={() => setOpen(false)}>
+        <Popover label="What's new" onClose={() => setOpen(false)}>
           <div className="changes">
             <h2 className="h">WHATS_NEW</h2>
             {changes.length === 0 && <p>No changes written up yet.</p>}

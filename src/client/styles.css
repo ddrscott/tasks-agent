@@ -731,6 +731,8 @@ a.att-name:hover { color: var(--accent-text); }
   box-shadow: var(--shadow-lift); animation: pop .15s ease-out;
 }
 .anchor { position: relative; }
+/* A popover or dialog takes focus itself when nothing inside should. It just appeared, so it needs no ring. */
+.popover:focus, dialog:focus { outline: none; }
 
 .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px; width: 390px; max-width: calc(100vw - 32px); }
 .theme-grid .h { grid-column: 1 / -1; margin-bottom: 2px; }

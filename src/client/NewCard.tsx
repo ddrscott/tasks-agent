@@ -160,7 +160,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
                   <span className="att-thumb"><span>{busy ? "$" : (f.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span></span>
                   <span className="att-name">{f.name}</span>
                   <span className="att-size">{busy ? "uploading…" : formatBytes(f.size)}</span>
-                  <button type="button" className="btn ghost icon" title={`Remove ${f.name}`} disabled={busy} onClick={() => setFiles((all) => all.filter((_, j) => j !== i))}><IconClose /></button>
+                  <button type="button" className="btn ghost icon" title={`Remove ${f.name}`} aria-label={`Remove ${f.name}`} disabled={busy} onClick={() => setFiles((all) => all.filter((_, j) => j !== i))}><IconClose /></button>
                 </li>
               ))}
             </ul>
