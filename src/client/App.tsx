@@ -340,6 +340,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
 
   // Losing the board: stop the socket so nothing reconnects, and hand back to BoardHost, once.
   const lost = useRef(false);
+  /** Set while this tab's own Leave is on its way, so the board closing reads as leaving, not as being removed. */
+  const leaving = useRef(false);
   const lose = useCallback((why: string) => {
     if (lost.current) return;
     lost.current = true;
@@ -357,6 +359,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     if (!next) {
       lose(f.closed === "encrypted"
         ? `${was.ownerEmail} encrypted their board, which closes it to everyone else. This is your own board.`
+        // The server closes the socket before it answers the leave call, so this frame gets here first.
+        : leaving.current ? `You left ${was.ownerEmail}'s board. This is your own board.`
         : `You're no longer a member of ${was.ownerEmail}'s board, so it closed. This is your own board.`);
       return;
     }
@@ -453,7 +457,9 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
   const leave = useCallback(async () => {
     const a = accessRef.current;
     if (!a) return;
+    leaving.current = true;
     const r = await fetch(api("/api/boards/leave"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board: a.board }) }).catch(() => null);
+    leaving.current = false;
     if (r?.ok) { lose(`You left ${a.ownerEmail}'s board. This is your own board.`); return; }
     const data = r ? ((await r.json().catch(() => ({}))) as { error?: string }) : {};
     say(data.error ?? "Leaving didn't go through. Try again in a minute.");
