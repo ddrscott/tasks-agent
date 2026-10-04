@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
-import { ownerTagLike } from "../member-rules";
+import { isOwnerTag, ownerTagLike } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
 import { NoAgentLine } from "./AgentNudge";
@@ -124,7 +124,12 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const [due, setDue] = useState(card.due ?? "");
   // A trailing space says the last tag is finished, so the field suggests more tags instead of
   // treating that tag as half typed.
-  const [tags, setTags] = useState((card.tags ?? []).map((t) => `${t} `).join(""));
+  // The owner's tags on the card (#needs-ceo on a card with a question, #ship-ok) aren't a
+  // writer's to take off, so for a writer they aren't in the field at all: they show locked
+  // under it, and Save sends them back as they were.
+  const locked = mode === "writer" ? (card.tags ?? []).filter(isOwnerTag) : [];
+  const own = (card.tags ?? []).filter((t) => !locked.includes(t));
+  const [tags, setTags] = useState(own.map((t) => `${t} `).join(""));
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
   const [editing, setEditing] = useState(!card.notes.trim());
   const [lane, setLane] = useState(card.laneId);
@@ -182,7 +187,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
     if (n !== card.notes) patch.notes = n;
     if ((d || null) !== card.due) patch.due = d || null;
     const nextTags = [...new Set(g.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
-    if (nextTags.join(" ") !== (card.tags ?? []).join(" ")) patch.tags = nextTags;
+    if (nextTags.join(" ") !== own.join(" ")) patch.tags = [...locked, ...nextTags.filter((t) => !locked.includes(t))];
     return { patch, lane: l !== card.laneId ? l : null };
   }
 
@@ -309,6 +314,12 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           </label>
         </div>
         <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} />
+        {locked.length > 0 && (
+          <p className="held-note tag-lock">
+            {locked.map((t) => <span key={t} className="chip tag">#{t}</span>)}
+            <span>{locked.length === 1 ? "is" : "are"} {owner ?? "the board's owner"}'s to put on or take off, so {locked.length === 1 ? "it stays" : "they stay"} on this card whatever you save here.{card.ask && locked.includes("needs-ceo") ? " #needs-ceo comes off when they answer the question." : ""}</span>
+          </p>
+        )}
         {error && <div className="dialog-error" role="alert">{error}</div>}
         {filesNote ? <NoFiles note={filesNote} /> : (
           <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} board={board} />

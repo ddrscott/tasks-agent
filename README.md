@@ -1571,7 +1571,12 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   list asks the same question a card at a time (`takeRoom`).
 - **What the app shows a member.** An agent's card doesn't lift, has no check, and says
   `<owner>'s agent card. Read only.` on its face. It opens as the read-only card with the
-  reason on it. The Tags field doesn't suggest the owner's tags. Typing one into Tags, or
+  reason on it. The Tags field doesn't suggest the owner's tags, and it doesn't hold the ones
+  already on the card either: on a card with an open question, `#needs-ceo` shows locked
+  under the field for a writer ("is dana@…'s to put on or take off, so it stays on this card
+  whatever you save here"), and Save sends it back untouched. It used to sit in the field,
+  where deleting it was refused only on Save. The server refuses it regardless
+  (`[owner_tag]`, checked by `check:members` on a card with a question). Typing one into Tags, or
   ending a title with one, keeps the dialog open with the reason and what to change; in quick
   add the line stays in the box under the reason. `// CARD` and `// NEW_CARD` say it before
   anything is sent (`ownerTagTouched` in `src/client/member.tsx`).

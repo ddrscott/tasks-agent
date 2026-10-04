@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A viewer on a board whose owner's Pro plan lapsed is told the plan lapsed, instead of being told to ask for a writer role that wouldn't help
 - Section labels inside menus (the board switcher, the account menu on a shared board, the lane menu) look like the app's other section headers
 - When a pasted list leaves lines behind for different reasons, it gives each reason with the line it's about, not only the first one
+- On a shared board, a writer editing a card with an open question sees `#needs-ceo` locked under the Tags field, with the reason, instead of finding out on Save that they can't remove it
 
 ## [0.2.0] - 2026-10-04
 
