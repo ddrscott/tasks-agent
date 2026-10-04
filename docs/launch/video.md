@@ -29,17 +29,19 @@ voice-over needed; the captions carry it. Not recorded yet.
 | 6 | 0:38 to 0:50 | "Rate limit the public search endpoint" moves from To do to Doing by itself, gets a `STATUS: picked up` line, then a new question appears on it. "Need you" comes back in the top bar. | Then it claims the next one. And asks again when it needs to. |
 | 7 | 0:50 to 0:58 | Click "need you" in the top bar. The list opens: the open question with its buttons, and under it the line for the session that's waiting on it. | One list of everything waiting on you. |
 | 8 | 0:58 to 1:05 | Close it. Click Sessions. Three sessions grouped by project: shop-api, shop-web, infra. One needs input, one is working, one is idle on another machine. | Every Claude Code session, on every machine. |
-| 9 | 1:05 to 1:11 | Cut to a phone (or a 390-wide window): the same board, one lane wide, the question on the card. A thumb taps an answer. | It's a web page. Answer from your phone. |
-| 10 | 1:11 to 1:15 | Cut to the Connect page, step 02, Claude Code tab: `claude mcp add --transport http tasks https://askscottpierce.com/tasks/mcp`. | One command to connect. Any MCP client. |
+| 9 | 1:05 to 1:11 | Cut to a phone (or a 390-wide window): the same board, one lane wide. A thumb taps "?1" in the top bar, the "need you" list opens, and one tap on an answer sends it. This is what `06-phone.png` shows. | It's a web page. Answer from your phone. |
+| 10 | 1:11 to 1:15 | Cut to a new account's empty board: `// START_HERE`, four numbered steps, the sample card added and the command copied (`05-quick-start.png`). Dot out the token if it's in frame. | Four steps to a working agent. |
 | 11 | 1:15 to 1:20 | Back to the demo board, full frame, with the strip that says it's a demo. Hold. | Try the demo. No sign-up. askscottpierce.com/tasks |
 
 That's 80 seconds. To get to 60, drop beats 8 and 10.
 
 ## // NOTES
 
-- Beat 3: with a mouse, an answer on the card face is one click. On a real touch screen (beat 9)
-  the card face takes two taps: the first turns the option into "Send: …?" and the second sends
-  it. Show both taps in beat 9, or answer from the "need you" list, where it's one tap.
+- Beat 3: with a mouse, an answer on the card face is one click, and the caption says "One tap"
+  over a mouse click, which is fair. On a real touch screen the card face takes two taps: the
+  first turns the option into "Send: …?" and the second sends it. That's why beat 9 answers
+  from the "need you" list, where it's one tap. Don't put a "one tap" caption over a thumb on a
+  card face.
 - Beat 4: the demo strip at the top says the agents are scripted. Leave it in frame. Cropping it
   out would make the video claim something the demo doesn't.
 - Beat 8 says "Claude Code" in the caption on purpose. Agents without its hooks only
