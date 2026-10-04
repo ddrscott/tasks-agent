@@ -1,23 +1,53 @@
-// What a signed-out visitor sees at /tasks/: what Tasks is, the sign-in form, and a picture of
-// the product. The picture is the app's own components and CSS fed sample data, not a bitmap,
-// so it follows the theme and can't drift from what the board really looks like.
+// What a signed-out visitor sees at /tasks/: what Tasks is, a picture of the product, the sign-in
+// form, and what they can check for themselves. The picture is the app's own components and CSS
+// fed sample data, not a bitmap, so it follows the theme and can't drift from what the board
+// really looks like. /tasks/pricing is this same page, scrolled to its pricing section.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
 import type { Claim, Session } from "../presence-shared";
 import type { Card } from "../shared";
+import { pageAt } from "../routes";
 import { api, BASE } from "./base";
 import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
 import { blockedSessions, isStale, PresenceContext, SessionRow } from "./Sessions";
+import { useTitle } from "./title";
 
 const DEMO = `${BASE}/demo`;
-
-export function Landing({ signIn }: { signIn: ReactNode }) {
-  const command = claudeMcpAdd(`${location.origin}${BASE}/mcp`);
 const REPO = "https://github.com/ddrscott/tasks-agent";
+
+/**
+ * `signIn` is the sign-in form (Login.tsx owns it). Someone already signed in only gets here
+ * through /tasks/pricing, and sees `SignedInCard` in its place.
+ */
+export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signedIn?: boolean }) {
+  const command = claudeMcpAdd(`${location.origin}${BASE}/mcp`);
+  const [toPricing] = useState(() => pageAt(location.pathname, BASE) === "pricing");
+  // Signed out, Login.tsx names the tab; this only matters for the signed-in pricing page.
+  useTitle(toPricing ? "Pricing" : undefined);
+
+  // /tasks/pricing lands on the pricing section. The form and the plans above and inside it
+  // finish loading a moment later and move things, so keep the section in place for the first
+  // couple of seconds, and stop the instant the visitor scrolls or types.
+  useEffect(() => {
+    if (!toPricing) return;
+    const jump = () => document.getElementById("pricing")?.scrollIntoView();
+    jump();
+    const watch = new ResizeObserver(jump);
+    watch.observe(document.body);
+    const stop = () => {
+      watch.disconnect();
+      clearTimeout(timer);
+      for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop);
+    };
+    const timer = setTimeout(stop, 2500);
+    for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(e, stop, { passive: true });
+    return stop;
+  }, [toPricing]);
+
   return (
     <div className="landing">
       <header className="topbar">
@@ -48,6 +78,7 @@ const REPO = "https://github.com/ddrscott/tasks-agent";
           <Shot />
         </section>
 
+          <div className="landing-signin">{signIn}</div>
         <section className="landing-section" aria-labelledby="different-h">
           <h2 className="h" id="different-h">WHATS_DIFFERENT</h2>
           <ol className="landing-points">

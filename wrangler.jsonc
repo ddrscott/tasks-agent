@@ -21,9 +21,12 @@
   "preview_urls": false,
   "assets": {
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // The Worker answers every /tasks address, so one that isn't a page can be a real 404
+    // (src/server.ts, src/routes.ts). Only the hashed build output and the Needle model files
+    // skip it. Nothing falls back to index.html on its own: a missing file is a 404.
+    "not_found_handling": "none",
     "run_worker_first": [
-      "/tasks/api/*", "/tasks/agent", "/tasks/agent/*", "/tasks/mcp", "/tasks/events", "/tasks/presence", "/tasks/oauth/*", "/tasks/setup.mjs",
+      "/tasks", "/tasks/*", "!/tasks/assets/*", "!/tasks/needle/*",
       "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/*"
     ]
   },

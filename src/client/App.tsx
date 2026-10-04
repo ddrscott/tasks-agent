@@ -29,15 +29,12 @@ import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
+import { pageAt, type Page } from "../routes";
+import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string };
-type Page = "board" | "connect" | "privacy" | "terms" | "demo";
-const PAGES: Page[] = ["connect", "privacy", "terms", "demo"];
-
-const pageFromPath = (): Page => {
-  const sub = location.pathname.replace(/\/+$/, "").slice(BASE.length + 1) as Page;
-  return PAGES.includes(sub) ? sub : "board";
-};
+// The pages are listed once, in src/routes.ts, for this and for the Worker's 404s.
+const pageFromPath = (): Page => pageAt(location.pathname, BASE) ?? "board";
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -54,10 +51,10 @@ export function App() {
     const onPop = () => setPage(pageFromPath());
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
-    // Signed out is a 200 with `null`, not a 401, so a visitor's console stays clean.
   }, []);
 
   const load = useCallback(async () => {
+    // Signed out is a 200 with `null`, not a 401, so a visitor's console stays clean.
     const r = await fetch(api("/api/me"));
     setMe(r.ok ? ((await r.json()) as Me | null) : null);
   }, []);
@@ -76,6 +73,8 @@ export function App() {
   // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
   if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   if (me === null) return <Login onSignedIn={load} />;
+  // /tasks/pricing is the front page at its pricing section, for someone signed in too.
+  if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
   return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 
