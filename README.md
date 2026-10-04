@@ -1942,7 +1942,10 @@ address or a guess, and nothing on screen offers a change the server would refus
   the assistant for a writer, Change theme, Sign out, and **Leave this board**, which takes a
   second tap on the same item ("Tap again to leave …").
 - **Live changes.** `tasks_access` frames update the open board on the spot, each with a toast
-  in plain words: made a viewer (an open card editor turns into the read-only view, and an
+  in plain words: made a viewer (an open card editor turns into the read-only view; if
+  anything in it was typed and not saved, the view opens with a `Not saved.` block that says
+  why and holds the title, notes, and tags as typed, read only, to copy out, and they're back
+  in the fields if the editor returns; before this the typing vanished without a word. An
   open New card dialog or quick add closes), made a writer, the owner's plan lapsed or came
   back. A frame with `closed` (removed, left in another tab, or the board was encrypted)
   closes the socket from the client, drops back to your own board, and says why. If the

@@ -1630,6 +1630,11 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .dialog-body .held-note { flex: none; margin: 0; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
 
 /* Who made the last change: on the card face when it wasn't you, and in the open card. */
+/* Typing that couldn't be saved because the card went read only under the person. A full outline, no rail. */
+.dialog-body .unsaved { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); }
+.dialog-body .unsaved p { margin: 0; font-size: 13px; line-height: 1.5; }
+.dialog-body .unsaved label { display: flex; flex-direction: column; gap: 4px; font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dialog-body .unsaved .field { font: 13px/1.5 var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--ink); resize: vertical; }
 .dialog-body .tag-lock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .card-by { margin-top: 6px; display: flex; flex-wrap: wrap; column-gap: 5px; min-width: 0; font: 11px/1.4 var(--font-mono); color: var(--muted); }
 .card-by-who { min-width: 0; overflow-wrap: anywhere; }

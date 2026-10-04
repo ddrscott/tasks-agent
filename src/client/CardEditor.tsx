@@ -48,12 +48,34 @@ type Props = {
  * a viewer, or the owner's plan lapsing), and the dialog follows it on the spot.
  */
 export function CardEditor(props: Props) {
+  // What's been typed and not saved, kept here, above both views. When the editor turns into
+  // the read-only view under someone (made a viewer, the owner's plan lapsing, the owner
+  // tagging the card for an agent), their text is still on screen to copy, and it's back in
+  // the fields if the editor returns.
+  const draft = useRef<Draft | null>(null);
   // An agent's work order is read only to a writer too (OWNER_TAGS in member-rules.ts).
-  return props.mode === "viewer" || agentHeld(props.mode, props.card) ? <CardView {...props} /> : <CardEdit {...props} />;
+  return props.mode === "viewer" || agentHeld(props.mode, props.card)
+    ? <CardView {...props} unsaved={draft.current} />
+    : <CardEdit {...props} draft={draft} />;
+}
+
+/** The fields someone has changed and not saved: only the ones that differ from the card. */
+type Draft = { title?: string; notes?: string; tags?: string };
+
+/** Text that was typed and couldn't be saved, read only and selectable, so it can be copied out. */
+function Unsaved({ draft, why }: { draft: Draft; why: string }) {
+  return (
+    <div className="unsaved" role="alert">
+      <p><b>Not saved.</b> {why} What you typed is below, so you can copy it. Closing this card throws it away.</p>
+      {draft.title !== undefined && <label>Title you typed<textarea className="field" readOnly rows={1} value={draft.title} onFocus={(e) => e.target.select()} /></label>}
+      {draft.notes !== undefined && <label>Notes you typed<textarea className="field" readOnly rows={Math.min(8, draft.notes.split("\n").length + 1)} value={draft.notes} /></label>}
+      {draft.tags !== undefined && <label>Tags you typed<input className="field" readOnly value={draft.tags} /></label>}
+    </div>
+  );
 }
 
 /** A card to read: the notes rendered with their checkboxes fixed, the files to open or download, and one button, Close. */
-function CardView({ card, lanes, vault, board, onClose, mode, lapsed }: Props) {
+function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }: Props & { unsaved?: Draft | null }) {
   const ref = useRef<HTMLDialogElement>(null);
   const owner = useContext(AskOwnerContext);
   // A writer lands here only on an agent's work order; a viewer lands here on every card.
@@ -78,6 +100,12 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed }: Props) {
         </div>
         <h3 className="card-view-title">{card.title}</h3>
         {held && <p className="held-note">{AGENT_HOLDS(owner ?? "the board's owner")}</p>}
+        {unsaved && Object.keys(unsaved).length > 0 && (
+          <Unsaved draft={unsaved} why={held
+            ? `${owner ?? "The board's owner"} made this card a work order for their agents while you were editing it.`
+            : lapsed ? `${owner ?? "The board's owner"}'s Pro plan lapsed while you were editing this card, so the board is view only.`
+            : "Your role changed to viewer while you were editing this card."} />
+        )}
         <AskBlock card={card} />
         <div className="notes-read">
           <div className="notes-head"><span id="notes-label">Notes</span></div>
@@ -111,7 +139,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed }: Props) {
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board }: Props) {
+function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft }: Props & { draft: React.MutableRefObject<Draft | null> }) {
   const ref = useRef<HTMLDialogElement>(null);
   // A writer can't finish or delete a card while its question is open: that would end the
   // agent's wait, which is the owner's call. Those controls aren't offered, and a line says why.
@@ -119,8 +147,9 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const held = mode === "writer" && !!card.ask;
   const doneLane = doneLaneId(lanes);
   const heldLane = (id: string) => held && id === doneLane && card.laneId !== doneLane;
-  const [title, setTitle] = useState(card.title);
-  const [notes, setNotes] = useState(card.notes);
+  // Whatever was typed before the editor last went read only comes back with it.
+  const [title, setTitle] = useState(draft.current?.title ?? card.title);
+  const [notes, setNotes] = useState(draft.current?.notes ?? card.notes);
   const [due, setDue] = useState(card.due ?? "");
   // A trailing space says the last tag is finished, so the field suggests more tags instead of
   // treating that tag as half typed.
@@ -129,9 +158,18 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   // under it, and Save sends them back as they were.
   const locked = mode === "writer" ? (card.tags ?? []).filter(isOwnerTag) : [];
   const own = (card.tags ?? []).filter((t) => !locked.includes(t));
-  const [tags, setTags] = useState(own.map((t) => `${t} `).join(""));
+  const ownText = own.map((t) => `${t} `).join("");
+  const [tags, setTags] = useState(draft.current?.tags ?? ownText);
+  // Kept for the read-only view (CardEditor above): the fields that differ from the card, as typed.
+  useEffect(() => {
+    draft.current = {
+      ...(title.trim() && title.trim() !== card.title ? { title } : {}),
+      ...(notes !== card.notes ? { notes } : {}),
+      ...(tags.trim() !== ownText.trim() ? { tags: tags.trim() } : {}),
+    };
+  });
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
-  const [editing, setEditing] = useState(!card.notes.trim());
+  const [editing, setEditing] = useState(!card.notes.trim() || draft.current?.notes !== undefined);
   const [lane, setLane] = useState(card.laneId);
   // Notes take the whole dialog while this is on (the expander next to the Notes label).
   const [full, setFull] = useState(false);
