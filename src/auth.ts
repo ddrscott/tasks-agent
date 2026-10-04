@@ -3,6 +3,7 @@
 // 30-day session cookie. Only hashes of codes and session tokens are stored.
 
 import { verifyTurnstile } from "./turnstile";
+import { isAdmin, noteSignIn } from "./users";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 30 * 1000;
@@ -87,6 +88,8 @@ export async function createSession(req: Request, env: Env, email: string): Prom
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(Date.now()),
     env.DB.prepare("DELETE FROM login_limits WHERE window_start < ?").bind(Date.now() - DAY_MS),
   ]);
+  // The users table is what the admin page lists (users.ts).
+  await noteSignIn(env, email);
   return sessionCookie(req, token, SESSION_TTL_S);
 }
 
@@ -226,7 +229,8 @@ export async function handleAuth(req: Request, env: Env, path: string): Promise<
     const user = await currentUser(req, env);
     // "Not signed in" is an answer, not an error: every signed-out page asks, and a 401 would
     // put a red line in each visitor's console. So it's a 200 with `null` for a body.
-    return json(user ? { ...user, model: env.CHAT_MODEL } : null);
+    // `admin` only decides whether the app shows the link to the admin page. The page's API checks the role itself.
+    return json(user ? { ...user, model: env.CHAT_MODEL, admin: await isAdmin(env, user.email) } : null);
   }
   return null;
 }

@@ -2,7 +2,7 @@ import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable, type Connection } from "agents";
 import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
-import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
+import { billingEnabled, dailyLimit, planFor, planSource, type Usage } from "./billing";
 import * as ops from "./shared";
 import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
@@ -665,9 +665,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Assistant messages used today, the cap for this user's plan, and whether they can upgrade. */
   @callable()
   async usage(): Promise<Usage> {
-    const plan = await planFor(this.env, this.name);
+    const { plan, granted } = await planSource(this.env, this.name);
     const used = this.sql<{ chats: number }>`SELECT chats FROM usage WHERE day = ${this.today()}`[0]?.chats ?? 0;
-    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env) };
+    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env), ...(granted ? { granted } : {}) };
   }
 
   async onChatMessage(_onFinish: unknown, options?: { requestId: string; abortSignal?: AbortSignal; body?: Record<string, unknown> }) {

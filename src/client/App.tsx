@@ -10,6 +10,7 @@ import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } fr
 import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
+import { Admin } from "./Admin";
 import { Connect } from "./Connect";
 import { Demo } from "./Demo";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
@@ -32,7 +33,7 @@ import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
 import { Landing, SignedInCard } from "./Landing";
 
-type Me = { email: string; id: string; model: string };
+type Me = { email: string; id: string; model: string; /** Shows the Admin link. The admin page's API checks the role itself. */ admin?: boolean };
 // The pages are listed once, in src/routes.ts, for this and for the Worker's 404s.
 const pageFromPath = (): Page => pageAt(location.pathname, BASE) ?? "board";
 
@@ -75,10 +76,12 @@ export function App() {
   if (me === null) return <Login onSignedIn={load} />;
   // /tasks/pricing is the front page at its pricing section, for someone signed in too.
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
-  return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
+  // Anyone signed in can ask for the page; the server answers 403 unless they're an admin, and the page says so.
+  if (page === "admin") return <Admin me={me.email} onBack={() => go("board")} />;
+  return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} />;
 }
 
-function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+function Workspace({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void }) {
   useTitle("Board");
   async function signOut() {
     await fetch(api("/api/auth/logout"), { method: "POST" });
@@ -487,9 +490,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                     {usage?.billing && usage.plan === "free" && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
                     )}
-                    {usage?.billing && usage.plan === "pro" && (
+                    {/* Pro an admin gave has no subscription behind it, so there's nothing to manage. */}
+                    {usage?.billing && usage.plan === "pro" && !usage.granted && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
                     )}
+                    {me.admin && <button role="menuitem" onClick={() => { setMenuOpen(false); onAdmin(); }}>Admin</button>}
                     <button className="danger" role="menuitem" onClick={() => void signOut()}>Sign out</button>
                   </div>
                 </Popover>

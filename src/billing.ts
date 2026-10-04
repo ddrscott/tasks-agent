@@ -9,9 +9,11 @@
 // STRIPE_PRICE_ID are set.
 
 import { currentUser, type User } from "./auth";
+import { proGranted } from "./users";
 
 export type Plan = "free" | "pro";
-export type Usage = { plan: Plan; used: number; limit: number; billing: boolean };
+/** `granted` is Pro an admin gave (users.ts): there's no subscription behind it to manage. */
+export type Usage = { plan: Plan; used: number; limit: number; billing: boolean; granted?: boolean };
 
 // past_due keeps Pro while Stripe retries the card; Stripe moves it to canceled or
 // unpaid if the retries fail, and the webhook downgrades then.
@@ -28,16 +30,28 @@ export function dailyLimit(env: Env, plan: Plan): number {
   return plan === "pro" ? num(env.PRO_DAILY_CHATS, 150) : num(env.FREE_DAILY_CHATS, 30);
 }
 
-/** The user's plan, from the subscription row the webhook keeps current. */
-export async function planFor(env: Env, userId: string): Promise<Plan> {
-  const row = await env.DB.prepare("SELECT status, current_period_end FROM subscriptions WHERE user_id = ?")
-    .bind(userId).first<{ status: string; current_period_end: number | null }>();
-  if (!row || !PRO_STATUSES.has(row.status)) return "free";
+/** Whether a subscription row counts as Pro right now. */
+export function subscriptionIsPro(row: { status: string; current_period_end: number | null }): boolean {
+  if (!PRO_STATUSES.has(row.status)) return false;
   // A missed "deleted" webhook shouldn't mean Pro forever: a period that ended over
   // three days ago without a renewal event counts as lapsed.
-  if (row.current_period_end && row.current_period_end * 1000 < Date.now() - 3 * 86400_000) return "free";
-  return "pro";
+  return !(row.current_period_end && row.current_period_end * 1000 < Date.now() - 3 * 86400_000);
 }
+
+/** Whether the user is paying for Pro, from the subscription row the webhook keeps current. */
+async function subscribed(env: Env, userId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT status, current_period_end FROM subscriptions WHERE user_id = ?")
+    .bind(userId).first<{ status: string; current_period_end: number | null }>();
+  return !!row && subscriptionIsPro(row);
+}
+
+/** The user's plan and where it comes from: a live subscription, or Pro an admin gave them (users.ts). */
+export async function planSource(env: Env, userId: string): Promise<{ plan: Plan; granted: boolean }> {
+  if (await subscribed(env, userId)) return { plan: "pro", granted: false };
+  return (await proGranted(env, userId)) ? { plan: "pro", granted: true } : { plan: "free", granted: false };
+}
+
+export const planFor = async (env: Env, userId: string): Promise<Plan> => (await planSource(env, userId)).plan;
 
 // ---------- Stripe REST ----------
 
@@ -203,7 +217,8 @@ async function customerFor(env: Env, user: User): Promise<string | null> {
 }
 
 async function checkout(req: Request, env: Env, user: User): Promise<Response> {
-  if ((await planFor(env, user.id)) === "pro") return Response.json({ error: "You're already on Pro." }, { status: 400 });
+  // Someone an admin gave Pro can still subscribe, which is how they'd keep it if the grant ends.
+  if (await subscribed(env, user.id)) return Response.json({ error: "You're already on Pro." }, { status: 400 });
   const origin = new URL(req.url).origin;
   const customer = await customerFor(env, user);
   const session = await stripe<{ url: string }>(env, "POST", "/checkout/sessions", {

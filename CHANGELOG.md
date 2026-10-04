@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
 - Agents see which lanes are the to do, doing, and done lanes in `get_board`
+- Admins get an Admin page from the account menu: every account, with a switch to make someone an admin and a switch to give them Pro without a subscription. An email that hasn't signed in yet can be added ahead of time
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

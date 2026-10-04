@@ -1228,6 +1228,33 @@ Setup:
 Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` prints a
 `whsec_…` for `.dev.vars`. Pay with card `4242 4242 4242 4242`.
 
+## // ADMIN
+
+`/tasks/admin` (`src/client/Admin.tsx`, `src/users.ts`) lists every account with two switches:
+**Admin** lets that person open the page and change the switches, and **Pro** gives them the
+Pro plan without a subscription. Admins see the link in the account menu.
+
+- **Root admins** are the emails in `ADMIN_EMAILS` (`wrangler.jsonc`). They're admins whatever
+  the database says and can't be demoted from the page, so there's always a way back in. Other
+  admins are rows in the `users` table. Nobody can take their own admin role away.
+- **The `users` table** (`migrations/0005_users.sql`) is the role data Stripe doesn't hold:
+  `role` (`user` or `admin`), `pro_grant`, who last changed either and when, and first and
+  last sign-in. Every sign-in writes the row (`noteSignIn`), which is what gives the page a
+  list. An admin can add an email that has never signed in; the flags are waiting when it does.
+- **Pro is a live Stripe subscription or a grant** (`planSource` in `src/billing.ts`). A
+  granted account's `usage()` carries `granted: true`, so the app doesn't offer Manage
+  subscription for a subscription that isn't there. It can still subscribe.
+- **What an admin can't do.** Read a board, files, or chat; delete an account; sign in as
+  someone. The API has two calls, `GET` and `POST /api/admin/users`, and that's the whole of it.
+- **Checks are on the server.** `/api/admin/*` takes the browser session, never an access
+  token, and looks the role up on every call: 401 signed out, 403 without the role. `admin` in
+  `/api/me` only decides whether the link shows. Writes go through the same same-origin check
+  as every other `/api` write. The page is `noindex`.
+- **It fails safe.** If the `users` table can't be read (a deploy before its migration ran),
+  sign-in still works, nobody but a root admin is an admin, and plans fall back to Stripe alone.
+- The shared-origin risk (README → Accepted risk) now reaches a bit further: a script on
+  askscottpierce.com running in an admin's browser could flip these switches.
+
 ## // PRIVACY_AND_TERMS
 
 `/tasks/privacy` and `/tasks/terms` (`src/client/Legal.tsx`) are public pages, linked
@@ -1515,6 +1542,7 @@ for Email Sending.
 | `CHAT_MODEL` | `@cf/zai-org/glm-4.7-flash` | any Workers AI model with function calling |
 | `EMAIL_FROM` | `hey@askscottpierce.com` | must be on a domain onboarded to Email Sending |
 | `ALLOWED_EMAILS` | empty (anyone) | comma-separated emails or `@domain.com` rules to make it invite-only |
+| `ADMIN_EMAILS` | `ddrscott@gmail.com` | comma-separated root admins, who can open `/tasks/admin` (`// ADMIN`) |
 | `DEV_LOGIN_CODES` | unset | `1` in `.dev.vars` only. Never set it in production. |
 | `TURNSTILE_SITEKEY` | empty (off) | public sitekey for the sign-in widget |
 | `TURNSTILE_HOSTNAMES` | `askscottpierce.com` | hostnames Siteverify may report; never `localhost` in production |
