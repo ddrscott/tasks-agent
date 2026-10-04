@@ -1,5 +1,6 @@
 import { BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 
 /** Every address the app answers under /tasks/. Anything else gets the not-found page. */
 const KNOWN = ["", "connect", "privacy", "terms", "demo"];
@@ -9,6 +10,7 @@ export const isUnknownPath = () => !KNOWN.includes(location.pathname.replace(/\/
 
 /** Shown for a mistyped or stale link, signed in or not. The links are plain ones, so they load the real page. */
 export function NotFound() {
+  useTitle("Not found");
   return (
     <div className="connect">
       <header className="topbar">

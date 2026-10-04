@@ -23,7 +23,8 @@ import { NewCard, type NewCardInput } from "./NewCard";
 import { SearchBox } from "./Search";
 import { PresenceContext, SessionsButton } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
-import { applyTheme, readCachedTheme } from "./themes";
+import { readCachedTheme } from "./themes";
+import { useTitle } from "./title";
 import { fitTopbar } from "./topbarFit";
 
 type Props = {
@@ -36,6 +37,7 @@ type Props = {
 
 /** Start over swaps in a fresh board by remounting it. */
 export function Demo(p: Props) {
+  useTitle("Demo board");
   const [run, setRun] = useState(0);
   return <DemoBoard key={run} {...p} onReset={() => setRun((n) => n + 1)} />;
 }
