@@ -24,7 +24,7 @@ export function sharingFacts(members: number | null): Fact[] {
     },
     {
       q: "What happens if Pro ends?",
-      a: "Nobody is removed and nothing is deleted. Everyone on the board drops to view only, writers included, and new invites are off. The roles you gave come back when Pro does.",
+      a: "Nobody is removed and nothing is deleted. Everyone on the board drops to view only, writers included, and new invites are off. The roles you gave come back when Pro does. Boards people have open follow within a second of the payment system telling us, and within about half a minute at worst.",
     },
     {
       q: "Who owns the cards?",

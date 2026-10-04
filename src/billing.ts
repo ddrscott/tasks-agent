@@ -54,8 +54,23 @@ function form(params: Record<string, unknown>, prefix = "", out = new URLSearchP
   return out;
 }
 
-async function stripe<T>(env: Env, method: "GET" | "POST", path: string, params?: Record<string, unknown>, idempotencyKey?: string): Promise<T> {
-  const url = new URL(`https://api.stripe.com/v1${path}`);
+const STRIPE_API = "https://api.stripe.com/v1";
+
+/**
+ * A stand-in for Stripe's API that a signed webhook may name, on a dev server only
+ * (DEV_LOGIN_CODES=1) and only on this machine. `check:members` posts a correctly signed
+ * webhook and answers the "fetch the subscription" call itself, so the whole path from
+ * Stripe's event to an open member's board runs offline. Anywhere else the header is ignored.
+ */
+const DEV_STRIPE_HEADER = "X-Dev-Stripe-Api";
+function devStripeBase(req: Request, env: Env): string | undefined {
+  if (env.DEV_LOGIN_CODES !== "1") return undefined;
+  const base = req.headers.get(DEV_STRIPE_HEADER);
+  return base && /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/v1$/.test(base) ? base : undefined;
+}
+
+async function stripe<T>(env: Env, method: "GET" | "POST", path: string, params?: Record<string, unknown>, idempotencyKey?: string, base: string = STRIPE_API): Promise<T> {
+  const url = new URL(`${base}${path}`);
   if (method === "GET" && params) url.search = form(params).toString();
   const headers: Record<string, string> = { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` };
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -93,8 +108,12 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
        updated_at = excluded.updated_at`,
   ).bind(userId, sub.metadata.email ?? "", sub.customer, sub.id, sub.status, periodEnd, sub.cancel_at_period_end ? 1 : 0, Date.now()).run();
   // A shared board follows its owner's plan: members drop to view only when Pro lapses and get
-  // their roles back when it returns, on the sockets they already have open (members.ts).
-  await planChanged(env, userId).catch((e: Error) => console.warn("telling the board about a plan change failed", e.message));
+  // their roles back when it returns, on the sockets they already have open. This is where
+  // that happens at once: the board is told right here, before Stripe gets its 200, and it
+  // rechecks every open member socket against the row just written (planChanged in members.ts,
+  // which retries). The board's own 30-second sweep is only the backstop for a webhook that
+  // never arrives.
+  await planChanged(env, userId).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
 }
 
 // ---------- public plans ----------
@@ -200,7 +219,7 @@ async function webhook(req: Request, env: Env): Promise<Response> {
   }
   if (!subscriptionId) return Response.json({ ignored: "no subscription" });
   // Fetch rather than trust the event body, so an old event can't overwrite newer state.
-  await storeSubscription(env, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${subscriptionId}`));
+  await storeSubscription(env, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, undefined, devStripeBase(req, env)));
   return Response.json({ ok: true });
 }
 

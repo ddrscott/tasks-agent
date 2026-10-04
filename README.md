@@ -1570,6 +1570,21 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   either way; their writes stop within 2 seconds. A lapsed plan with no webhook is view only
   for members within 30 seconds (the sweep), and at once when the webhook does arrive.
 
+**A plan change is instant when the webhook arrives.** The real path for a lapse is Stripe's
+webhook (`src/billing.ts`): the handler checks the signature, fetches the subscription, stores
+it, and then calls `planChanged`, which writes `sharing_suspended` or `sharing_restored` and
+signals the board (the same `signal`, with the same retries) before Stripe gets its 200. Every
+open member socket is rechecked against the row just written, so a writer's open board turns
+view only, or gets its role back, in well under a second: `check:members` posts a correctly
+signed webhook to the dev server and fails past one second (10 to 30 ms in practice). To run
+that offline, a dev server (`DEV_LOGIN_CODES=1`, and only then) lets a signed webhook name a
+stand-in for Stripe's API on this machine in `X-Dev-Stripe-Api`; the check answers the one
+"get the subscription" call itself. Everything else about the path is the real one, and the
+header is ignored anywhere else. The 30-second sweep is the backstop for a webhook that never
+comes (and for a paid period that simply runs out, which `planFor` treats as lapsed three
+days after its end): that's the "within about half a minute at worst" in the terms and in
+Members.
+
 **Attribution.** Every card carries who last changed it: `by?: { email: string; via?: "assistant" | "agent" }`
 on `Card` (`src/shared.ts`), next to `updatedAt`. `email` is the owner or the member; `via` is
 `"assistant"` when the in-app assistant did it on their message and `"agent"` for an outside

@@ -18,9 +18,9 @@
 
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { readFileSync, rmSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import WebSocket from "ws";
@@ -1589,6 +1589,75 @@ section("a member's HTTP calls are counted too");
   ok("after a quiet spell it all works as before", again.map((r) => r.status).join() === "200,200,200,404", again.map((r) => r.status).join());
   await fo.rpc("deleteCard", [fileCard]);
   fo.close();
+}
+
+section("a plan change through Stripe's webhook is instant");
+{
+  // The real path: Stripe posts a signed event, the handler fetches the subscription and
+  // stores it, and tells the board. Driven offline: the signature is made the way Stripe
+  // makes it, with the dev server's own webhook secret, and the one call the handler makes
+  // to Stripe is answered by a stand-in here (a dev server takes its address from a header).
+  const devVars = (() => { try { return Object.fromEntries(readFileSync(join(STATE_DIR, "..", "..", ".dev.vars"), "utf8").split("\n").filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])); } catch { return {}; } })();
+  const secret = devVars.STRIPE_WEBHOOK_SECRET;
+  if (!secret || !devVars.STRIPE_SECRET_KEY || !devVars.STRIPE_PRICE_ID) {
+    console.log("skip the webhook rows: the dev server's .dev.vars has no STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and STRIPE_PRICE_ID, so billing is off there");
+  } else {
+    const subId = `sub_check_${run}_owner`;
+    const subs = new Map();
+    const asked = [];
+    const stripe = createServer((req, res) => {
+      asked.push(`${req.method} ${req.url} ${req.headers.authorization === `Bearer ${devVars.STRIPE_SECRET_KEY}` ? "authed" : "no key"}`);
+      const sub = subs.get(decodeURIComponent((req.url ?? "").replace("/v1/subscriptions/", "")));
+      res.writeHead(sub ? 200 : 404, { "Content-Type": "application/json" }).end(JSON.stringify(sub ?? { error: { type: "invalid_request_error", message: "No such subscription" } }));
+    });
+    await new Promise((r) => stripe.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${stripe.address().port}/v1`;
+    const webhook = async (status, { type = "customer.subscription.updated", sign = secret, at = Math.floor(Date.now() / 1000) } = {}) => {
+      subs.set(subId, { id: subId, object: "subscription", customer: `cus_check_${run}_owner`, status, cancel_at_period_end: false, metadata: { user_id: owner.id, email: owner.email }, items: { data: [{ current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400 }] } });
+      const body = JSON.stringify({ id: `evt_check_${randomBytes(6).toString("hex")}`, object: "event", type, data: { object: { id: subId, object: "subscription" } } });
+      const sig = createHmac("sha256", sign).update(`${at}.${body}`).digest("hex");
+      const r = await fetch(`${BASE}/tasks/api/stripe/webhook`, { method: "POST", headers: { "Content-Type": "application/json", "Stripe-Signature": `t=${at},v1=${sig}`, "X-Dev-Stripe-Api": base }, body, signal: AbortSignal.timeout(30_000) });
+      return { status: r.status, text: await r.text() };
+    };
+    const planRow = () => d1(`SELECT status FROM subscriptions WHERE user_id = ${q(owner.id)}`)[0]?.status;
+
+    // Nothing unsigned, wrongly signed, or stale gets as far as Stripe or the board.
+    let wMark = writerSock.frames.length;
+    const forged = await webhook("canceled", { sign: "whsec_not_the_secret" });
+    const stale = await webhook("canceled", { at: Math.floor(Date.now() / 1000) - 3600 });
+    await sleep(500);
+    ok("a webhook with a bad or stale signature is refused, and changes nothing", forged.status === 400 && stale.status === 400 && asked.length === 0 && planRow() === "active" && !writerSock.frames.slice(wMark).some((f) => f.type === "tasks_access"), [forged, stale, asked]);
+
+    wMark = writerSock.frames.length;
+    let vMark = viewerSock.frames.length;
+    let oMark = ownerSock.frames.length;
+    let t0 = Date.now();
+    const lapse = await webhook("canceled");
+    const tAnswered = Date.now();
+    const wLapsed = await writerSock.wait((f) => f.type === "tasks_access" && f.reason === "plan_lapsed", 3000, wMark);
+    const oHeard = await ownerSock.wait((f) => f.type === "tasks_members", 3000, oMark);
+    console.log(`     … a signed "subscription canceled" webhook: answered in ${tAnswered - t0} ms, the open writer was view only after ${wLapsed ? wLapsed._at - t0 : "never"} ms, the owner's tab heard after ${oHeard ? oHeard._at - t0 : "never"} ms`);
+    ok("a correctly signed webhook is accepted, and the handler fetched the subscription with the secret key", lapse.status === 200 && asked.length === 1 && asked[0] === `GET /v1/subscriptions/${subId} authed` && planRow() === "canceled", [lapse, asked]);
+    ok("the open writer's board is view only within a second of the webhook", wLapsed?.effective === "viewer" && wLapsed.role === "writer" && wLapsed.plan === "free" && wLapsed._at - t0 < 1000, wLapsed ? wLapsed._at - t0 : "never");
+    ok("in fact before Stripe had its answer", !!wLapsed && wLapsed._at <= tAnswered + 50, [wLapsed?._at, tAnswered]);
+    ok("the owner's open tab hears in the same moment", !!oHeard && oHeard._at - t0 < 1000);
+    ok("a write right after is refused, in words that say why", (await writerSock.rpc("addCard", [lanes[0].id, "During the webhook lapse"])).error === rules.READ_ONLY_LAPSED);
+    ok("an open viewer stays a viewer, and nobody was closed", viewerSock.ws.readyState === WebSocket.OPEN && writerSock.ws.readyState === WebSocket.OPEN && !viewerSock.frames.slice(vMark).some((f) => f.closed));
+    ok("the lapse is in the audit log", has(await audit(owner), "sharing_suspended", null, { actor: "system" }));
+
+    wMark = writerSock.frames.length;
+    oMark = ownerSock.frames.length;
+    t0 = Date.now();
+    const restore = await webhook("active", { type: "customer.subscription.resumed" });
+    const wBack = await writerSock.wait((f) => f.type === "tasks_access" && f.effective === "writer", 3000, wMark);
+    console.log(`     … a signed "subscription resumed" webhook: the open writer could write again after ${wBack ? wBack._at - t0 : "never"} ms`);
+    ok("when the webhook says Pro is back, the role is back within a second", restore.status === 200 && wBack?.reason === null && wBack.plan === "pro" && wBack._at - t0 < 1000 && planRow() === "active", wBack ? wBack._at - t0 : "never");
+    ok("and the writer writes again on the same socket", (await writerSock.rpc("addCard", [lanes[0].id, "After the webhook lapse"])).success === true);
+    ok("the return is in the audit log too", has(await audit(owner), "sharing_restored", null, { actor: "system" }));
+    const other = await fetch(`${BASE}/tasks/api/stripe/webhook`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    ok("the webhook takes no session and no unsigned body", other.status === 400);
+    await new Promise((r) => stripe.close(r));
+  }
 }
 
 section("open sockets follow the owner's plan");
