@@ -36,7 +36,7 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
-import { ADD_CARDS_MAX, isOwnerTag, plainError, plainText } from "../member-rules";
+import { ADD_CARDS_MAX, ownerTagLike, plainError, plainText } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string; /** Shows the Admin link. The admin page's API checks the role itself. */ admin?: boolean };
@@ -580,7 +580,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
 
   // For the Tags field in the card dialogs. On an encrypted board this is the decrypted view, so it works there too.
   // A member isn't offered the tags that direct the owner's agents: the server would refuse them.
-  const knownTags = useMemo(() => (board ? tagsByUse(board).filter((t) => !member || !isOwnerTag(t)) : []), [board, member]);
+  const knownTags = useMemo(() => (board ? tagsByUse(board).filter((t) => !member || !ownerTagLike(t)) : []), [board, member]);
 
   const actions: Actions = useMemo(() => ({
     // Quick add, one card per line, as one change (`addCards`). "Write a haiku #agent" is the

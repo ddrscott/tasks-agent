@@ -4,7 +4,7 @@
 // decides a role; it only turns the server's answer into what to show and what to say.
 
 import { createContext, useContext } from "react";
-import { isAgentCard, isOwnerTag, ownerTagInTitle, type ActivityFrame } from "../member-rules";
+import { isAgentCard, ownerTagInTitle, ownerTagLike, type ActivityFrame } from "../member-rules";
 import type { By, Card } from "../shared";
 
 /** A member's way into someone else's board, as the server reports it. */
@@ -93,16 +93,18 @@ export const agentHeld = (mode: Mode | undefined, card: Card) => mode === "write
 export const AGENT_HOLDS = (owner: string) =>
   `This card is a work order for ${owner}'s agents (it's tagged #agent or #gauntlet), so only ${owner} can change, move, or delete it.`;
 /** Said when a member's tags would add or remove one of the owner's. */
-export const OWNER_TAG_NOTE = (tag: string, owner: string) =>
-  `Only ${owner} can put #${tag} on a card or take it off. Their agents take orders from that tag.`;
+export const OWNER_TAG_NOTE = (tag: string, owner: string, typed?: string) =>
+  `${typed && typed !== tag ? `#${typed} reads as #${tag}. ` : ""}Only ${owner} can put #${tag} on a card or take it off. Their agents take orders from that tag.`;
 /**
  * The owner tag a member's edit would add or remove, or that their title ends in, if any. The
  * server refuses the same thing (memberChangeError); this is so the dialog can say it before
  * anything is sent, with the field still open to fix.
  */
 export function ownerTagTouched(before: string[], after: string[], title?: string): string | null {
-  const changed = [...after.filter((t) => !before.includes(t)), ...before.filter((t) => !after.includes(t))].find(isOwnerTag);
-  return changed ?? (title !== undefined ? ownerTagInTitle(title) : null);
+  // An added tag counts when it only reads as the owner's (`ship_ok`, a Cyrillic \u0430 in `agent`); a removed one has to be the real thing.
+  const added = after.filter((t) => !before.includes(t)).map(ownerTagLike).find(Boolean);
+  const removed = before.filter((t) => !after.includes(t)).find((t) => ownerTagLike(t) === t);
+  return added ?? removed ?? (title !== undefined ? ownerTagInTitle(title) : null);
 }
 
 // ── Who made the last change ────────────────────────────────────────────────────────────────

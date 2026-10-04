@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
+import { ownerTagLike } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
 import { NoAgentLine } from "./AgentNudge";
@@ -191,7 +192,9 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
     const who = owner ?? "the board's owner";
     const inTags = patch.tags ? ownerTagTouched(card.tags ?? [], patch.tags) : null;
     const inTitle = patch.title !== undefined ? ownerTagTouched([], [], patch.title) : null;
-    if (inTags) setError(`${OWNER_TAG_NOTE(inTags, who)} ${(card.tags ?? []).includes(inTags) ? `Put ${inTags} back in Tags` : `Take ${inTags} out of Tags`} to save.`);
+    // What they typed, when it only reads as the owner's tag (`ship_ok`, a look-alike letter).
+    const typed = inTags ? patch.tags!.find((t) => !(card.tags ?? []).includes(t) && ownerTagLike(t) === inTags) : undefined;
+    if (inTags) setError(`${OWNER_TAG_NOTE(inTags, who, typed)} ${typed ? `Take ${typed} out of Tags` : `Put ${inTags} back in Tags`} to save.`);
     else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who)} Take #${inTitle} off the end of the title to save.`);
     return !!(inTags || inTitle);
   }

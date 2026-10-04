@@ -3,7 +3,7 @@
 // card. Files wait in the dialog and upload once the card exists to hang them on.
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
-import { isOwnerTag, plainError } from "../member-rules";
+import { ownerTagLike, plainError } from "../member-rules";
 import { useContext, useEffect, useRef, useState } from "react";
 import { AskOwnerContext } from "./Ask";
 import { OWNER_TAG_NOTE } from "./member";
@@ -116,9 +116,10 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
         const split = moveTitleTags();
         // A member can't tag a card for the owner's agents. Said before anything is sent: the
         // tag is in the Tags field by now, where it can be seen and taken out.
-        const ownerTag = owner ? split.tags.find(isOwnerTag) : undefined;
-        if (ownerTag) {
-          setError(`${OWNER_TAG_NOTE(ownerTag, owner!)} Take ${ownerTag} out of Tags to add this card.`);
+        // One that only reads as the owner's (`ship_ok`, a look-alike letter) is refused the same way.
+        const typed = owner ? split.tags.find((t) => ownerTagLike(t)) : undefined;
+        if (typed) {
+          setError(`${OWNER_TAG_NOTE(ownerTagLike(typed)!, owner!, typed)} Take ${typed} out of Tags to add this card.`);
           setBusy(false);
           return;
         }

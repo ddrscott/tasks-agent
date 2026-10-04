@@ -4,7 +4,7 @@
 // them on their own.
 
 import { doneLaneId } from "./lanes";
-import { AGENT_TAG, cleanTag, forAgent, GAUNTLET_TAG, NEEDS_CEO_TAG, SHIP_OK_TAG, type Board, type Card } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, NEEDS_CEO_TAG, SHIP_OK_TAG, type Board, type Card } from "./shared";
 
 /** What an invite grants. The owner isn't a member: they're whoever the board's Durable Object is named after. */
 export type MemberRole = "viewer" | "writer";
@@ -176,6 +176,40 @@ export const plainText = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u00
  */
 export const OWNER_TAGS: readonly string[] = [AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG, SHIP_OK_TAG];
 export const isOwnerTag = (tag: string) => OWNER_TAGS.includes(tag);
+
+// A tag doesn't have to be an owner tag to be read as one. `\u0430gent` with a Cyrillic \u0430,
+// `\uff41\uff47\uff45\uff4e\uff54` in fullwidth letters, `ship_ok`, `shipok`, and `agent-` all look like the
+// owner's on a card's face, and an agent that matches tags loosely would take them. So what a
+// member adds is compared by how it reads, not by its code points (`ownerTagLike`). Only the
+// comparison is folded: the owner's own tags are stored as typed, and so is a member's tag
+// that reads like nothing of the owner's.
+
+/** Characters that take no room on screen: zero-width spaces and joiners, the soft hyphen, direction marks, variation selectors, and blank filler letters. */
+const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0]|\udb40[\udc00-\uddef]/g;
+/** Letters of other alphabets, and Latin letters outside a to z, that are drawn like a plain Latin one. Not every such letter there is: the common ones. */
+const LOOKS_LIKE: Readonly<Record<string, string>> = {
+  // Cyrillic
+  "\u0430": "a", "\u0432": "b", "\u0441": "c", "\u0501": "d", "\u0435": "e", "\u050d": "g", "\u04bb": "h", "\u043d": "h", "\u0456": "i", "\u0458": "j", "\u043a": "k", "\u04cf": "l", "\u043c": "m",
+  "\u043f": "n", "\u043e": "o", "\u0440": "p", "\u051b": "q", "\u0433": "r", "\u0455": "s", "\u0442": "t", "\u0438": "u", "\u051d": "w", "\u0445": "x", "\u0443": "y",
+  // Greek
+  "\u03b1": "a", "\u03b2": "b", "\u03b5": "e", "\u03b7": "n", "\u03b9": "i", "\u03ba": "k", "\u03bd": "v", "\u03bf": "o", "\u03c1": "p", "\u03c2": "s", "\u03c3": "o", "\u03c4": "t", "\u03c5": "u", "\u03c7": "x", "\u03b3": "y",
+  // Armenian
+  "\u0581": "g", "\u0570": "h", "\u0578": "n", "\u057d": "u", "\u0585": "o",
+  // Latin letters outside a to z: script and small-capital forms, and letters with a stroke
+  "\u0251": "a", "\u1d00": "a", "\u1d04": "c", "\u0111": "d", "\u1d07": "e", "\u0261": "g", "\u0262": "g", "\u01e5": "g", "\u0127": "h", "\u029c": "h", "\u0131": "i", "\u0269": "i", "\u026a": "i",
+  "\u1d0b": "k", "\u0142": "l", "\u029f": "l", "\u0274": "n", "\u00f8": "o", "\u1d0f": "o", "\u1d18": "p", "\ua731": "s", "\u1d1b": "t", "\u1d1c": "u",
+};
+/**
+ * How a tag reads: compatibility forms unfolded (fullwidth, ligatures), accents and invisible
+ * characters dropped, lower case, look-alike letters as the Latin ones they resemble, and
+ * everything that isn't a letter or a digit left out, so `ship-ok`, `ship_ok`, and `shipok`
+ * are one thing.
+ */
+const reading = (s: string) =>
+  s.normalize("NFKD").replace(/\p{M}/gu, "").replace(INVISIBLE, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/./gu, (ch) => LOOKS_LIKE[ch] ?? ch);
+const OWNER_READINGS: ReadonlyMap<string, string> = new Map(OWNER_TAGS.map((t) => [reading(t), t]));
+/** The owner tag that `tag` is, or reads as: `agent` for `agent`, for `\u0430gent`, and for `agent-`. Null for a tag that's nobody's but the member's. */
+export const ownerTagLike = (tag: unknown): string | null => (typeof tag === "string" ? OWNER_READINGS.get(reading(tag)) ?? null : null);
 /** A card that's a work order for the owner's agents (`agent` or `gauntlet`): read only to members. */
 export const isAgentCard = (c: Pick<Card, "tags">) => forAgent(c as Card);
 /** Which owner tag a member is trying to add or remove between two versions of a card, if any. */
@@ -183,20 +217,38 @@ function ownerTagChanged(p: Card | undefined, c: Card): string | null {
   return OWNER_TAGS.find((t) => !!p?.tags?.includes(t) !== !!c.tags?.includes(t)) ?? null;
 }
 /**
+ * A tag a member is adding that reads as an owner tag without being one, as [what they typed,
+ * the owner tag it reads as]. Only tags this change adds: a look-alike the owner put there
+ * themselves stays the owner's business, and doesn't lock a member out of the card.
+ */
+function lookalikeAdded(p: Card | undefined, c: Card): [string, string] | null {
+  if (!Array.isArray(c.tags)) return null;
+  for (const t of c.tags) {
+    if (typeof t !== "string" || isOwnerTag(t) || p?.tags?.includes(t)) continue;
+    const like = ownerTagLike(t);
+    if (like) return [t, like];
+  }
+  return null;
+}
+/**
  * An owner tag typed at the end of a title ("Do evil #agent"), the way quick add reads tags.
  * It isn't a tag there, but it looks like one that took, so a member's title can't end in it.
  */
 export function ownerTagInTitle(title: string): string | null {
-  const words = title.trim().split(/\s+/);
+  // Read the way it shows: `\uff03agent` is #agent, an invisible character after the tag isn't
+  // there, and neither is the full stop in `Do evil #agent.`
+  const words = title.normalize("NFKC").replace(INVISIBLE, "").trim().split(/[\s\p{Z}]+/u).filter(Boolean);
   while (words.length > 1) {
-    const w = words.pop()!;
-    if (!/^#[\p{L}\p{N}_-]{1,32}$/u.test(w)) return null;
-    if (isOwnerTag(cleanTag(w))) return cleanTag(w);
+    const w = words.pop()!.replace(/[^\p{L}\p{N}_#-]+$/u, "");
+    if (!/^#[^#]{1,64}$/u.test(w)) return null;
+    const tag = ownerTagLike(w.slice(1));
+    if (tag) return tag;
   }
   return null;
 }
-export const ownerTagError = (tag: string) =>
-  `[owner_tag] Only the board's owner can put #${tag} on a card or take it off. The owner's agents take their orders from that tag.`;
+/** `typed` is what the member wrote when it only reads as the owner's tag: the refusal says which tag it was taken for. */
+export const ownerTagError = (tag: string, typed?: string) =>
+  `[owner_tag] ${typed && typed !== tag ? `#${typed.slice(0, 40)} reads as #${tag}. ` : ""}Only the board's owner can put #${tag} on a card or take it off. The owner's agents take their orders from that tag.`;
 export const AGENT_CARD = "[agent_card] That card is a work order for the owner's agents (it's tagged #agent or #gauntlet). Only the board's owner can change, move, or delete it.";
 
 /** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. */
@@ -204,6 +256,8 @@ function memberCardError(p: Card | undefined, c: Card): string | null {
   if (p && isAgentCard(p)) return AGENT_CARD;
   const tag = ownerTagChanged(p, c) ?? (typeof c.title === "string" && p?.title !== c.title ? ownerTagInTitle(c.title) : null);
   if (tag) return ownerTagError(tag);
+  const like = lookalikeAdded(p, c);
+  if (like) return ownerTagError(like[1], like[0]);
   return cardTooBig(p, c);
 }
 

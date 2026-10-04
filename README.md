@@ -1517,6 +1517,21 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   `[owner_tag] Only the board's owner can put #agent on a card or take it off. …`. A title
   that ends in one (`Do evil #agent`, the way quick add reads a tag) is refused the same way,
   so a card can't land looking like the tag took. `#agent` in the middle of a title is a word.
+- **Or one that only reads as one.** A member's tag is compared by how it reads, not by its
+  code points (`ownerTagLike` in `src/member-rules.ts`): compatibility forms are unfolded
+  (NFKD, so fullwidth `\uff41\uff47\uff45\uff4e\uff54` is `agent`), accents and invisible characters come
+  out (zero-width spaces and joiners, the soft hyphen, direction marks, blank filler letters),
+  Cyrillic, Greek, Armenian, and odd Latin letters that are drawn like a plain Latin one are
+  read as that one (`LOOKS_LIKE`, the common ones, not every such letter Unicode has), and
+  everything that isn't a letter or a digit is left out. So `\u0430gent` with a Cyrillic \u0430,
+  `agen\u0442`, `ship_ok`, `shipok`, `agent-`, `_agent`, and `needs_ceo` are all refused, with
+  the same reason and what it was read as: `[owner_tag] #ship_ok reads as #ship-ok. Only the
+  board's owner can put #ship-ok on a card …`. A title is read the same way before its last
+  words are checked, so `Do evil #agent.`, `#agent` followed by a zero-width space, and
+  `\uff03agent` with a fullwidth # are refused too. Only what a member adds is judged: the
+  owner's own tags are stored exactly as typed, a look-alike the owner put on a card doesn't
+  lock members out of it, and a member's tag that reads like nothing of the owner's
+  (`agents`, `re-agent`, a word in Russian or Japanese) is theirs to use.
 - **A card tagged `agent` or `gauntlet` is read only to members.** No edit to its title,
   notes, due date, tags, or checkboxes, no move, no delete, no file added or removed
   (`[agent_card] That card is a work order for the owner's agents …`). The order of those
