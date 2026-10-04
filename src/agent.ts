@@ -95,6 +95,24 @@ function memberMeta(ws: WebSocket): MemberMeta | null {
 
 const utf8 = new TextEncoder();
 
+/** Where a tool call's input didn't fit its schema, in a few words: "cards.0.tags: expected array, received string". */
+function shapeError(e: { issues: { path: PropertyKey[]; message: string }[] }): string {
+  return e.issues.slice(0, 3).map((i) => `${i.path.map(String).join(".") || "input"}: ${i.message.replace(/^Invalid input: /, "").replace(/undefined/g, "nothing")}`).join("; ").slice(0, 200);
+}
+
+/**
+ * What to tell a caller when a call throws. An Error this code threw on purpose is a sentence
+ * and goes out as written. Anything the runtime threw (a TypeError from an argument of the
+ * wrong type that got past the checks, a RangeError) is replaced: its text describes this
+ * code, not what the caller did wrong.
+ */
+function plainFailure(e: unknown): string {
+  if (!(e instanceof Error) || e instanceof TypeError || e instanceof RangeError || e instanceof SyntaxError || e instanceof ReferenceError || e.name === "ZodError") {
+    return `[${ops.BAD_ARGS}] That call's details weren't the right shape, so nothing was changed.`;
+  }
+  return e.message;
+}
+
 function sendTo(ws: WebSocket, frame: string) {
   try { ws.send(frame); } catch { /* it closed under us */ }
 }
@@ -363,7 +381,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const result = await callers.run({ kind: "member", id: m.id, email: m.email, effective: m.effective, reason: m.reason }, () => fn.apply(this, f.args as unknown[]));
       reply({ success: true, result: result === undefined ? null : result });
     } catch (e) {
-      reply({ success: false, error: e instanceof Error ? e.message : "That didn't work." });
+      // What a member is told is always a sentence of ours, never the runtime's.
+      reply({ success: false, error: plainFailure(e) });
     }
   }
 
@@ -603,7 +622,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   async search(input: unknown): Promise<SearchResult> {
     if (this.state.sealed) throw new Error("This board is end-to-end encrypted, so only the app can search it, in your browser.");
-    return this.index.search(this.state, SEARCH_TOOL.inputSchema.parse(input));
+    const asked = SEARCH_TOOL.inputSchema.safeParse(input);
+    if (!asked.success) throw new Error(`[${ops.BAD_ARGS}] A search needs some words to look for. ${shapeError(asked.error)}`);
+    return this.index.search(this.state, asked.data);
   }
 
   validateStateChange(_next: Board, source: Connection | "server") {
@@ -842,7 +863,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     let next = before;
     items.forEach((item, index) => {
       try {
-        const r = ops.addCard(next, { title: String(item?.title ?? ""), laneId, tags: Array.isArray(item?.tags) ? item.tags.map(String) : undefined });
+        // Each line is checked as it comes: a title that isn't text, or tags that aren't a list, is that line's reason.
+        ops.checkCardFields(item);
+        const r = ops.addCard(next, { title: item.title, laneId, tags: item.tags });
         const why = room ? takeRoom(room, r.card) : null;
         if (why) { left.push({ index, error: why }); return; }
         next = r.board;
@@ -1031,10 +1054,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!callers.getStore() && actor === "agent") {
       return callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" }, () => this.runTool(name, input, group, actor));
     }
-    const t = BOARD_TOOLS[name];
-    if (!t) return { ok: false, summary: `Unknown tool ${name}` };
+    const t = Object.hasOwn(BOARD_TOOLS, name) ? BOARD_TOOLS[name] : undefined;
+    if (!t) return { ok: false, summary: `Unknown tool ${String(name).slice(0, 40)}` };
     try {
-      const args = t.inputSchema.parse(input);
+      const parsed = t.inputSchema.safeParse(input);
+      if (!parsed.success) return { ok: false, summary: `That step's details weren't the right shape. ${shapeError(parsed.error)}` };
+      const args = parsed.data;
       let summary = "";
       let ids: string[] | undefined;
       const board = this.mutate(t.label, (b) => {
@@ -1045,7 +1070,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       }, group, actor);
       return { ok: true, summary, board: ops.describeBoard(board, undefined, this.ownerEmail()), ids };
     } catch (e) {
-      return { ok: false, summary: plainError((e as Error).message) };
+      return { ok: false, summary: plainError(plainFailure(e)) };
     }
   }
 
@@ -1101,12 +1126,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   @callable()
   async applyLocal(turn: { text: string; calls: { name: ToolName; input: unknown }[]; engine: string; confidence: number; ms?: number }): Promise<{ outcomes: ToolOutcome[]; reply: string }> {
+    if (turn === null || typeof turn !== "object" || typeof turn.text !== "string") throw new Error(`[${ops.BAD_ARGS}] An assistant turn is the message and the steps it came to.`);
     const sealed = this.state.sealed;
-    const text = sealed ? String(turn.text ?? "") : String(turn.text ?? "").trim().slice(0, 2000);
+    const text = sealed ? turn.text : turn.text.trim().slice(0, 2000);
     // On an encrypted board the transcript is stored too, so the message has to arrive encrypted.
     if (sealed && !(isSealed(text) && kidOf(text) === sealed.kid)) throw new Error("This board is encrypted; the message has to be too.");
     const raw = Array.isArray(turn.calls) ? turn.calls.slice(0, 8) : [];
     if (!text || !raw.length) throw new Error("Nothing to apply.");
+    if (!raw.every((c) => c !== null && typeof c === "object" && typeof c.name === "string")) throw new Error(`[${ops.BAD_ARGS}] Each step of an assistant turn names a board tool.`);
     // The inputs are stored in the transcript as well, so on an encrypted board they have to be
     // clean before anything runs: parsed by the tool's schema (unknown keys dropped), with every
     // string either an id already on the board or ciphertext under the board's key.
@@ -1151,8 +1178,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         : v !== null && typeof v === "object" ? Object.values(v).every(clean)
         : v === null || typeof v === "number" || typeof v === "boolean" || v === undefined;
     return calls.map((c) => {
-      const t = BOARD_TOOLS[c.name];
-      if (!t) throw new Error(`Unknown tool ${String(c.name)}.`);
+      const t = Object.hasOwn(BOARD_TOOLS, c.name) ? BOARD_TOOLS[c.name] : undefined;
+      if (!t) throw new Error(`Unknown tool ${String(c.name).slice(0, 40)}.`);
       const parsed = t.inputSchema.safeParse(c.input);
       if (!parsed.success || !clean(parsed.data)) throw new Error("This board is encrypted; a tool call carried text that wasn't.");
       return { name: c.name, input: parsed.data };

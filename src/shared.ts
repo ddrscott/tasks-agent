@@ -135,23 +135,45 @@ export function shortId(prefix: string, taken: Set<string>): string {
 export const laneCards = (b: Board, laneId: string) => b.cards.filter((c) => c.laneId === laneId);
 
 export function findLane(b: Board, ref: string): Lane | undefined {
+  if (typeof ref !== "string") return undefined;
   const r = ref.trim().toLowerCase();
   return b.lanes.find((l) => l.id === ref) ?? b.lanes.find((l) => l.name.toLowerCase() === r);
 }
 
 function requireCard(b: Board, id: string): Card {
+  if (typeof id !== "string") throw badArgs("A card is named by its id, like c1a2b.");
   const c = b.cards.find((c) => c.id === id);
   if (!c) throw new Error(`No card with id "${id}"`);
   return c;
 }
 
 function requireLane(b: Board, ref: string): Lane {
+  if (typeof ref !== "string") throw badArgs("A lane is named by its id or its name.");
   const l = findLane(b, ref);
   if (!l) throw new Error(`No lane "${ref}". Lanes: ${b.lanes.map((l) => l.name).join(", ")}`);
   return l;
 }
 
 const now = () => new Date().toISOString();
+
+/**
+ * An argument of the wrong type: a number where a title goes, one string where a list of tags
+ * goes. Every op checks what it's handed before treating it as text, so a malformed call from
+ * any client is refused in words, and never half-read (`tags: "agent"` used to be stored as
+ * #a #g #e #n #t). The code in brackets is for clients; `plainError` takes it off for people.
+ */
+export const BAD_ARGS = "bad_args";
+const badArgs = (what: string) => new Error(`[${BAD_ARGS}] ${what}`);
+const isTagList = (v: unknown): v is string[] => Array.isArray(v) && v.every((t) => typeof t === "string");
+/** Throws unless each field that's present is the type a card keeps it as. */
+export function checkCardFields(v: unknown): asserts v is { title?: string; notes?: string; due?: string | null; tags?: string[] } {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw badArgs("A card's fields come as a set: title, notes, due, tags.");
+  const f = v as Record<string, unknown>;
+  if (f.title !== undefined && typeof f.title !== "string") throw badArgs("A card's title has to be text.");
+  if (f.notes !== undefined && typeof f.notes !== "string") throw badArgs("A card's notes have to be text.");
+  if (f.due !== undefined && f.due !== null && typeof f.due !== "string") throw badArgs("A due date has to look like 2026-09-30, or be left empty.");
+  if (f.tags !== undefined && !isTagList(f.tags)) throw badArgs("Tags have to be a list of words, like client and urgent, not one piece of text.");
+}
 export const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
 /** Tidy plain text; sealed text is ciphertext and passes through as is. */
 const tidy = (s: string, max: number) => (isSealed(s) ? s : clean(s, max));
@@ -170,6 +192,7 @@ export function tagsByUse(b: Board): string[] {
 
 /** Tidy a tag list: clean each plain tag, drop blanks and repeats. Sealed tags pass through. */
 export function tidyTags(tags: string[]): string[] {
+  if (!isTagList(tags)) throw badArgs("Tags have to be a list of words, like client and urgent, not one piece of text.");
   const out: string[] = [];
   for (const t of tags) {
     const v = isSealed(t) ? t : cleanTag(t);
@@ -271,6 +294,9 @@ export function addCard(
   b: Board,
   input: { title: string; laneId?: string; notes?: string; due?: string | null; tags?: string[]; top?: boolean },
 ): { board: Board; card: Card } {
+  checkCardFields(input);
+  if (typeof input.title !== "string") throw badArgs("A card's title has to be text.");
+  if (input.laneId !== undefined && typeof input.laneId !== "string") throw badArgs("A lane is named by its id or its name.");
   const title = tidy(input.title, 200);
   if (!title) throw new Error("A card needs a title");
   // No lane named: the card goes to the to do lane.
@@ -299,6 +325,7 @@ export function updateCard(
   id: string,
   patch: { title?: string; notes?: string; due?: string | null; tags?: string[] },
 ): Board {
+  checkCardFields(patch);
   const card = requireCard(b, id);
   let next = { ...card, updatedAt: now() };
   if (patch.title !== undefined) {
@@ -415,6 +442,7 @@ export function describeAsk(c: Card): string {
 
 /** Move a card into a lane at `index` among that lane's cards (end when omitted). */
 export function moveCard(b: Board, id: string, laneRef: string, index?: number): Board {
+  if (index !== undefined && (typeof index !== "number" || Number.isNaN(index))) throw badArgs("A card's place in a lane is a number, counting from 0.");
   const card = requireCard(b, id);
   const lane = requireLane(b, laneRef);
   const rest = b.cards.filter((c) => c.id !== id);
@@ -506,6 +534,7 @@ export function addAttachment(b: Board, cardId: string, att: Attachment): Board 
 
 /** Take a file off a card. The R2 object stays until nothing, including undo history, points at it. */
 export function removeAttachment(b: Board, cardId: string, attId: string): Board {
+  if (typeof attId !== "string") throw badArgs("A file is named by its id.");
   const card = requireCard(b, cardId);
   const list = card.attachments ?? [];
   if (!list.some((a) => a.id === attId)) throw new Error(`No attachment "${attId}" on that card`);
@@ -519,6 +548,7 @@ export function attachmentIds(b: Board): string[] {
 }
 
 export function deleteCards(b: Board, ids: string[]): Board {
+  if (!isTagList(ids)) throw badArgs("Cards to delete come as a list of ids.");
   ids.forEach((id) => requireCard(b, id));
   return { ...b, cards: b.cards.filter((c) => !ids.includes(c.id)) };
 }

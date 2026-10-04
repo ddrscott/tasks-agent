@@ -1398,6 +1398,21 @@ the owner's until it's added to the list. A `cf_agent_use_chat_request` gets an 
 messages, tool results, and anything else are dropped. A member's `applyLocal` changes the board
 and writes nothing into the owner's chat transcript.
 
+**Arguments are checked for type before anything reads them.** A member's client is whatever
+they point at the socket, so every one of those methods is handed arguments of any shape. The
+ops in `src/shared.ts` check first (`checkCardFields`, `tidyTags`, `requireCard`,
+`requireLane`): a title and notes are text, tags are a list of text, a due date is text or
+empty, a lane and a card are named by text, a position is a number. Anything else is refused
+with `[bad_args] …` and a sentence (`A card's title has to be text.`), and nothing is stored.
+Before this, `tags: "agent"` was read a letter at a time and saved as `#a #g #e #n #t`, and a
+number for a title answered `s.replace is not a function`. `search` and the assistant's steps
+(`applyLocal`) are parsed by their schemas, and a miss says where (`cards.0.tags: expected
+array, received string`). In a pasted list each malformed line comes back in `left` with its
+reason, like any other line that didn't fit. As a backstop, an error the runtime threw
+(`TypeError` and friends) never reaches a caller as written: `plainFailure` in `src/agent.ts`
+swaps it for one plain sentence. The checks are in the ops, so the owner's own client and
+agents get the same answers.
+
 **A pasted list is one call.** Quick add ("Add a card") makes one card per line, and it sends
 the whole list as `addCards(laneId, [{ title, tags? }, …])`: one frame, one board change, one
 undo step, for the owner and for a writer. It used to send a frame per line, so a writer's
