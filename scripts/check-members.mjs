@@ -277,6 +277,39 @@ const decliner = await account("decliner");
 const encOwner = await account("enc");
 ok("ten accounts signed in", [owner, writer, viewer, stranger, removed, leaver, revoked, late, decliner, encOwner].every((u) => /^[0-9a-f]{32}$/.test(u.id)));
 
+// ---------- a WebSocket upgrade anywhere but the three socket addresses ----------
+
+section("stray WebSocket upgrades");
+{
+  // An upgrade to a page, a file, an API route, or the Agents SDK's own address shape once took
+  // the whole dev server down, signed out. Each must be refused, and the server must still answer.
+  const alive = async () => { try { return (await call(null, "GET", "/api/me")).status === 200; } catch { return false; } };
+  const hex = randomBytes(16).toString("hex");
+  const stray = [
+    `/tasks/agents/todo-agent/${owner.id}`, `/tasks/agents/todo-agent/${hex}`, `/agents/todo-agent/${owner.id}`,
+    `/tasks/agent/sub/todo-agent/${owner.id}`, `/tasks/agent/`, "/tasks/", "/tasks", "/tasks/connect", "/tasks/invite", "/tasks/nope",
+    "/tasks/assets/nope.js", "/tasks/og.png", "/tasks/api/me", "/tasks/api/board/members", "/tasks/mcp", "/tasks/setup.mjs",
+    "/tasks/oauth/token", "/tasks/presence/x", "/tasks/events/x", "/", "/.well-known/oauth-authorization-server",
+  ];
+  for (const who of [null, owner, stranger]) {
+    let bad = [];
+    for (const path of stray) {
+      const s = await new Promise((resolve) => {
+        const ws = new WebSocket(`${WS_BASE}${path}`, { headers: who ? { Cookie: who.cookie } : {}, handshakeTimeout: 10_000 });
+        ws.on("open", () => { ws.close(); resolve({ opened: true }); });
+        ws.on("unexpected-response", (_r, res) => { res.resume(); resolve({ opened: false, status: res.statusCode }); });
+        ws.on("error", () => resolve({ opened: false, status: null }));
+      });
+      // Vite drops a refused upgrade without the status; the built Worker says 404.
+      if (s.opened || (s.status !== null && s.status !== 404) || !(await alive())) bad.push([path, s]);
+    }
+    ok(`${who ? (who === owner ? "signed in" : "signed in as someone else") : "signed out"}, an upgrade to ${stray.length} addresses that aren't sockets is refused and the server stays up`, bad.length === 0, bad);
+  }
+  const real = await open(owner);
+  ok("the board's own socket still opens", real.opened && !!(await real.wait((f) => f.type === "cf_agent_state")), how(real));
+  real.close();
+}
+
 // ---------- invites ----------
 
 section("invites");

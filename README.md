@@ -1269,6 +1269,13 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
   (`/tasks/agent/get-messages?board=…`, any path under `/agent/`) is a 404.
 - Refusals: signed out 401, another origin 403, everything else **404 `Not found`**: a
   stranger, a pending invitee, a removed member, an encrypted board, a made-up or malformed id.
+- **Only three addresses take a WebSocket**: `/tasks/agent`, `/tasks/presence`, and
+  `/tasks/events`, exact paths. An `Upgrade: websocket` request to anything else (a page, a
+  file, an API route, `/tasks/mcp`, a path under `/agent/`, the Agents SDK's own
+  `/agents/<class>/<name>` shape) gets a plain 404 from `strayUpgrade` in `src/server.ts`,
+  before the OAuth provider, the asset layer, or the page shell see it, signed in or not. Under
+  the local dev server such an upgrade used to reach the asset layer and take the whole
+  server down.
 - **Member sockets are not Agents SDK connections.** `TodoAgent.fetch` accepts them itself as
   plain hibernating WebSockets (`acceptMember` in `src/agent.ts`) and answers a small part of
   the same wire protocol, so `useAgent` works unchanged. The SDK and the chat SDK only handle

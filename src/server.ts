@@ -102,8 +102,32 @@ const forbidden = () => Response.json({ error: "Requests have to come from Tasks
 /** Stripe calls this from its servers, and it's authenticated by its signature, not a cookie. */
 const NO_ORIGIN_CHECK = new Set(["/api/stripe/webhook"]);
 
+/**
+ * The only addresses that answer a WebSocket upgrade: the board (`/agent`, your own or one
+ * shared with you), the Sessions list (`/presence`), and the agent event feed (`/events`).
+ * Exact paths, nothing under them.
+ */
+const SOCKET_PATHS: ReadonlySet<string> = new Set([`${BASE}/agent`, `${BASE}/presence`, `${BASE}/events`]);
+
+/**
+ * An upgrade to anywhere else is refused here, before the OAuth provider, the asset layer, or
+ * the page shell see it. None of those expect one: handed an upgrade for a file or a page, the
+ * local emulator's asset layer died on an assertion, with no sign-in needed to send it. That
+ * covers the Agents SDK's own address shape (`/agents/<class>/<name>`) too, which this app
+ * never routes.
+ */
+function strayUpgrade(req: Request): Response | null {
+  if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return null;
+  let path: string;
+  try { path = new URL(req.url).pathname; } catch { return new Response("Bad request", { status: 400 }); }
+  if (SOCKET_PATHS.has(path)) return null;
+  return new Response("There's no WebSocket at this address.", { status: 404, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+}
+
 const app: ExportedHandler<Env> = {
   async fetch(req, env) {
+    const stray = strayUpgrade(req);
+    if (stray) return stray;
     const path = new URL(req.url).pathname;
     if (path !== BASE && !path.startsWith(`${BASE}/`)) return new Response("Not found", { status: 404 });
     const sub = path.slice(BASE.length);
@@ -256,7 +280,7 @@ async function handleEvents(req: Request, env: Env): Promise<Response> {
 // /.well-known paths here:
 //   /.well-known/oauth-protected-resource/tasks/mcp  → "this resource uses askscottpierce.com"
 //   /.well-known/oauth-authorization-server          → the endpoints below
-export default new OAuthProvider<Env>({
+const provider = new OAuthProvider<Env>({
   apiRoute: MCP_PATH,
   apiHandler: {
     fetch: (req, env, ctx) => handleMcp(req, env, ctx, (ctx as ExecutionContext & { props: User }).props),
@@ -275,3 +299,10 @@ export default new OAuthProvider<Env>({
     return user ? { props: user } : null;
   },
 });
+
+export default {
+  fetch(req, env, ctx) {
+    // First thing, for every request: see strayUpgrade.
+    return strayUpgrade(req) ?? provider.fetch(req, env, ctx);
+  },
+} satisfies ExportedHandler<Env>;
