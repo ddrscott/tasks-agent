@@ -145,12 +145,13 @@ async function update(req: Request, env: Env, admin: User): Promise<Response> {
   ).run();
   // A shared board follows its owner's plan, and a grant is part of the plan (planSource in
   // billing.ts). So this tells the owner's board the same way the Stripe webhook does
-  // (storeSubscription): the audit log gets "sharing suspended" or "sharing restored", and open
+  // (storeSubscription): the audit log gets "sharing suspended" or "sharing restored", in this
+  // admin's name and marked as an admin's doing (`changed_by` on the users row says the same), and open
   // member sockets drop to view only, or get their roles back, before this answers. It reads
   // the plan fresh, so taking a grant from someone who also pays changes nothing. The board's
   // own 30-second sweep is the backstop if this fails.
   if (setPro !== undefined) {
-    await planChanged(env, await userIdFor(email)).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
+    await planChanged(env, await userIdFor(email), admin.email).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
   }
   const row = await env.DB.prepare(`${SELECT} WHERE u.email = ?`).bind(email).first<Row>();
   console.log(`admin: ${admin.email} set ${email}${setAdmin !== undefined ? ` admin=${setAdmin}` : ""}${setPro !== undefined ? ` pro=${setPro}` : ""}`);

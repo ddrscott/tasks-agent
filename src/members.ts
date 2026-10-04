@@ -151,6 +151,11 @@ export type AuditEntry = {
   actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null;
   /** Set on `card_deleted` and `card_restored`, null on membership entries. */
   detail: AuditCard | null;
+  /**
+   * Set when `actor` did it as a site admin and not as someone on the board: giving or taking
+   * back Pro on the admin page, which pauses or restores sharing. Left off every other entry.
+   */
+  actorRole?: "admin";
 };
 
 function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction, target: string | null, from: MemberRole | null = null, to: MemberRole | null = null) {
@@ -159,6 +164,13 @@ function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction,
 }
 
 const audit = (...args: Parameters<typeof auditRow>) => auditRow(...args).run();
+
+/** What the `detail` column holds for an entry an admin made: no card, only that the actor was acting as an admin. */
+const ADMIN_DETAIL = JSON.stringify({ actorRole: "admin" });
+const byAdmin = (raw: string | null): boolean => {
+  if (!raw) return false;
+  try { return (JSON.parse(raw) as { actorRole?: unknown }).actorRole === "admin"; } catch { return false; }
+};
 
 type AuditDbRow = { id: number; seq: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null; detail: string | null };
 function cardDetail(raw: string | null): AuditCard | null {
@@ -172,7 +184,10 @@ function cardDetail(raw: string | null): AuditCard | null {
     return null;
   }
 }
-const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, seq: r.seq, at: r.at, time: new Date(r.at).toISOString(), actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail) });
+const toEntry = (r: AuditDbRow): AuditEntry => ({
+  id: r.id, seq: r.seq, at: r.at, time: new Date(r.at).toISOString(), actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail),
+  ...(byAdmin(r.detail) ? { actorRole: "admin" as const } : {}),
+});
 
 /**
  * Write down cards that were deleted from a board, or brought back by undo: who, when, the
@@ -235,8 +250,12 @@ async function signal(env: Env, ownerId: string): Promise<void> {
  * the admin page's Pro switch, by the board while members are connected, and when the owner
  * opens the members list, so a lapse nobody announced (a missed webhook, a period that ran
  * out) is still written down.
+ *
+ * `admin` is the admin whose switch caused it, when one did (users.ts): the entry then names
+ * them and says they acted as an admin, so the owner's log doesn't read "by system" for
+ * something a person did. Everything else is `system`: Stripe, or a period that ran out.
  */
-export async function syncSharing(env: Env, ownerId: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
+export async function syncSharing(env: Env, ownerId: string, admin?: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
   const row = await env.DB.prepare("SELECT suspended FROM board_sharing WHERE owner_id = ?").bind(ownerId).first<{ suspended: number }>();
   if (!row) return null; // never shared
   const suspended = (await planFor(env, ownerId)) === "pro" ? 0 : 1;
@@ -247,18 +266,41 @@ export async function syncSharing(env: Env, ownerId: string): Promise<{ suspende
       .bind(suspended, Date.now(), ownerId).run();
     flipped = true;
     if (changed.meta.changes === 1 && (await boardShared(env, ownerId))) {
-      await audit(env, ownerId, "system", suspended ? "sharing_suspended" : "sharing_restored", null);
+      const action = suspended ? "sharing_suspended" : "sharing_restored";
+      // The admin page writes the grant and then calls here with the admin's name. Anything
+      // else that looks at the plan in the instant between (the owner's open tab reading the
+      // members list, the board's sweep) gets here first, with no name. So a flip nobody
+      // claimed checks whether an admin changed this account in the last few seconds.
+      admin ??= await recentAdminChange(env, ownerId);
+      if (admin) {
+        await env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)")
+          .bind(ownerId, Date.now(), admin, action, ADMIN_DETAIL).run();
+      } else await audit(env, ownerId, "system", action, null);
     }
   }
   return { suspended: !!suspended, flipped };
 }
 
+/** How long after an admin changes an account a plan flip on its board is still put down to them. */
+const ADMIN_CHANGE_WINDOW_MS = 10_000;
+/** The admin who changed this account on the admin page within the last few seconds, if one did (`users.changed_by`). */
+async function recentAdminChange(env: Env, ownerId: string): Promise<string | undefined> {
+  try {
+    const row = await env.DB.prepare("SELECT changed_by, changed_at FROM users WHERE user_id = ?").bind(ownerId).first<{ changed_by: string | null; changed_at: number | null }>();
+    return row?.changed_by && row.changed_at && Date.now() - row.changed_at < ADMIN_CHANGE_WINDOW_MS ? row.changed_by : undefined;
+  } catch (e) {
+    console.error("users", (e as Error).message);
+    return undefined;
+  }
+}
+
 /**
  * The owner's plan just changed: Stripe's webhook stored a subscription (billing.ts), or an
- * admin gave or took back Pro (users.ts). Record it and tell the open sockets.
+ * admin gave or took back Pro (users.ts), in which case `admin` is their email. Record it and
+ * tell the open sockets.
  */
-export async function planChanged(env: Env, ownerId: string): Promise<void> {
-  if ((await syncSharing(env, ownerId)) !== null) await signal(env, ownerId);
+export async function planChanged(env: Env, ownerId: string, admin?: string): Promise<void> {
+  if ((await syncSharing(env, ownerId, admin)) !== null) await signal(env, ownerId);
 }
 
 // ---------- the invite email ----------
@@ -523,7 +565,7 @@ async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promi
   const lines = ["seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
   for (const r of results) {
     const d = cardDetail(r.detail);
-    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? null].map(csvCell).join(","));
+    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? (byAdmin(r.detail) ? "admin" : null)].map(csvCell).join(","));
   }
   // The byte-order mark is what tells Excel on Windows the file is UTF-8 when it's opened with
   // a double-click; without it, a card title that isn't plain ASCII comes out garbled.

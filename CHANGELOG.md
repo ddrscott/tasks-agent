@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A list pasted into Add a card goes in as one change, so one Undo takes it back out. If some lines can't be added (a shared board that's full, say), those lines stay in the box and it says how many were added, how many are left, and why
 - A malformed request to a shared board is refused with a plain sentence and stores nothing. Tags sent as one piece of text used to be saved a letter at a time
 - On a shared board a member can't drag one of your `#agent` or `#gauntlet` cards up or down inside its lane. Moving it to another lane was already refused
+- When an admin gives or takes back Pro, your audit log names the admin who did it instead of saying "system". Changes that come from billing still say system
 
 ## [0.2.0] - 2026-10-04
 

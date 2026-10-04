@@ -666,6 +666,11 @@ const ACTIONS: Record<AuditAction, string> = {
   card_deleted: "Card deleted",
   card_restored: "Card brought back",
 };
+/** The same two plan entries when a site admin's switch caused them, not billing. */
+const ADMIN_ACTIONS: Partial<Record<AuditAction, string>> = {
+  sharing_suspended: "Sharing paused: an admin took Pro back, members are view only",
+  sharing_restored: "Sharing restored: an admin gave Pro, roles apply again",
+};
 /** How a card entry was made when it wasn't by hand. */
 const VIA: Record<NonNullable<NonNullable<AuditEntry["detail"]>["via"]>, string> = {
   assistant: "through the assistant", agent: "by their agent, over MCP", undo: "with Undo", redo: "with Redo",
@@ -743,7 +748,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
           Person
           <select className="field" value={who} onChange={(e) => { paged.current = false; setWho(e.target.value); }}>
             <option value="">everyone</option>
-            {people.map((p) => <option key={p} value={p}>{p === "system" ? "system (plan change)" : p === me.email ? `${p} (you)` : p}</option>)}
+            {people.map((p) => <option key={p} value={p}>{p === "system" ? "system (billing or plan change)" : p === me.email ? `${p} (you)` : p}</option>)}
           </select>
         </label>
         {filtered && <button type="button" className="btn ghost" onClick={() => { paged.current = false; setWho(""); setKind(""); }}>Clear filter</button>}
@@ -768,8 +773,8 @@ function AuditLog({ me }: { me: Props["me"] }) {
                   <span className="audit-utc">{iso(e.at)}</span>
                   <span className="audit-utc">entry {e.seq}</span>
                 </td>
-                <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (plan change)" : e.actor}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
-                <td data-th="What"><span>{ACTIONS[e.action] ?? e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
+                <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (billing or plan change)" : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
+                <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
                 {e.detail ? (
                   <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
                 ) : (

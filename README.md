@@ -1674,7 +1674,8 @@ Members.
 
 The admin page's Pro switch (`// ADMIN`) takes the same path. After it writes the grant,
 `update` in `src/users.ts` calls the same `planChanged`, before it answers the admin: the same
-two audit entries (actor `system`, as with Stripe; the log doesn't name the admin), the same
+two audit entries, in the admin's name (`actor` is their email and `actorRole` is `admin`, so
+the owner's log says a person did it and who; a change Stripe caused stays `system`), the same
 signal, the same retries, and the same sweep behind it. `check:members` gives and takes a
 grant with a member's socket open and fails past one second either way. An admin gets nothing
 else on a board: `access` never looks at the admin role, so an admin who isn't a member is
@@ -1765,10 +1766,18 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
-`AuditEntry` is `{ id, seq, at, time, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null }`.
+`AuditEntry` is `{ id, seq, at, time, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null, actorRole?: "admin" }`.
 `id` is the row's id in the whole table and is only for paging (`before`). `seq` is the entry's
 number on this board, `at` is epoch milliseconds, and `time` is the same instant as ISO-8601 UTC.
-`actor` is the signed-in email that did it, or `system`. `from` and `to` are the role before and
+`actor` is the signed-in email that did it, or `system` for a plan change that came from
+billing or from a paid period running out. `actorRole: "admin"` is on a plan entry a site
+admin caused by giving or taking back Pro (`// ADMIN`): `actor` is that admin's email, and
+they aren't on the board. It's stored in the row's `detail` column as `{"actorRole":"admin"}`,
+so there's no new column. The admin page writes the grant and then records the change, and
+the owner's open tab or the board's sweep can notice the new plan in between; so a plan
+entry with nobody's name on it is still put down to an admin who changed that account in the
+last 10 seconds (`recentAdminChange` in `src/members.ts`, from `users.changed_by`). The audit tab shows `rae@example.com (a site admin)` and "an admin
+took Pro back". `from` and `to` are the role before and
 after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
 late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
@@ -1786,18 +1795,18 @@ when the file is opened with a double-click), CRLF line ends, and one header row
 |---|---|
 | `seq` | The entry's number on this board: 1 for its first entry, then 2, 3, with no gaps. The log is append-only, so an entry keeps its number in every later export. (The table's own row id isn't exported: it counts every board's entries, so one board's would show gaps that look like missing rows.) |
 | `time` | When, ISO-8601 in UTC with milliseconds: `2026-10-04T20:51:31.853Z` |
-| `actor` | The signed-in email that did it, or `system` for a plan change |
+| `actor` | The signed-in email that did it, or `system` for a plan change from billing. A site admin who gave or took back Pro is named here, with `admin` under `via` |
 | `action` | One of the action codes above |
 | `target` | The email it was done to. Empty for plan and card entries |
 | `from_role`, `to_role` | `viewer`, `writer`, or empty: the role before and after |
 | `card_id`, `card_title`, `lane` | On `card_deleted` and `card_restored`: the card's id, its title, and the lane it was in. Empty otherwise |
-| `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo` |
+| `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo`. On a plan entry a site admin caused: `admin` |
 
 A cell that starts with `=`, `+`, `-`, `@`, a tab, or a return gets a `'` in front, so a
 spreadsheet shows it as text instead of running it. The JSON is
 `{ board, owner, exportedAt, entries }`, where each entry is an `AuditEntry` without `id`:
 `seq`, `at` (epoch milliseconds), `time` (ISO-8601 UTC), `actor`, `action`, `target`, `from`,
-`to`, `detail`. The audit tab shows each entry's number under its time.
+`to`, `detail`, and `actorRole` on the entries that have one. The audit tab shows each entry's number under its time.
 
 **Invite links.** `https://askscottpierce.com/tasks/invite#t=<token>`. The token is 32 random
 bytes and sits in the fragment, so it never reaches the server in a URL, a log, or a Referer.
