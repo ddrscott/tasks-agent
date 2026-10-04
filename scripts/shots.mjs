@@ -536,6 +536,10 @@ const shots = {
     // The page says something different when the clipboard refuses. The picture is of a copy that worked.
     const copied = await inPage(() => navigator.clipboard.readText().then((t) => /claude /.test(t), () => false));
     if (!copied) die("the command never reached the clipboard, so the page is showing its “copy it from here” fallback.");
+    // Once the command is copied the block folds to one line, out of the board's way. The
+    // picture is of the four steps, so it opens them again with the block's own button.
+    await click(`${sec} button[aria-controls][aria-expanded="false"]`, "the button that shows the quick start's steps again after the copy");
+    await waitFor("the quick start's steps to be showing again", (s) => { const li = document.querySelector(`${s} ol > li`); return !!li && li.getBoundingClientRect().height > 0; }, sec);
     // The token is this throwaway account's, on this server. It still doesn't belong in a picture.
     await inPage((s) => {
       const pre = document.querySelector(`${s} [role="status"] pre`);
@@ -562,10 +566,11 @@ const shots = {
       all = await boxAround([sec]);
       cut = await inPage((s, room) => {
         const el = document.querySelector(s), top = el.getBoundingClientRect().top;
-        const rows = [...el.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height);
+        // The steps sit in a wrapper that takes no box of its own (display: contents), so its children are the rows.
+        const rows = [...el.children].flatMap((c) => (getComputedStyle(c).display === "contents" ? [...c.children] : [c])).map((c) => c.getBoundingClientRect()).filter((r) => r.height);
         let at = 0;
         rows.forEach((r, i) => { const gap = rows[i + 1] ? (r.bottom + rows[i + 1].top) / 2 : el.getBoundingClientRect().bottom; if (gap - top <= room) at = gap; });
-        const cmd = el.querySelector('[role="status"]').getBoundingClientRect().bottom;
+        const cmd = el.querySelector('[role="status"]:has(pre)').getBoundingClientRect().bottom;
         return { height: Math.floor(at - top), cmdShown: cmd < at, need: Math.ceil(cmd - top), room: Math.floor(room), width: Math.round(el.getBoundingClientRect().width) };
       }, sec, (H - HEADLINE_ONLY) / zoom);
       if (cut.cmdShown) break;

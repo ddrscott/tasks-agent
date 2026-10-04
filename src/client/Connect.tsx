@@ -241,7 +241,7 @@ type Quick = { command: string; copied: boolean } | null;
  * it (FirstRun.tsx) and so does the top of the Connect page. `sample` is how step 2 is done from
  * where this is drawn: the board adds the card, the Connect page goes to the board to add it.
  */
-export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, lede }: {
+export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, onCopied, lede }: {
   signedIn: boolean;
   hasSample: boolean;
   onAddSample(): void;
@@ -249,6 +249,8 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
   onMinted?(info: TokenInfo, dropped: string[]): void;
   /** On the board: open the Connect page without leaving the app. */
   onConnect?(): void;
+  /** Told each time the command lands on the clipboard, so the board can fold the steps away. */
+  onCopied?(): void;
   lede: string;
 }) {
   const [quick, setQuick] = useState<Quick>(null);
@@ -265,6 +267,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
     if (quick) {
       const copied = await copyLater(Promise.resolve(quick.command));
       setQuick({ ...quick, copied });
+      if (copied) onCopied?.();
       return;
     }
     setBusy(true);
@@ -275,6 +278,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
       const r = await minted;
       setQuick({ command: await command, copied });
       onMinted?.(r.info, r.dropped);
+      if (copied) onCopied?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {

@@ -131,6 +131,15 @@ run ahead of whatever serves the zone.
     still there after step 2 (`quickStartOpen`). It goes away when an agent connects, when the
     sample is deleted or done, or when the board has cards and none is the sample. An encrypted
     board never shows it.
+  - **It folds once the command is copied.** With the sample on the board and the command on the
+    clipboard, steps 1 to 3 are done and the rest happens in a terminal, then on the card. So the
+    block folds to one line: "Copied. Paste it in a terminal. Your agent's question will show up
+    on the sample card.", with a **Show the steps** button that opens it again (and **Hide the
+    steps** to fold it back). That keeps the lanes and the sample card in view at 1280x800 and on
+    a phone, where the open block takes up to 55% of the screen and scrolls inside itself. The
+    steps stay mounted while folded, since they hold the command and its token is shown once. A
+    command the browser wouldn't put on the clipboard doesn't fold the block: it has to be copied
+    from there by hand. A reload brings the open block back, without the command.
   - Its last line says how to tag your own cards: `#agent` at the end of the title, or the Tags field.
 - **No agent connected yet.** From the first card on, a board no agent has ever reached says
   so (`src/client/AgentNudge.tsx`): one line above the lanes (not while `// START_HERE` is up,
@@ -1274,7 +1283,8 @@ never touches the Chrome you're signed in to. How the crops are made:
   between two rows (the open card's notes, the quick start's blocks), never through one.
 - `05` is the only signed-in picture. The script signs up through the landing page's form with a
   made-up `shots-…@example.com` address and the code a dev server shows on screen
-  (`DEV_LOGIN_CODES=1`), adds the sample card, and copies the command. So `05` comes from a dev
+  (`DEV_LOGIN_CODES=1`), adds the sample card, copies the command, and presses Show the steps,
+  since the block folds after a copy. So `05` comes from a dev
   server only; against the live site it fails and says so. It finds the quick start by structure
   (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
   and 3, the command in a `role="status"` block), not by wording. The token in the command is
