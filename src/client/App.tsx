@@ -18,6 +18,7 @@ import { recallKey, Vault } from "./vault";
 import { FirstRun } from "./FirstRun";
 import { NoAgentProvider } from "./AgentNudge";
 import { Footer } from "./Footer";
+import { Invite } from "./Invite";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
@@ -72,6 +73,8 @@ export function App() {
   if (me === undefined) return <div className="splash">loading</div>;
   // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
   if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
+  // An invite link (// TEAM_BOARDS). Signed out, it sends you to sign in and back.
+  if (page === "invite") return <Invite me={me} onBoard={(board) => { location.assign(`${BASE}/?board=${board}`); }} />;
   if (me === null) return <Login onSignedIn={load} />;
   // /tasks/pricing is the front page at its pricing section, for someone signed in too.
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
@@ -220,9 +223,14 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     setVault(null);
   }, []);
 
+  // `?board=<id>` opens a board someone shared with you; without it, the Worker picks your own
+  // from the session cookie. The id opens nothing by itself: the Worker checks membership
+  // (// TEAM_BOARDS). This is only the connection; the switcher and the rest of the UI aren't built yet.
+  const [sharedBoard] = useState(() => { const b = new URLSearchParams(location.search).get("board"); return b && b !== me.id ? b : null; });
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
-    basePath: "tasks/agent", // the Worker picks your board from the session cookie
+    basePath: "tasks/agent",
+    ...(sharedBoard ? { query: { board: sharedBoard } } : {}),
     onStateUpdate: (s) => ingest(s),
   });
 
