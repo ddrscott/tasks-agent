@@ -653,6 +653,13 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .tag-suggest::-webkit-scrollbar { display: none; }
 .tag-suggest .chip { flex: none; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; }
 @media (hover: none) { .tag-suggest .chip { height: 40px; padding: 0 12px; font-size: 13px; } }
+/* Move to: one button per lane, for touch screens, where dragging across lanes is the hard way.
+   Shown by the touch block at the end of this file. */
+.move-row { display: none; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; }
+.move-label { font: 12px var(--font-mono); color: var(--muted); margin-right: 2px; }
+.move-to { font: 600 12px var(--font-mono); max-width: 100%; overflow: hidden; }
+.move-to[aria-current] { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
+.move-mark { color: var(--accent); }
 .dialog-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-foot { flex: none; display: flex; gap: 8px; padding: 14px 20px; border-top: var(--border-w) solid var(--line); }
 .dialog-foot .spacer { flex: 1; }
@@ -973,6 +980,7 @@ a.att-name:hover { color: var(--accent); }
   .quick-add .btn, .attachments-head .btn { height: 40px; }
   .menu button { padding: 11px 10px; font-size: 14px; }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
+  .move-row { display: flex; }
   .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }
   /* Shortcut hints are for keyboards. */
   .quick-add .hint, .add-lane-form .hint, .menu kbd, .search kbd { display: none; }

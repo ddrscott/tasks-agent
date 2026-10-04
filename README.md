@@ -67,7 +67,8 @@ run ahead of whatever serves the zone.
   the top corner and Esc close the editor and throw the edits away, so opening a card to
   read it can't change it by accident; that covers the title, notes, due date, tags, and
   the lane. A click outside closes an untouched card and does nothing once something has
-  been edited. Files are the exception: they upload and come off as you go.
+  been edited. Files are the exception: they upload and come off as you go. Mark done, Reopen,
+  and the Move to buttons are actions of their own: each saves the edits and then moves the card.
 - **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
   shows the tags already on the board above the input, most used first (`tagsByUse` in
   `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first
@@ -80,6 +81,15 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
+- **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
+  under the title (touch screens only; the current lane is marked): that moves it right away,
+  keeps any other edits, and closes the card, so it's two taps from the board. Or long-press
+  and drag. Up to 900px wide the board shows one lane at a time, and holding the card at the
+  left or right edge brings in the next lane: one lane after 0.4 seconds, and one more only
+  after another 2.5 seconds of holding, so it can't run to Done on its own. The 44px edge
+  strips are for scrolling, so a card let go there lands in the lane that fills the screen,
+  not the sliver of the next one (`collision` and `stepBoard` in `src/client/Board.tsx`).
+  dnd-kit's own sideways auto-scroll is off at that width; wider boards still use it.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.

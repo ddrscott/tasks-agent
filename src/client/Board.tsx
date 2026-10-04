@@ -1,6 +1,6 @@
 import {
   closestCorners, DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor,
-  useDroppable, useSensor, useSensors, type DragEndEvent, type DragOverEvent, type DragStartEvent,
+  useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragOverEvent, type DragStartEvent,
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -40,11 +40,94 @@ type Props = {
 
 const LANE_PREFIX = "lane:";
 
+// On a narrow screen the board shows one lane at a time and snaps to it (styles.css, max-width:
+// 900px). There, holding a dragged card in the strip along either side edge brings in the next
+// lane, one lane per hold. dnd-kit's own auto-scroll speeds up the longer it runs, and against
+// scroll snap it ran from the first lane to the last in half a second.
+const SNAPS = "(max-width: 900px)";
+const EDGE_PX = 44;
+/** How long the card rests at the edge before the board moves one lane. */
+const EDGE_DWELL_MS = 400;
+/** Still holding at the edge this long after a step moves one more lane. Long enough to see where you are and let go. */
+const EDGE_AGAIN_MS = 2500;
+const snaps = () => matchMedia(SNAPS).matches;
+const edgeSide = (x: number) => (x < EDGE_PX ? -1 : x > innerWidth - EDGE_PX ? 1 : 0);
+const laneEls = () => [...document.querySelectorAll<HTMLElement>(".board > [data-lane-id]")];
+
+/** Scroll the board one lane left (-1) or right (1) of the lane it's showing. */
+function stepBoard(side: number) {
+  const boardEl = document.querySelector<HTMLElement>(".board");
+  const els = laneEls();
+  if (!boardEl || !els.length) return;
+  const pad = parseFloat(getComputedStyle(boardEl).scrollPaddingLeft) || 0;
+  const origin = boardEl.getBoundingClientRect().left + pad;
+  const lefts = els.map((el) => el.getBoundingClientRect().left - origin);
+  const at = lefts.reduce((best, l, i) => (Math.abs(l) < Math.abs(lefts[best]) ? i : best), 0);
+  const to = Math.min(els.length - 1, Math.max(0, at + side));
+  if (to === at) return;
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  boardEl.scrollTo({ left: boardEl.scrollLeft + lefts[to], behavior: calm ? "auto" : "smooth" });
+}
+
 export function BoardView(p: Props) {
   const { board } = p;
   const [drag, setDrag] = useState<{ id: string; cards: Card[] } | null>(null);
   const cards = drag?.cards ?? board.cards;
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
+
+  // Where the finger or mouse is while a card is held. dnd-kit reports movement with the board's
+  // scrolling folded in, so the screen position is tracked here. Null for a keyboard drag.
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const dragging = !!drag;
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent | TouchEvent) => {
+      const at = "touches" in e ? e.touches[0] : e;
+      if (at) pointer.current = { x: at.clientX, y: at.clientY };
+    };
+    addEventListener("pointermove", move, { passive: true });
+    addEventListener("touchmove", move, { passive: true });
+    let side = 0, since = 0, wait = EDGE_DWELL_MS;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const s = pointer.current && snaps() ? edgeSide(pointer.current.x) : 0;
+      if (s !== side) { side = s; since = now; wait = EDGE_DWELL_MS; return; }
+      if (!side || now - since < wait) return;
+      stepBoard(side);
+      since = now;
+      wait = EDGE_AGAIN_MS;
+    }, 100);
+    return () => {
+      removeEventListener("pointermove", move);
+      removeEventListener("touchmove", move);
+      clearInterval(timer);
+      pointer.current = null;
+    };
+  }, [dragging]);
+
+  // Which lane a held card is over. On a wide board, the nearest lane or card, as before. On a
+  // snapping board it's the lane under the finger, except in the edge strips: those are for
+  // bringing in the next lane, and the sliver of it that peeks in there isn't a target, so the
+  // card belongs to the lane filling the screen.
+  const collision: CollisionDetection = (args) => {
+    const at = pointer.current;
+    if (!at || !snaps()) return closestCorners(args);
+    const inEdge = edgeSide(at.x) !== 0;
+    let lane: string | undefined;
+    let best = -Infinity;
+    for (const el of laneEls()) {
+      const r = el.getBoundingClientRect();
+      const score = inEdge
+        ? Math.min(r.right, innerWidth) - Math.max(r.left, 0) // how much of it is on screen
+        : -Math.max(r.left - at.x, at.x - r.right, 0); // how far the finger is from it
+      if (score > best) { best = score; lane = el.dataset.laneId; }
+    }
+    if (!lane) return closestCorners(args);
+    const inLane = args.droppableContainers.filter(
+      (c) => c.id === LANE_PREFIX + lane || c.data.current?.sortable?.containerId === lane,
+    );
+    return closestCorners({ ...args, droppableContainers: inLane });
+  };
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -60,6 +143,9 @@ export function BoardView(p: Props) {
     id.startsWith(LANE_PREFIX) ? id.slice(LANE_PREFIX.length) : list.find((c) => c.id === id)?.laneId;
 
   function onDragStart(e: DragStartEvent) {
+    const ev = e.activatorEvent;
+    const at = "touches" in ev ? (ev as TouchEvent).touches[0] : "clientX" in ev ? (ev as MouseEvent) : null;
+    pointer.current = at ? { x: at.clientX, y: at.clientY } : null;
     setDrag({ id: String(e.active.id), cards: board.cards });
     p.onDragging(true);
   }
@@ -129,7 +215,9 @@ export function BoardView(p: Props) {
 
   return (
     <DndContext
-      sensors={sensors} collisionDetection={closestCorners}
+      sensors={sensors} collisionDetection={collision}
+      // The edge stepper above scrolls a snapping board sideways; dnd-kit still scrolls a long lane up and down.
+      autoScroll={{ canScroll: (el) => !(snaps() && el.classList.contains("board")) }}
       onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
       onDragCancel={() => { setDrag(null); p.onDragging(false); }}
     >

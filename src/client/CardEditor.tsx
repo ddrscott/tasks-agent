@@ -17,6 +17,8 @@ type Props = {
   vault: Vault | null;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
   onMove(laneId: string): void;
+  /** A tap on a Move to button: move right away and say so, with Undo. */
+  onMoveNow(laneId: string): void;
   onDelete(): void;
   onRemoveAttachment(id: string): void;
   /** Move to the done lane, or back out of it. Missing when the board has one lane. */
@@ -30,7 +32,7 @@ type Props = {
  * away, so opening a card to read it can't change it by accident. Files are the exception: they
  * upload and come off as you go, and Undo covers a removal.
  */
-export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -92,6 +94,16 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
     onClose();
   }
 
+  // The Move to buttons, shown on touch screens, where dragging a card to another lane is the
+  // hard way. Unlike the Lane select, which waits for Save, a tap here is the whole action: it
+  // keeps the other edits, moves the card, and closes, the way Mark done does.
+  function moveNow(to: string) {
+    const { patch } = pending();
+    if (Object.keys(patch).length) onSave(patch);
+    onMoveNow(to);
+    onClose();
+  }
+
   /** The X and Esc: close and keep nothing. */
   const cancel = onClose;
 
@@ -112,6 +124,19 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={cancel}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
+        {lanes.length > 1 && (
+          <div className="move-row" role="group" aria-label="Move to lane">
+            <span className="move-label">Move to</span>
+            {lanes.map((l) => (
+              <button
+                key={l.id} type="button" className="btn move-to" disabled={l.id === card.laneId}
+                aria-current={l.id === card.laneId ? "true" : undefined}
+                title={l.id === card.laneId ? `In ${l.name} now` : `Move to ${l.name}`}
+                onClick={() => moveNow(l.id)}
+              >{l.id === card.laneId && <span className="move-mark" aria-hidden="true">$</span>}{l.name}</button>
+            ))}
+          </div>
+        )}
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={save} />
         {editing ? (

@@ -492,6 +492,10 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER)}
+          onMoveNow={(laneId) => {
+            const to = board.lanes.find((l) => l.id === laneId)?.name ?? "lane";
+            void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true));
+          }}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true)); }}
           isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
           onToggleDone={board.lanes.length > 1 ? () => {
