@@ -3,9 +3,9 @@
 // changed through the same pure functions the server uses (src/shared.ts), with undo and redo
 // kept in memory. No WebSocket opens and nothing is written to the server; a reload starts over.
 //
-// One pretend agent follows a short script (demoData.ts): answer its question and a couple of
-// seconds later it goes back to working, updates the card's status line, moves the card to Done,
-// then picks up the next card and asks again.
+// One pretend agent follows a short script (demoData.ts): answer its question and it goes back
+// to working, a few seconds later it updates the card's status line, then it moves the card to
+// Done, picks up the next card, and asks again.
 //
 // Undo and Redo walk the visitor's own changes only. The agent's steps never go on the stack:
 // each one is applied to the board on screen and to every board the stack remembers, so undoing
@@ -61,7 +61,11 @@ type Entry = { label: string; world: World };
 
 /** What the scripted agent does next, and how long it takes to get around to it. */
 type Step = "pickup" | "ask" | "ack" | "finish" | "yield";
-const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 2500, finish: 8000, yield: 1500 };
+// A real agent took about 12 seconds from the answer to its next status, with the card face
+// reading `answered: …` the whole time. Here the same stretch is split in two, 6 seconds of
+// `answered: …` and 7 of a working status, so there's something to open the card and read.
+// docs/launch/video.md is timed to these.
+const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 6000, finish: 7000, yield: 1500 };
 /** The card the agent is on and its next step. `step` is null while it waits on an answer. */
 type Spot = { beat: Beat; card: Card; step: Step | null };
 

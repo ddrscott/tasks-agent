@@ -206,7 +206,8 @@ const POLL_MS = 30_000;
  * session in shop-api follows the scene and reads the way a real session does: while its card
  * has a question open it holds its claim and polls wait_for_answer, the claim carries the
  * question, and the app's own rule (withAsks) makes the row say needs input and "asked: …".
- * Answering takes the question off the claim, and the row is back to working in the same moment.
+ * Answering takes the question off the claim, and the row is back to working in the same moment,
+ * last heard from when the answer reached it.
  * Out of cards, it's idle from the moment it finished and gets older from there, like the other.
  *
  * `open` says whether a card can still be worked on. One in Done or deleted can't, and a claim
@@ -221,7 +222,10 @@ export function demoPresence(scene: Scene, now: number, startedAt: number, open:
       const asked = Date.parse(scene.card.ask?.askedAt ?? scene.card.updatedAt);
       return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: now - (Math.max(0, now - asked) % POLL_MS) };
     }
-    if (scene.at === "heard") return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: now - 1000 };
+    // The call that was holding came back with the answer. A session with hooks keeps the line its
+    // hooks last wrote, and routine tool reports are thinned out, so its row still names this
+    // tool for a while. (A session with no hooks would read `got your answer on "<card>"`.)
+    if (scene.at === "heard") return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: Date.parse(scene.card.answer?.at ?? "") || now - 1000 };
     return { state: "working", last: scene.beat.last[scene.at], seenAt: now - 3000 };
   };
   const sessions: Session[] = [
