@@ -28,6 +28,8 @@ type Props = {
   /** Cards without this tag fade back. */
   tagFilter: string | null;
   onTag(tag: string): void;
+  /** Open the full New card dialog for a lane. */
+  onNew(laneId: string): void;
   quickAddLane: string | null;
   setQuickAddLane(id: string | null): void;
   onOpen(card: Card): void;
@@ -193,7 +195,7 @@ function LaneView(props: Props & {
         )}
         <span className="lane-count">{cards.length}</span>
         <span className="spacer" />
-        <button className="btn ghost icon" title={`Add to ${lane.name}`} onClick={() => props.setQuickAddLane(lane.id)}><IconPlus /></button>
+        <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
         <div className="anchor">
           <button className="btn ghost icon" title="Lane options" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><IconDots /></button>
           {menu && (

@@ -56,6 +56,12 @@ run ahead of whatever serves the zone.
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
   screens.
+- **Adding a card.** The + in a lane's header opens the full `// NEW_CARD` dialog
+  (`src/client/NewCard.tsx`): title, notes, lane, due date, and tags in one go. Nothing is
+  added until Add card, so Cancel or Esc leaves no empty card behind, and the card goes in
+  as one change, so one Undo takes it back out. Files attach after the card exists. "Add a
+  card" at the bottom of a lane (and `n`) is still the quick way: type a title and hit
+  Enter, or paste a list to add one card per line.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.

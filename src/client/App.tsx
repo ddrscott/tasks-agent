@@ -8,6 +8,7 @@ import { clean, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
+import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
@@ -79,6 +80,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   /** Show only cards with this tag; the rest fade back. Per tab, not saved. */
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
+  const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -295,6 +297,15 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     return agent.stub.updateCard(id, p);
   }, [agent, out]);
 
+  // The New card dialog: one change, so one Undo takes the whole card back out.
+  const addFullCard = useCallback(async (input: NewCardInput) => {
+    await agent.stub.addCard(input.laneId, await out(clean(input.title, 200)), false, {
+      notes: input.notes.trim() ? await out(input.notes.slice(0, 4000)) : "",
+      due: input.due ? await out(input.due) : null,
+      tags: await Promise.all(tidyTags(input.tags).map(out)),
+    });
+  }, [agent, out]);
+
   // One tap on a question an agent asked (ask_ceo). The answer lands on the card and in the agent's event feed.
   const answerAsk: AnswerFn = useCallback((id, input) => {
     const ask = boardRef.current?.cards.find((c) => c.id === id)?.ask;
@@ -451,6 +462,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           board={board} actions={actions} flash={flash}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
+          onNew={setNewCardLane}
           onOpen={(c: Card) => setEditing(c.id)}
           onOptimistic={(b) => setBoard(b)}
           onDragging={(d) => {
@@ -469,6 +481,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       />
       {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
+      {newCardLane && (
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
+      )}
       {editingCard && (
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} vault={board.sealed ? vault : null}

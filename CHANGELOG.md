@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The footer shows the running version; click it for the latest changes
 - Sort a lane from its menu by due date, title, newest, oldest, or recently updated — Undo puts it back
 
+### Changed
+- The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
+
 ## [0.1.0] - 2026-10-03
 
 ### Added

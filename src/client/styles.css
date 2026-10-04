@@ -642,6 +642,7 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .dialog-foot { flex: none; display: flex; gap: 8px; padding: 14px 20px; border-top: var(--border-w) solid var(--line); }
 .dialog-foot .spacer { flex: 1; }
 .dialog-meta { font: 11px var(--font-mono); color: var(--muted); }
+.dialog-error { font: 12px var(--font-mono); color: var(--danger); }
 
 .attachments { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: -8px; border: 1.5px dashed transparent; border-radius: var(--radius-sm); transition: border-color .15s, background .15s; }
 .attachments.over { border-color: var(--accent); background: var(--accent-soft); }

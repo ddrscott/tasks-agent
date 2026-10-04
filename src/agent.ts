@@ -197,10 +197,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   // ---------- board actions for the UI ----------
 
   @callable()
-  addCard(laneId: string, title: string, top = false) {
+  addCard(laneId: string, title: string, top = false, extra?: { notes?: string; due?: string | null; tags?: string[] }) {
     let id = "";
     this.mutate("Add card", (b) => {
-      const r = ops.addCard(b, { title, laneId, top });
+      // `extra` comes from the New card dialog, which fills in everything at once.
+      const r = ops.addCard(b, { title, laneId, top, notes: extra?.notes, due: extra?.due, tags: extra?.tags });
       id = r.card.id;
       return r.board;
     });
