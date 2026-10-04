@@ -396,11 +396,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */
-  cardDetail(id: string): { text: string; attachments: Attachment[] } | null {
+  cardDetail(id: string): { text: string; attachments: Attachment[]; done: boolean } | null {
     if (this.state.sealed) return null;
     const text = ops.describeCard(this.state, id);
     if (text === null) return null;
-    return { text, attachments: this.state.cards.find((c) => c.id === id)?.attachments ?? [] };
+    const card = this.state.cards.find((c) => c.id === id);
+    const lanes = this.state.lanes;
+    // Done is the last lane, the same rule that ends a claim (endedCards in presence-shared.ts).
+    return { text, attachments: card?.attachments ?? [], done: lanes.length > 1 && card?.laneId === lanes[lanes.length - 1].id };
   }
 
   /** Lane names and card counts, for what a write tool echoes over MCP. */

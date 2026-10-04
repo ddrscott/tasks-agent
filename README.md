@@ -518,7 +518,9 @@ strip, and the not-found page link to it too.
     then tell me to check the board" and stop. It's the same in an interactive Claude Code
     session, a `claude -p` run, and any other MCP client. The MCP server stays stateless: the
     Worker rereads the cards every 2 seconds (`cardDetail`, at most 30 reads a call) and keeps
-    nothing; a client that hangs up ends the loop.
+    nothing; a client that hangs up ends the loop. A card you delete, or move to the last lane
+    with its question still open, ends the wait too: the answer says the card is gone or
+    finished and to stop waiting on it, the same rule that ends its claim (`// SESSIONS`).
   - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
     failing: the rules have the agent call `ask_ceo` on the card with what it needs and options
     that are whole actions ("I've allowed it in the terminal, try again", "Do it another way:

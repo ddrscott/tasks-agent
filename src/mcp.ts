@@ -202,7 +202,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         for (const id of ids) {
           const card = await agent.cardDetail(id);
           const state = card ? askState(card.text) : null;
-          if (state === "asking") waiting.push(id);
+          // A card the owner moved to the last lane is finished, question and all: its claim ended
+          // there too (Presence.finish), and the rules never pick up a card in that lane.
+          if (card && state === "asking" && card.done) ready.push(`[${id}] was moved to the last lane with its question still open: the owner finished it, so stop waiting on it.`);
+          else if (state === "asking") waiting.push(id);
           else if (!card) ready.push(`[${id}] is gone: the owner deleted it, so stop working on it.`);
           else if (state === "answered") ready.push(`ANSWERED. Claim it again with claim_card and act on the answer:\n${card.text}`);
           else ready.push(`[${id}] has no open question and no answer. Call get_card to see where it stands.`);
@@ -251,7 +254,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const no = await locked();
       if (no) return no;
       const released = await presence.release({ cardId: input.id, sessionId: input.session_id, title: (await agent.cardTitle(input.id)) ?? undefined });
-      return text(released ? `Released [${input.id}].` : `Session ${input.session_id} doesn't hold a claim on [${input.id}].`);
+      // Not an error: a claim ends by itself when its card reaches the last lane or is deleted
+      // (Presence.finish), so an agent that moves a card to Done and then releases lands here.
+      return text(released ? `Released [${input.id}].`
+        : `Session ${input.session_id} holds no claim on [${input.id}], so there's nothing to release. A claim ends by itself when its card reaches the last lane or is deleted.`);
     });
 
     server.registerTool(SEARCH_TOOL.name, {
