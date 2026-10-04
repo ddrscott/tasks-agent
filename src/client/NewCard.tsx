@@ -52,7 +52,7 @@ export function NewCard({ lanes, laneId, onAdd, onClose }: Props) {
 
   return (
     <dialog
-      ref={ref} aria-label="New card"
+      ref={ref} className="card-dialog" aria-label="New card"
       onCancel={(e) => { e.preventDefault(); onClose(); }}
       // A stray click outside shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}

@@ -76,7 +76,7 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
 
   return (
     <dialog
-      ref={ref} aria-label="Edit card"
+      ref={ref} className="card-dialog" aria-label="Edit card"
       onCancel={(e) => { e.preventDefault(); close(); }}
       onClick={(e) => { if (e.target === ref.current) close(); }}
     >

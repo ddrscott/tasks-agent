@@ -917,6 +917,24 @@ a.att-name:hover { color: var(--accent); }
   .topbar .stats { display: none; }
   .topbar .actions { gap: 4px; }
   .theme-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Card dialogs take the whole screen above the keyboard: no margin to spend on a phone, and Tags
+     and the buttons stay reachable while typing. --vvh and --vvt come from viewport.ts. */
+  dialog { max-height: calc(var(--vvh, 100dvh) - 32px); }
+  dialog.card-dialog {
+    inset: var(--vvt, 0px) 0 auto 0; margin: 0;
+    width: 100vw; max-width: 100vw; height: var(--vvh, 100dvh); max-height: var(--vvh, 100dvh);
+    border-width: 0; border-radius: 0; animation-name: sheet-in;
+  }
+  @keyframes sheet-in { from { opacity: 0; transform: translateY(12px); } }
+  .card-dialog .dialog-body { padding: max(12px, env(safe-area-inset-top)) 12px 12px; gap: 10px; }
+  .card-dialog .dialog-body label { gap: 4px; }
+  .card-dialog .dialog-body textarea, .card-dialog .md-view { min-height: 84px; }
+  .card-dialog .dialog-row { gap: 8px; }
+  .card-dialog .dialog-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  /* Under 16px, iOS zooms the page when a field takes focus. */
+  .dialog-body .field, .dialog-body .title-input { font-size: 16px; }
+  .dialog-body .title-input { font-size: 17px; }
 }
 
 /* ============================================================ end-to-end encryption */
