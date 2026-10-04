@@ -75,7 +75,7 @@ function CardView({ card, lanes, vault, board, onClose }: Props) {
         <div className="notes-read">
           <div className="notes-head"><span id="notes-label">Notes</span></div>
           {card.notes.trim()
-            ? <div className="field md-view static" role="group" aria-labelledby="notes-label"><Markdown text={card.notes} /></div>
+            ? <div className="field md-view static" role="group" aria-labelledby="notes-label"><Markdown text={card.notes} fixed={owner ? `View only: checkboxes on ${owner}'s board are for writers to tick.` : "View only: you can't tick these."} /></div>
             : <p className="attachments-empty">No notes.</p>}
         </div>
         <dl className="card-facts">

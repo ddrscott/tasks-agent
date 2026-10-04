@@ -46,7 +46,7 @@ has("bullet list", "- one\n- two", "<ul><li>one</li><li>two</li></ul>");
 has("numbered list", "1. one\n2. two", "<ol><li>one</li><li>two</li></ol>");
 has("numbered list keeps its start", "3. three\n4. four", '<ol start="3">');
 has("nested list", "- a\n  - b", "<ul><li>a<ul><li>b</li></ul></li></ul>");
-has("open checkbox", "- [ ] todo", '<input type="checkbox" readOnly="" aria-label="todo"/>');
+has("open checkbox", "- [ ] todo", '<input type="checkbox" disabled="" aria-label="todo"/>');
 has("checked checkbox", "- [x] did it", 'checked=""');
 has("bold", "a **b** c", "a <strong>b</strong> c");
 has("italic", "a *b* c", "a <em>b</em> c");
@@ -111,7 +111,7 @@ const attrs = tags.flatMap((t) => [...t[2].matchAll(/([a-zA-Z-]+)(?:="([^"]*)")?
 const hrefs = attrs.filter(([n]) => n === "href").map(([, v]) => v);
 
 const ALLOWED_TAGS = new Set(["div", "p", "br", "a", "strong", "em", "del", "code", "pre", "ul", "ol", "li", "input", "span", "blockquote", "hr", "h3", "h4", "h5", "h6"]);
-const ALLOWED_ATTRS = new Set(["class", "href", "target", "rel", "type", "checked", "readonly", "aria-label", "start"]);
+const ALLOWED_ATTRS = new Set(["class", "href", "target", "rel", "type", "checked", "disabled", "title", "aria-label", "start"]);
 check("hostile note: only the renderer's own tags", [...names].every((n) => ALLOWED_TAGS.has(n)), [...names].join(" "));
 check("hostile note: no script, img, svg, or iframe element", !["script", "img", "svg", "iframe"].some((n) => names.has(n)));
 check("hostile note: only the renderer's own attributes", attrs.every(([n]) => ALLOWED_ATTRS.has(n)), attrs.map(([n]) => n).join(" "));

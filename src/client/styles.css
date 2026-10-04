@@ -752,7 +752,8 @@ dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
 .md ul:not(.md-tasks) > li.md-task, .md ol:not(.md-tasks) > li.md-task { margin-left: -22px; }
 .md li.md-task > ul, .md li.md-task > ol { grid-column: 2; }
 .md li.md-task > input { margin: 5px 0 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
-.md li.md-task > input[readonly] { cursor: default; }
+/* A box nobody here can tick (a viewer's card): dimmed, and the cursor says so. */
+.md li.md-task > input:disabled { cursor: not-allowed; opacity: .45; }
 .md li.md-task.done > span { color: var(--muted); text-decoration: line-through; }
 .md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .md a:hover { text-decoration-thickness: 2px; }

@@ -112,7 +112,7 @@ const TASK = /^\[([ xX])\]\s+(.*)$/;
 const indentOf = (ws: string) => ws.replace(/\t/g, "    ").length;
 const startsBlock = (l: string) => FENCE.test(l) || HEADING.test(l) || RULE.test(l) || QUOTE.test(l) || ITEM.test(l);
 
-type Ctx = { lines: string[]; onToggle?: (line: number) => void; offset: number };
+type Ctx = { lines: string[]; onToggle?: (line: number) => void; fixed?: string; offset: number };
 
 function list(ctx: Ctx, start: number, base: number, key: string): { node: ReactNode; next: number } {
   const { lines } = ctx;
@@ -160,9 +160,11 @@ function list(ctx: Ctx, start: number, base: number, key: string): { node: React
     if (it.done === null) return <li key={k}>{inline(it.text, k)}{it.kids}</li>;
     const line = it.line + ctx.offset;
     return (
-      <li key={k} className={it.done ? "md-task done" : "md-task"}>
+      // With nothing to call, the box is disabled, not just read-only: a read-only checkbox looks
+      // live and does nothing when clicked. `fixed` says why, on hover, for whoever tries.
+      <li key={k} className={it.done ? "md-task done" : "md-task"} title={ctx.onToggle ? undefined : ctx.fixed}>
         <input
-          type="checkbox" checked={it.done} readOnly={!ctx.onToggle} aria-label={it.text.split("\n")[0]}
+          type="checkbox" checked={it.done} disabled={!ctx.onToggle} aria-label={it.text.split("\n")[0]}
           onChange={() => ctx.onToggle?.(line)}
         />
         <span>{inline(it.text, k)}</span>
@@ -212,7 +214,7 @@ function blocks(ctx: Ctx, key: string): ReactNode[] {
       const inner: string[] = [];
       while (i < lines.length && QUOTE.test(lines[i])) inner.push(QUOTE.exec(lines[i++])![1]);
       // Checkboxes in a quote are shown but not clickable: their line numbers don't map back cleanly.
-      out.push(<blockquote key={k}>{blocks({ lines: inner, offset: start + ctx.offset }, `${k}q`)}</blockquote>);
+      out.push(<blockquote key={k}>{blocks({ lines: inner, fixed: ctx.fixed, offset: start + ctx.offset }, `${k}q`)}</blockquote>);
       continue;
     }
 
@@ -234,12 +236,14 @@ function blocks(ctx: Ctx, key: string): ReactNode[] {
 
 type Props = {
   text: string;
-  /** Called with the 0-based line of a checkbox the person clicked. Without it, checkboxes are read-only. */
+  /** Called with the 0-based line of a checkbox the person clicked. Without it, checkboxes are disabled. */
   onToggle?: (line: number) => void;
+  /** Why the checkboxes can't be ticked, for the tooltip on each one. Only used without `onToggle`. */
+  fixed?: string;
 };
 
-export function Markdown({ text, onToggle }: Props) {
+export function Markdown({ text, onToggle, fixed }: Props) {
   // Split on \n only, so line numbers match `toggleTask`; a \r from pasted text is dropped per line.
   const lines = text.split("\n").map((l) => l.replace(/\r$/, ""));
-  return <div className="md">{blocks({ lines, onToggle, offset: 0 }, "b")}</div>;
+  return <div className="md">{blocks({ lines, onToggle, fixed, offset: 0 }, "b")}</div>;
 }

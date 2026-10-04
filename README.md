@@ -1550,7 +1550,7 @@ address or a guess, and nothing on screen offers a change the server would refus
   attached, by mouse, touch, or keyboard), there's no check button, no add card or quick add,
   lane names are plain text with no menu, and `n`, `x`, `/`, and `⌘Z` do nothing. A card opens
   as a read-only view (`CardView` in `CardEditor.tsx`): the notes rendered with their
-  checkboxes fixed, lane, due date, and tags as text, files to open or download, and one
+  checkboxes disabled (dimmed, with a tooltip saying they're for writers to tick), lane, due date, and tags as text, files to open or download, and one
   button, Close. No assistant.
 - **A writer's board** has cards and nothing of the owner's. Gone, not disabled: lane menus,
   rename, and add lane; Undo, Redo, and their keys (a toast after a change never offers Undo);
