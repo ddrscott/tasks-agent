@@ -1,6 +1,6 @@
 # Demo video shot list
 
-A 75 second screen recording of the demo board at https://askscottpierce.com/tasks/demo. No
+An 80 second screen recording of the demo board at https://askscottpierce.com/tasks/demo. No
 voice-over needed; the captions carry it. Not recorded yet.
 
 ## // SETUP
