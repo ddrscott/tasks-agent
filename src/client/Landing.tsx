@@ -57,7 +57,9 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
           <a href={DEMO}>Demo</a>
           <a href="#connect">Connect</a>
           <a href="#pricing">Pricing</a>
-          <a className="landing-nav-signin" href="#sign-in">Sign in</a>
+          {signedIn
+            ? <a className="landing-nav-signin" href={`${BASE}/`}>Your board</a>
+            : <a className="landing-nav-signin" href="#sign-in">Sign in</a>}
         </nav>
       </header>
 
@@ -73,12 +75,12 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
               <a className="btn primary" href={DEMO}>Try the demo board</a>
               <span>No sign-up needed.</span>
             </p>
-            {signIn}
           </div>
+          {/* In the markup the picture comes before the form, which is the order a phone shows them in. */}
           <Shot />
+          <div className="landing-signin">{signIn}</div>
         </section>
 
-          <div className="landing-signin">{signIn}</div>
         <section className="landing-section" aria-labelledby="different-h">
           <h2 className="h" id="different-h">WHATS_DIFFERENT</h2>
           <ol className="landing-points">
@@ -110,10 +112,9 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
             <li>
               <h3>End-to-end encryption, if you want it.</h3>
               <p>
-                Set a passphrase and the board is encrypted in your browser. We store only ciphertext, in an
-          <div className="landing-signin">{signIn}</div>
-                open format (JWE). The trade-off: an encrypted board is closed to outside agents, because the
-                server can't read it either.
+                Set a passphrase and every lane name, title, note, tag, and file is encrypted in your browser
+                before it's sent. The server holds that as ciphertext in an open format (JWE). The trade-off:
+                an encrypted board is closed to outside agents, because the server can't read it either.
               </p>
               <p className="landing-aside"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
             </li>
@@ -135,13 +136,15 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
           </p>
         </section>
 
+        <Proof />
+
         <Pricing />
 
         <section className="landing-section landing-last">
           <p className="landing-lede">Look before you sign up.</p>
           <p className="landing-try">
             <a className="btn primary" href={DEMO}>Try the demo board</a>
-            <a className="btn" href="#sign-in">Sign in</a>
+            {signedIn ? <a className="btn" href={`${BASE}/`}>Open your board</a> : <a className="btn" href="#sign-in">Sign in</a>}
           </p>
         </section>
       </main>
@@ -150,43 +153,6 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
   );
 }
 
-// ---------- the picture ----------
-
-// One fixed moment, so the picture reads the same on every load: "4s ago" stays 4s ago.
-const NOW = Date.parse("2026-10-01T15:04:05Z");
-const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
-
-const card = (id: string, title: string, more: Partial<Card> = {}): Card => ({
-  id, title, notes: "", laneId: "sample", due: null, createdAt: at(86_400_000), updatedAt: at(60_000), ...more,
-});
-
-const TODO: Card[] = [
-  card("s1", "Write the 1.4 release notes", { tags: ["agent"] }),
-  card("s2", "Flaky test in the checkout spec", { tags: ["agent"], notes: "Fails about one run in ten on CI." }),
-  card("s3", "Renew the staging TLS cert"),
-];
-
-const DOING: Card[] = [
-  card("s4", "Rate limit the login endpoint", {
-    tags: ["agent", "needs-ceo"],
-    ask: {
-        <Proof />
-
-      question: "Limit by IP or by account?",
-      options: ["By IP", "By account", "Both, IP first"],
-      recommended: 2,
-      askedAt: at(120_000),
-    },
-  }),
-  card("s5", "Move the sessions table to D1", { tags: ["agent"] }),
-];
-
-const session = (id: string, more: Partial<Session>): Session => ({
-  id, project: "checkout-api", machine: "macbook", agent: "lead", state: "working", last: "", cwd: "~/code/checkout-api", link: "",
-  startedAt: NOW - 3_600_000, seenAt: NOW, ...more,
-});
-
-const SESSIONS: Session[] = [
 /** What sits where the sign-in form would, for someone who's already signed in (/tasks/pricing). */
 export function SignedInCard({ email }: { email: string }) {
   return (
@@ -275,6 +241,41 @@ function Proof() {
   );
 }
 
+// ---------- the picture ----------
+
+// One fixed moment, so the picture reads the same on every load: "4s ago" stays 4s ago.
+const NOW = Date.parse("2026-10-01T15:04:05Z");
+const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+
+const card = (id: string, title: string, more: Partial<Card> = {}): Card => ({
+  id, title, notes: "", laneId: "sample", due: null, createdAt: at(86_400_000), updatedAt: at(60_000), ...more,
+});
+
+const TODO: Card[] = [
+  card("s1", "Write the 1.4 release notes", { tags: ["agent"] }),
+  card("s2", "Flaky test in the checkout spec", { tags: ["agent"], notes: "Fails about one run in ten on CI." }),
+  card("s3", "Renew the staging TLS cert"),
+];
+
+const DOING: Card[] = [
+  card("s4", "Rate limit the login endpoint", {
+    tags: ["agent", "needs-ceo"],
+    ask: {
+      question: "Limit by IP or by account?",
+      options: ["By IP", "By account", "Both, IP first"],
+      recommended: 2,
+      askedAt: at(120_000),
+    },
+  }),
+  card("s5", "Move the sessions table to D1", { tags: ["agent"] }),
+];
+
+const session = (id: string, more: Partial<Session>): Session => ({
+  id, project: "checkout-api", machine: "macbook", agent: "lead", state: "working", last: "", cwd: "~/code/checkout-api", link: "",
+  startedAt: NOW - 3_600_000, seenAt: NOW, ...more,
+});
+
+const SESSIONS: Session[] = [
   session("7c1e04b2-sample", { state: "needs-input", machine: "mini", last: "Waiting on: Limit by IP or by account?", seenAt: NOW - 120_000 }),
   session("3fa9d6e1-sample", { last: "Edit migrations/0007_sessions.sql", seenAt: NOW - 4_000 }),
   session("b20c88a7-sample", { project: "docs-site", agent: "", state: "idle", last: "Finished: rebuilt the search index", cwd: "~/code/docs-site", seenAt: NOW - 180_000 }),
