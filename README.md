@@ -729,7 +729,10 @@ When an agent needs you to decide something, it asks on the card and you answer 
 - **The status line is on the card.** When a card's notes open with a `STATUS:` line (under
   any `ANSWER:` lines), the card face shows it as one line of small mono text, two lines at
   most, so nobody opens a card to see what its agent is doing (`statusLine` in
-  `src/shared.ts`, drawn by `CardFace`). A card with an open question shows the question
+  `src/shared.ts`, drawn by `CardFace`). Agents often open the line with a date
+  (`STATUS: 2026-10-04 — read the folder…`), which would take the room the news needs, so the
+  face leaves a leading date or date and time off (`withoutLeadingDate`, used by `faceLine`).
+  The notes keep the line as written, and the face's tooltip shows all of it. A card with an open question shows the question
   instead, and a card in the last lane shows neither.
 - **Right after you answer, the card says what you answered.** The STATUS line an agent wrote
   before asking usually says it's waiting on you, and it stays in the notes until the agent

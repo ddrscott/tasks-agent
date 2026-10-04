@@ -85,6 +85,16 @@ check("an answered one reads as answered", askState(describeCard(answerAsk(asked
 const face = (b) => faceLine(b.cards.find((c) => c.id === askedId));
 let told = updateCard(asked, askedId, { notes: "STATUS: blocked — waiting on your pick" });
 check("a plain card shows its STATUS line", faceLine({ notes: "STATUS: working — on it" }), { kind: "status", text: "working — on it" });
+// A date in front of the status would take the face's room, so the face leaves it off. The notes keep it.
+const faceOf = (line) => faceLine({ notes: `STATUS: ${line}` })?.text;
+check("a leading date is left off the face", faceOf("2026-10-04 — read the folder, three ideas"), "read the folder, three ideas");
+check("so is a date and time", faceOf("2026-10-04 14:05 UTC: writing the plan"), "writing the plan");
+check("and an ISO stamp", faceOf("2026-10-04T14:05:09Z - on it"), "on it");
+check("and one in brackets", faceOf("[2026-10-04 14:05] on it"), "on it");
+check("a date that's part of the sentence stays", faceOf("2026-10-04 is the deadline, on track"), "2026-10-04 is the deadline, on track");
+check("a date at the end stays", faceOf("done — shipped 2026-10-04"), "done — shipped 2026-10-04");
+check("a status that's only a date stays", faceOf("2026-10-04 —"), "2026-10-04 —");
+check("statusLine itself keeps the date", statusLine("STATUS: 2026-10-04 — on it"), "2026-10-04 — on it");
 told = answerAsk(told, askedId, { choice: 1 });
 check("right after an answer the face says the answer, not the STATUS from before it", face(told), { kind: "answered", text: "answered: Later" });
 check("the old STATUS is still in the notes, under the ANSWER line", statusLine(told.cards.find((c) => c.id === askedId).notes), "blocked — waiting on your pick");

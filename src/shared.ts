@@ -332,8 +332,22 @@ export function statusLine(notes: string): string | null {
   return null;
 }
 
+const STAMP = String.raw`\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?: ?(?:Z|UTC|GMT|[AaPp][Mm]|[+-]\d{2}:?\d{2}))?)?`;
+const LEADING_STAMP = new RegExp(`^(?:[\\[(]${STAMP}[\\])]\\s*[—–:·|,-]*|${STAMP}\\s*[—–:·|,-]+)\\s*`);
+
 /**
- * The one line of agent news a card's face shows under its title. Normally the STATUS line. But a
+ * A status line without the date or date and time it opens with. Agents often write
+ * `2026-10-04 — read the folder…`, and on a card's face, two short lines at most, the date takes
+ * the room the news needs. Only a date that's set off from the rest (a dash, a colon, brackets)
+ * is taken, so "2026-10-04 is the deadline" stays whole. The notes keep the line as written.
+ */
+export function withoutLeadingDate(line: string): string {
+  return line.replace(LEADING_STAMP, "") || line;
+}
+
+/**
+ * The one line of agent news a card's face shows under its title. Normally the STATUS line, without
+ * a date in front (withoutLeadingDate). But a
  * STATUS written before the owner answered ("blocked, waiting on your pick") is stale the moment
  * they tap, and stays until the agent rewrites it. So while the STATUS is still the one the card
  * had when it was answered, the face says what was answered instead. Any new STATUS line takes over.
@@ -343,7 +357,7 @@ export function faceLine(c: Pick<Card, "notes" | "answer">): { kind: "status" | 
   if (c.answer && c.answer.was !== undefined && (status ?? "") === c.answer.was) {
     return { kind: "answered", text: `answered: ${c.answer.answer}`.slice(0, 200) };
   }
-  return status ? { kind: "status", text: status } : null;
+  return status ? { kind: "status", text: withoutLeadingDate(status) } : null;
 }
 
 /** A card's open question or last answer in one line, for agents. */
