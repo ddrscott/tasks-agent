@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { blockedSessions, isStale, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isStale, projectName, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -83,7 +83,7 @@ export function PresenceLine({ session, agent, now }: { session: Session; agent?
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
-      <span className="sess-where">{agent || session.agent || "agent"} · {session.machine}</span>
+      <span className="sess-where">{whoWhere(session, agent || session.agent)}</span>
       <span className="sess-seen">{ago(now - session.seenAt)}</span>
     </div>
   );
@@ -147,15 +147,17 @@ export function SessionRow({ session, now, cards }: { session: Session; now: num
     <li className={`sess-row${isStale(session, now) ? " stale" : ""}`}>
       <div className="sess-line">
         <StateMark session={session} now={now} />
-        <span className="sess-where">{session.agent ? `${session.agent} · ` : ""}{session.machine}</span>
+        <span className="sess-where">{whoWhere(session)}</span>
         <span className="sess-seen" title={new Date(session.seenAt).toLocaleString()}>{ago(now - session.seenAt)}</span>
       </div>
       {session.last && <div className="sess-last">{session.last}</div>}
-      {cards.map((t) => <div key={t} className="sess-card">card: {t}</div>)}
+      {/* "claimed "Fix login"" already names the card, so it isn't said twice. */}
+      {cards.filter((t) => !session.last.includes(`"${t}"`)).map((t) => <div key={t} className="sess-card">card: {t}</div>)}
       <div className="sess-links">
+        {/* No folder means it never reported through hooks (it only claims cards), so there's nothing to resume. */}
         {session.link
           ? <a href={session.link} target="_blank" rel="noopener noreferrer">open session</a>
-          : <ResumeButton session={session} />}
+          : session.cwd && <ResumeButton session={session} />}
         <span className="sess-id" title={session.id}>{session.id.slice(0, 8)}</span>
       </div>
     </li>
@@ -182,7 +184,7 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
   const summary = `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {
     const by = new Map<string, Session[]>();
-    for (const s of [...sessions].sort(order(now))) by.set(s.project, [...(by.get(s.project) ?? []), s]);
+    for (const s of [...sessions].sort(order(now))) by.set(projectName(s), [...(by.get(projectName(s)) ?? []), s]);
     // A project's place comes from its most urgent session.
     return [...by.entries()].sort((a, b) => order(now)(a[1][0], b[1][0]));
   }, [sessions, now]);
@@ -203,9 +205,9 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
             <h2 className="h">SESSIONS</h2>
             {groups.length === 0 && (
               <p className="sess-empty">
-                No Claude Code sessions are reporting in. A session reports through hooks you add once
-                on each machine. {connectLink("#sessions", "Set up the hooks")} and sessions show up here
-                within seconds.
+                No sessions are reporting in. A Claude Code session reports through hooks you add once
+                on each machine: {connectLink("#sessions", "set up the hooks")} and it shows up here
+                within seconds. Any other agent shows up when it claims a card.
               </p>
             )}
             {groups.map(([project, list]) => (

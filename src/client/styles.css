@@ -820,7 +820,7 @@ a.att-name:hover { color: var(--accent-text); }
 .sess-links { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .sess-links a, .sess-resume { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .sess-links a:hover, .sess-resume:hover { color: var(--accent-text); }
-.sess-id { color: var(--muted); }
+.sess-id { color: var(--muted); margin-left: auto; }
 
 .menu { min-width: 220px; max-width: min(300px, calc(100vw - 32px)); padding: 6px; display: flex; flex-direction: column; }
 .menu .who { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }

@@ -7,7 +7,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Card } from "../shared";
 import { Popover } from "./Board";
-import { askingSession } from "../presence-shared";
+import { askingSession, projectName } from "../presence-shared";
 import { blockedSessions, PresenceLine, SessionRow, type Presence } from "./Sessions";
 
 export type AnswerFn = (cardId: string, input: { choice?: number; text?: string }) => void;
@@ -143,7 +143,7 @@ export function AsksButton({ cards, presence, open, setOpen, onOpenCard }: Butto
             ))}
             {blocked.map((s) => (
               <section key={s.id}>
-                <h3 className="asks-project">{s.project}</h3>
+                <h3 className="asks-project">{projectName(s)}</h3>
                 <ul className="card-session">
                   <SessionRow
                     session={s} now={presence.now}
