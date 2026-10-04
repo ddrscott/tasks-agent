@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opening a card puts the cursor in the title. On a phone it leaves the keyboard down until you tap a field
 - The assistant's footer says where it runs instead of naming models
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
+- The assistant's starter suggestions are about agent work: queue up cards tagged `agent`, ask what's waiting on your answer, ask which `#agent` cards aren't done
 
 ### Fixed
 - Tapping the search icon on a phone opens search

@@ -1,7 +1,7 @@
 # Tasks
 
-Live at **https://askscottpierce.com/tasks**. Tasks is a kanban-style task board with an assistant in the sidebar. Tell it "finished the dentist
-thing, add taxes for Friday" and the cards move while you watch. It runs entirely on
+Live at **https://askscottpierce.com/tasks**. Tasks is a kanban-style task board with an assistant in the sidebar. Tell it "finished the
+login test, add release notes for Friday" and the cards move while you watch. It runs entirely on
 Cloudflare, and you sign in with an emailed code.
 
 The point of the project is to show a simple task manager run by AI agents, where a small

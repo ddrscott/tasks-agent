@@ -7,15 +7,17 @@ import type { LocalCall } from "../needle-tools";
 import { clean, hasSealedText, type Board } from "../shared";
 import type { Vault } from "./vault";
 
+// What someone running agents on a few projects would say. Each one works on any board with the
+// tools the assistant has (src/tools.ts): it adds, tags, moves, and reads the board, open questions included.
 const SUGGESTIONS = [
-  "Add groceries, call the dentist, and file taxes by Friday",
-  "I finished the first thing on my list",
+  "Add fix the flaky login test, bump the SDK, and write release notes, all tagged agent",
+  "Which cards are waiting on an answer from me?",
+  "Which #agent cards aren't done yet?",
   "What's due this week?",
-  "Plan my Saturday: laundry, gym, and meal prep",
 ];
 
 // On an encrypted board the cloud model can't read anything, so only the model in this tab runs.
-const SEALED_SUGGESTIONS = ["Add groceries due tomorrow", "Add call the dentist"];
+const SEALED_SUGGESTIONS = ["Add fix the flaky login test", "Add cut the release Friday"];
 
 /** Encrypt the text in a local turn's tool calls. Ids and lane ids stay as they are; the server moves things by id. */
 async function sealCall(vault: Vault, c: LocalCall): Promise<LocalCall> {
@@ -137,7 +139,7 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
       if (!r.ok) {
         setLast({ path: "local", note: `not handled: ${r.reason}` });
         setText(v);
-        setNotice(`That's more than the assistant in this tab can do on its own (${r.reason}). The cloud assistant can't read an encrypted board, so try one plain step, like "finished the taxes" or "add call mom due Friday", or change the card directly.`);
+        setNotice(`That's more than the assistant in this tab can do on its own (${r.reason}). The cloud assistant can't read an encrypted board, so try one plain step, like "finished the login test" or "add cut the release Friday", or change the card directly.`);
         return;
       }
       const calls = await Promise.all(r.calls.map((c) => sealCall(vault, c)));
@@ -169,7 +171,7 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
           <div className="chat-empty">
             {vault
               ? <p>Your board is encrypted, so the assistant runs only in this tab, and nothing you type here leaves it unencrypted. It handles one plain step at a time: add a card, finish, start, move, set a date, or delete.</p>
-              : <p>Tell me what's on your plate, what you finished, or what changed. I'll update the board.</p>}
+              : <p>Tell me what to queue up for your agents, what shipped, or what changed. I'll update the board.</p>}
             <div className="suggestions">
               {(vault ? SEALED_SUGGESTIONS : SUGGESTIONS).map((s) => <button key={s} className="suggestion" onClick={() => send(s)}>{s}</button>)}
             </div>
@@ -206,7 +208,7 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
           <div className="cap-note" role="status">
             <p>
               <b>That's today's {usage.limit} assistant messages.</b> The board, drag and drop, and connected
-              agents keep working{localReady ? ", and so do plain commands like \"finished the taxes\", which the model in this tab handles for free" : ""}. The count resets at midnight UTC.
+              agents keep working{localReady ? ", and so do plain commands like \"finished the login test\", which the model in this tab handles for free" : ""}. The count resets at midnight UTC.
             </p>
             {canUpgrade && <button className="btn primary" onClick={onUpgrade}>Upgrade to Pro</button>}
           </div>
