@@ -425,11 +425,25 @@ section("invites");
   ok("the invited account accepts", acc.status === 200 && acc.data.board.id === owner.id && acc.data.board.role === "writer", acc);
   ok("the token is gone once it's used", d1(`SELECT token_hash FROM board_members WHERE owner_id = ${q(owner.id)}`)[0].token_hash === null);
   ok("the invite doesn't work twice", (await call(writer, "POST", "/api/invites/accept", { token: wToken })).status === 404);
-  ok("a used invite can't be looked up", (await call(writer, "POST", "/api/invites/lookup", { token: wToken })).status === 404);
   ok("a used invite can't be declined", (await call(writer, "POST", "/api/invites/decline", { token: wToken })).status === 404);
+
+  // Opening the invite email again. The member it let in is told they're already on the board;
+  // everyone else holding the same link hears what they'd hear for a made-up one.
+  const reopened = await call(writer, "POST", "/api/invites/lookup", { token: wToken });
+  ok("the member who used an invite, opening it again, is told they're already on the board", reopened.status === 200 && reopened.data.member?.board === owner.id && reopened.data.member.ownerEmail === owner.email && reopened.data.member.role === "writer" && !("invite" in reopened.data), reopened);
+  const usedByStranger = await call(stranger, "POST", "/api/invites/lookup", { token: wToken });
+  const madeUp = await call(stranger, "POST", "/api/invites/lookup", { token: randomBytes(32).toString("base64url") });
+  ok("anyone else with the used link hears the same as for a made-up one", usedByStranger.status === 404 && usedByStranger.text === madeUp.text && !usedByStranger.text.includes(owner.email), usedByStranger);
+  const usedByOwner = await call(owner, "POST", "/api/invites/lookup", { token: wToken });
+  ok("so does the owner, and so does nobody at all", usedByOwner.status === 404 && usedByOwner.text === madeUp.text && (await call(null, "POST", "/api/invites/lookup", { token: wToken })).status === 401);
+  ok("being recognized doesn't make the link work again", (await call(writer, "POST", "/api/invites/accept", { token: wToken })).status === 404 && (await call(writer, "POST", "/api/invites/decline", { token: wToken })).status === 404
+    && (await call(stranger, "POST", "/api/invites/accept", { token: wToken })).status === 404);
+  const usedRow = d1(`SELECT token_hash, used_token_hash, status FROM board_members WHERE owner_id = ${q(owner.id)} AND member_email = ${q(writer.email)}`)[0];
+  ok("the used link is kept only as a hash, apart from the one that opens things", usedRow.token_hash === null && usedRow.used_token_hash === sha256(`invite:${wToken}`) && usedRow.status === "accepted", usedRow);
 
   for (const [u, role] of [[viewer, "viewer"], [removed, "writer"], [leaver, "writer"]]) {
     const r = await invite(owner, u.email, role);
+    u.inviteToken = tokenOf(r);
     const a = await call(u, "POST", "/api/invites/accept", { token: tokenOf(r) });
     ok(`${u.name} is invited as ${role} and accepts`, r.status === 201 && a.status === 200, [r.status, a.status]);
   }
@@ -904,7 +918,9 @@ section("open sockets follow membership");
   ok("the removed member can't reconnect", refused(await open(removed, { board: owner.id }), 404));
   ok("the removed member can't download files", (await call(removed, "GET", `/api/attachments/a0123456789abcdef?board=${owner.id}`)).status === 404);
   ok("the removed member's board list is empty again", (await call(removed, "GET", "/api/boards")).data.shared.length === 0);
-  ok("the removed member's old invite link is still dead", (await call(removed, "POST", "/api/invites/lookup", { token: randomBytes(32).toString("base64url") })).status === 404);
+  const oldLink = await call(removed, "POST", "/api/invites/lookup", { token: removed.inviteToken });
+  const noLink = await call(removed, "POST", "/api/invites/lookup", { token: randomBytes(32).toString("base64url") });
+  ok("the removed member's old invite link says nothing about the board anymore", oldLink.status === 404 && oldLink.text === noLink.text && (await call(removed, "POST", "/api/invites/accept", { token: removed.inviteToken })).status === 404, oldLink);
 
   mark = leaverSock.frames.length;
   const tLeft = Date.now();
@@ -923,6 +939,8 @@ section("open sockets follow membership");
   ok("and gets nothing after that", leaverSock.frames.length === leaverFrames);
   ok("and can't call anything on it", (await leaverSock.rpc("addCard", [lanes[0].id, "Ghost"], 1500)).success === false && (await leaverSock.rpc("search", [{ query: "seed" }], 1500)).success === false);
   ok("and they can't come back without a new invite", refused(await open(leaver, { board: owner.id }), 404));
+  const leftLink = await call(leaver, "POST", "/api/invites/lookup", { token: leaver.inviteToken });
+  ok("the link they joined with is as dead as a made-up one", leftLink.status === 404 && leftLink.data?.code === "invite_invalid" && !("member" in (leftLink.data ?? {})), leftLink);
 }
 
 // ---------- a member who floods ----------

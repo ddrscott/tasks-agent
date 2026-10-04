@@ -1211,7 +1211,7 @@ each card.
   that can fail gets the same answer, so nothing says whether a board exists.
 - **Membership is in D1** (migrations `0005_team_boards.sql` and up): `board_members` (one row
   per person, pending or accepted; owner id, owner email, member email, member id, role, status,
-  token hash, expiry, invited/accepted times), `board_audit` (append-only; triggers refuse
+  token hash, the hash of the link they joined with, expiry, invited/accepted times), `board_audit` (append-only; triggers refuse
   UPDATE and DELETE; `0006_board_activity.sql` adds `detail` for card entries), `invite_sends` (the daily email count), `board_sharing` (whether the
   board is currently view-only because Pro lapsed). Declining, revoking, removing, and
   leaving delete the member row; the audit log keeps what happened.
@@ -1459,7 +1459,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
 | `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found` |
 | `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
-| `POST /api/invites/lookup` | `{ token }` | `200 { invite: { board, ownerEmail, email, role, expiresAt } }`, `404 invite_invalid`, `429 too_many` |
+| `POST /api/invites/lookup` | `{ token }` | `200 { invite: { board, ownerEmail, email, role, expiresAt } }` for a live invite to this account. `200 { member: { board, ownerEmail, role } }` when this account already used this very link and is still on the board. `404 invite_invalid` for everything else, `429 too_many` |
 | `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
@@ -1478,7 +1478,15 @@ bytes and sits in the fragment, so it never reaches the server in a URL, a log, 
 D1 holds only `SHA-256("invite:" + token)`, and the invite is found by that hash. One refusal,
 `invite_invalid` ("This invite isn't for this account, or it's no longer valid."), covers a
 wrong account, a used, expired, revoked, declined, or made-up token. Accepting clears the hash
-in the same statement, so a link works once. Lookups are limited to 30 an hour per account and
+in the same statement, so a link works once. One case gets a kinder answer, and only from
+`lookup`: the member who used a link, opening it again while they're still on the board, is
+told `{ member: { board, ownerEmail, role } }` ("You're already on dana's board", with an Open
+button). Accepting moves the hash to `used_token_hash` (migration `0007_used_invites.sql`),
+and `lookup` reads that column only together with the signed-in account's own id and email on
+an accepted row. So it's no oracle: a stranger holding the link, the owner, another account,
+and the same person after leaving or being removed all get `invite_invalid`, word for word
+what a made-up token gets. `accept` and `decline` never look at that column, so a used link
+never works again. Lookups are limited to 30 an hour per account and
 120 per IP. `/tasks/invite` is a page (`src/client/Invite.tsx`, `noindex`); what it does is
 under **The member's side**. The token never goes through sign-in in a URL: the page keeps it
 in the tab and signs you in with `next=/tasks/invite`. `next` only ever takes paths inside the
@@ -1520,7 +1528,9 @@ address or a guess, and nothing on screen offers a change the server would refus
   address it was sent to, the role, one line on what that role can do, and when the link
   expires, with Accept and Decline. Accept lands on the shared board. Every invite that can't
   be used gets one message, the same way the server gives one refusal: it was sent to a
-  different address, or it's been used, withdrawn, or has expired. It doesn't say which, so a
+  different address, or it's been used, withdrawn, or has expired. The exception is your own
+  invite opened again after you accepted it: that says "You're already on dana's board", your
+  role, and Open the board. It doesn't say which, so a
   stolen link says nothing about itself. From there, "Sign out and use another address" signs
   you out and brings you back to the same invite after you sign in again.
 - **The board switcher** (`src/client/BoardSwitcher.tsx`) sits next to the wordmark: My board,

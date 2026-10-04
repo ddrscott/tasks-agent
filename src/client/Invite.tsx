@@ -48,6 +48,8 @@ const SIGN_IN = `${BASE}/?next=${encodeURIComponent(`${BASE}/invite`)}`;
 type State =
   | { at: "checking" }
   | { at: "invite"; invite: InviteInfo }
+  /** This account already accepted this very invite and is still on the board. */
+  | { at: "member"; board: string; ownerEmail: string; role: "viewer" | "writer" }
   /** One state for every invite that can't be used by this account. */
   | { at: "no-good" }
   | { at: "declined"; ownerEmail: string }
@@ -71,9 +73,11 @@ export function Invite({ me, onSignedOut }: { me: { email: string } | null; onSi
   useEffect(() => {
     if (!me || !token) return;
     let off = false;
-    post<{ invite?: InviteInfo }>("/api/invites/lookup", { token }).then(({ ok, status, data }) => {
+    post<{ invite?: InviteInfo; member?: { board: string; ownerEmail: string; role: "viewer" | "writer" } }>("/api/invites/lookup", { token }).then(({ ok, status, data }) => {
       if (off) return;
       if (ok && data.invite) setState({ at: "invite", invite: data.invite });
+      // The link was already used, by this account: there's nothing to accept, only a board to open.
+      else if (ok && data.member) setState({ at: "member", ...data.member });
       // The token stays in the tab: "sign out and use another address" comes back here with it.
       else if (status === 404) setState({ at: "no-good" });
       else setState({ at: "later", text: data.error ?? "The invite couldn't be checked just now. Try again in a minute." });
@@ -147,6 +151,22 @@ export function Invite({ me, onSignedOut }: { me: { email: string } | null; onSi
               <div className="invite-actions">
                 <button className="btn primary" disabled={!!busy} onClick={() => void answer("accept", state.invite)}>{busy === "accept" ? "Joining…" : "Accept"}</button>
                 <button className="btn" disabled={!!busy} onClick={() => void answer("decline", state.invite)}>{busy === "decline" ? "Declining…" : "Decline"}</button>
+              </div>
+            </>
+          )}
+
+          {token && me && state.at === "member" && (
+            <>
+              <p role="status"><b>You're already on <span className="mono">{state.ownerEmail}</span>'s board.</b></p>
+              <dl className="invite-facts">
+                <div><dt>Board</dt><dd>{state.ownerEmail}</dd></div>
+                <div><dt>You</dt><dd>{me.email}</dd></div>
+                <div><dt>Role</dt><dd><span className="role-chip" data-role={state.role}>{state.role}</span></dd></div>
+              </dl>
+              <p>You accepted this invite earlier, so there's nothing left to do here. An invite link works once.</p>
+              <div className="invite-actions">
+                <a className="btn primary" href={`${BASE}/?board=${state.board}`} onClick={dropToken}>Open the board</a>
+                {home}
               </div>
             </>
           )}

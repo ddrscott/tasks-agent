@@ -46,7 +46,7 @@ const tokenHash = (token: string) => sha256(`invite:${token}`);
 
 type MemberRow = {
   owner_id: string; owner_email: string; member_email: string; member_id: string; role: MemberRole;
-  status: "pending" | "accepted"; token_hash: string | null; expires_at: number | null;
+  status: "pending" | "accepted"; token_hash: string | null; used_token_hash: string | null; expires_at: number | null;
   invited_at: number; accepted_at: number | null; updated_at: number;
 };
 
@@ -467,10 +467,28 @@ async function liveInvite(env: Env, user: User, token: unknown): Promise<MemberR
   return row;
 }
 
+/**
+ * The board a spent token let this very account onto, if they're still on it. For the person
+ * who opens their invite email a second time. It answers only for the signed-in member the
+ * token was used by (their id and their email, on a row that's still accepted), so it tells
+ * nobody anything they couldn't already see in their own board list: a stranger holding the
+ * same link, another account, and the same person after leaving or being removed all get
+ * nothing here, and so the one generic refusal. It's a read. Nothing about the token changes.
+ */
+async function usedByMe(env: Env, user: User, token: unknown): Promise<Pick<MemberRow, "owner_id" | "owner_email" | "role"> | null> {
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  return env.DB.prepare(
+    "SELECT owner_id, owner_email, role FROM board_members WHERE used_token_hash = ? AND member_id = ? AND member_email = ? AND status = 'accepted'",
+  ).bind(await tokenHash(token), user.id, user.email).first<Pick<MemberRow, "owner_id" | "owner_email" | "role">>();
+}
+
 async function lookup(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
   if (!(await withinLookups(req, env, user))) return tooMany();
   const row = await liveInvite(env, user, body.token);
-  if (!row) return inviteInvalid();
+  if (!row) {
+    const mine = await usedByMe(env, user, body.token);
+    return mine ? json({ member: { board: mine.owner_id, ownerEmail: mine.owner_email, role: mine.role } }) : inviteInvalid();
+  }
   return json({ invite: { board: row.owner_id, ownerEmail: row.owner_email, email: row.member_email, role: row.role, expiresAt: row.expires_at } });
 }
 
@@ -482,7 +500,7 @@ async function accept(req: Request, env: Env, user: User, body: Record<string, u
   // Single use: the token's hash is cleared in the same statement that accepts, so of two
   // requests racing with one link, one changes a row and the other finds nothing.
   const used = await env.DB.prepare(
-    `UPDATE board_members SET status = 'accepted', token_hash = NULL, expires_at = NULL, accepted_at = ?1, updated_at = ?1
+    `UPDATE board_members SET status = 'accepted', used_token_hash = token_hash, token_hash = NULL, expires_at = NULL, accepted_at = ?1, updated_at = ?1
      WHERE token_hash = ?2 AND status = 'pending' AND member_email = ?3 AND member_id = ?4 AND expires_at > ?1`,
   ).bind(now, row.token_hash, user.email, user.id).run();
   if (used.meta.changes !== 1) return inviteInvalid();
