@@ -71,11 +71,22 @@ run ahead of whatever serves the zone.
   `terms`, `demo`. Add a new page to that list. The response is still a 200, because the
   Worker's assets serve the app shell for every unknown path.
 - **First run.** A board with no cards shows `// START_HERE` above its lanes
-  (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
-  with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
-  never shows it.
+  (`src/client/FirstRun.tsx`): four steps that end with Claude Code working a card. Sign in
+  (done), **Add a sample agent card**, **Copy the command**, paste it in a terminal. The steps
+  are `QuickStart` in `Connect.tsx`, and the Connect page shows them too (`// CONNECT_AN_AGENT`
+  has the command).
+  - The sample card (`SAMPLE` in `FirstRun.tsx`) is a real card tagged `#agent`. Its notes have
+    the agent look at the folder it was started in, find 2 or 3 small improvements, and ask
+    which to do with `ask_ceo` before it changes a file, so the visitor sees a question land on
+    the card and answers it in one tap. Adding it is one change, so one undo takes it back out.
+  - The block stays up while that sample card is open and no agent has connected, so step 3 is
+    still there after step 2 (`quickStartOpen`). It goes away when an agent connects, when the
+    sample is deleted or done, or when the board has cards and none is the sample. An encrypted
+    board never shows it.
+  - Its last line says how to tag your own cards: `#agent` at the end of the title, or the Tags field.
 - **No agent connected yet.** From the first card on, a board no agent has ever reached says
-  so (`src/client/AgentNudge.tsx`): one line above the lanes, a `no agent connected` chip on
+  so (`src/client/AgentNudge.tsx`): one line above the lanes (not while `// START_HERE` is up,
+  so the board says it once; with no `#agent` card yet, the line says how to tag one), a `no agent connected` chip on
   each open `#agent` or `#gauntlet` card, and the same in plain words in that card's editor,
   each linking to `/tasks/connect`. The X hides the line for that browser tab's session; the
   chips stay. The board remembers the first MCP request that got through (`agentSeenAt`, set
@@ -344,8 +355,9 @@ they came from anywhere else, including sibling subdomains that `SameSite=Lax` l
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
-can work the board. The page at **/tasks/connect** shows the server URL, setup steps
-for each client, the starter prompt (`#prompt`), connected apps and tokens (`#apps`), the
+can work the board. The page at **/tasks/connect** opens with a headline for people running
+coding agents and the four-step `// QUICK_START` for Claude Code (`#quick`), then shows the
+server URL, setup steps for each client (`#add`, Claude Code's tab first), the starter prompt (`#prompt`), connected apps and tokens (`#apps`), the
 one-command Sessions setup (`#sessions`), how the `#agent` tag, questions, claims, and the
 event feed fit together (`#working`), and the tool list (`#tools`). It's the first item in
 the user menu, the `// START_HERE` block on an empty board links to it, and so do the
@@ -359,13 +371,54 @@ strip, and the not-found page link to it too.
   lands back on the same section. The top bar's back link goes to the board signed in and to
   the landing page signed out. `App.tsx` routes `connect` ahead of the sign-in check and
   passes `signedIn`; the page is a static asset, so the Worker never gated it.
-- **The starter prompt.** Step 03 is the text to paste into a freshly connected agent, with a
-  Copy button: list cards with `get_board` and `tag: "agent"`, claim before starting, move to
-  Doing, keep a `STATUS:` line at the top of the notes, `ask_ceo` and move on, then Done and
-  `release_card`, and never touch a card without the tag. A second tab, "Claude Code + event
-  feed", adds starting `tasks-events.mjs --require agent` under Monitor and what to do with
-  each event. Both live in `Connect.tsx` (`STARTER_PROMPT`, `feedPrompt`); when a tool's
-  behavior changes, check them against `src/tool-docs.ts` and `src/mcp.ts`.
+- **The quick start.** Four steps: sign in, **Add a sample agent card**, **Copy the command**,
+  paste it in a terminal. The same `QuickStart` component is the empty board's `// START_HERE`
+  (`// HOW_IT_WORKS`, First run). On the Connect page, which has no board connection, the
+  sample button leaves a note in `sessionStorage` and goes to the board, which adds the card.
+  Copy the command creates an access token named "Claude Code quick start" and copies one line
+  (`quickStartCommand`):
+
+  ```sh
+  claude mcp remove tasks -s local >/dev/null 2>&1; claude mcp add --transport http tasks https://askscottpierce.com/tasks/mcp --header 'Authorization: Bearer tasks_…' && claude 'Work the agent cards on my Tasks board. Call get_started on the tasks MCP server first and follow what it returns.' --allowedTools mcp__tasks
+  ```
+
+  - No `/mcp` Authenticate and Allow round trip: the token is the sign-in. It's shown once, in
+    the command, and the page says so and says what the command changes. OAuth, which leaves no
+    token on disk, is the Claude Code tab under `#add`.
+  - `claude mcp add` refuses a name that's already there, so the local-scope entry is removed
+    first; that fails quietly when there isn't one. The new entry is local scope (the folder
+    it's run in), which wins over a `tasks` in user or project scope.
+  - Everything is single-quoted and the prompt is one plain line with no `$`, `!`, quotes, or
+    backticks, so no shell expands anything. The prompt comes before `--allowedTools`, which
+    takes a list and would swallow it. `--allowedTools mcp__tasks` lets Claude use the board's
+    tools without a prompt per call; file edits and shell commands still ask.
+  - Quick start tokens that were never used are commands that were copied and never run. The
+    button revokes those before it makes a new one, so clicking it again doesn't eat the 10.
+  - Codex has the same shape on its tab (`codexQuickCommand`): `export TASKS_TOKEN=… && codex
+    mcp add tasks --url … --bearer-token-env-var TASKS_TOKEN && codex '<prompt>'`. Cursor, VS
+    Code, and the chat apps have no terminal command to start them, so they keep their steps.
+  - The flags were checked against `claude mcp add --help`, `claude mcp remove --help`,
+    `claude --help` (2.1.289), and `codex mcp add --help` (0.150.1). Check again when they change.
+- **The starter prompt is one line.** Step 03 is `STARTER_LINE` from `src/agent-rules.ts`: it
+  tells the agent to call the MCP tool `get_started`, which returns the working rules
+  (`workingRules` in the same file). The rules live on the server so the pasted prompt is easy
+  to quote, works in every client, and can't go stale. A second tab, "The full rules", shows
+  the same text for reading or pasting whole. The rules cover: only `#agent` cards; a session
+  id, plus `agent`, `machine`, and `project` for `claim_card` (without them the board shows
+  "unknown"); `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
+  Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
+  notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo`, release, move
+  on; Done and `release_card`.
+  - **Coming back for an answer.** Nothing calls an agent when the owner answers. The rules
+    have it check `get_board` about every 20 seconds for up to 10 minutes while a question it
+    asked is open, pick the card up again when it shows ANSWERED, and otherwise say plainly
+    "answer on the board, then tell me to check the board".
+  - **The event feed is an upgrade, in the same rules.** If `~/.config/tasks/tasks-events.mjs`
+    exists (the Sessions setup installs it) and the agent has Claude Code's Monitor tool, it
+    runs the feed with `--require agent` and an answer wakes it at once. If not, it skips that
+    part. So the quick start command works before the Sessions setup has been run.
+  - When a tool's behavior changes, check `src/agent-rules.ts` against `src/tool-docs.ts`,
+    `src/mcp.ts`, and `src/shared.ts`.
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
   never points at this file. Its one command installs `scripts/tasks-presence.mjs` and
   `scripts/tasks-events.mjs` into `~/.config/tasks/`, next to the token (`// SESSIONS`), and
@@ -377,12 +430,13 @@ strip, and the not-found page link to it too.
   their descriptions from it, and `mcp.ts` fails to compile if it lists a tool that isn't
   registered, so the page can't drift from the server.
 
-- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`, `get_card`,
+- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
+  rules, above), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
-  and `update_card` replaces the whole list.
+  and `update_card` replaces the whole list when it's passed and keeps it when it isn't.
 - **Reading a card.** `get_board` is the overview: it shows the first 120 characters of each
   card's notes, says how many more there are (`… [+480 more characters]`), and lists file
   names. `get_card` returns one card in full: all of the notes, lane, tags, due date, the
@@ -400,7 +454,7 @@ strip, and the not-found page link to it too.
   needed, then see a consent screen with the app's name and where it returns to,
   and choose Allow. Access tokens last an hour and refresh tokens 90 days. Connected
   apps are listed on the Connect page, and disconnecting one kills its tokens.
-- **Access tokens (fallback).** For clients that take a pasted token (Codex, Glean's
+- **Access tokens.** For the quick start command, and for clients that take a pasted token (Codex, Glean's
   API Key method): `Authorization: Bearer tasks_…`. Per user, at most 10, stored as
   SHA-256 hashes in D1 (`api_tokens`). Only a browser session can create or revoke
   them.
@@ -428,8 +482,8 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 ```
 
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
-agent definition (`~/.claude/agents/lead.md`) does this itself, and so does the "Claude Code +
-event feed" starter prompt on the Connect page. The Sessions setup command (`// SESSIONS`)
+agent definition (`~/.claude/agents/lead.md`) does this itself, and the working rules from
+`get_started` tell Claude Code to do it whenever the script is installed. The Sessions setup command (`// SESSIONS`)
 installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
