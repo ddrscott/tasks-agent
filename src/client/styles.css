@@ -541,6 +541,8 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
+/* The agent's STATUS line from the notes: plain mono text, two lines at most. The whole line is in its title. */
+.card-status { margin-top: 6px; font: 11px/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .card-meta:empty { display: none; }
 .chip {
@@ -943,6 +945,14 @@ a.att-name:hover { color: var(--accent-text); }
 .landing-note b { color: var(--ink); font-weight: 600; }
 .landing-note code { font: 12.5px var(--font-mono); padding: 1px 5px; background: var(--surface-2); border-radius: var(--radius-sm); color: var(--ink); }
 .landing-section .copy-row { max-width: 820px; }
+/* The four-step quick start, told before sign-in: the same numerals as // START_HERE, no buttons. */
+.landing-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.landing-steps li { counter-increment: step; display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.5; }
+.landing-steps li::before { content: counter(step, decimal-leading-zero); font: 700 16px/1.4 var(--font-mono); color: var(--accent); }
+.landing-steps b { font-weight: 600; }
+.landing-steps span { color: var(--muted); }
+.landing-steps code { font: 12.5px var(--font-mono); color: var(--ink); }
+.landing-section .btn.primary { text-decoration: none; display: inline-flex; }
 .landing-points { margin: 0; padding: 0; list-style: none; counter-reset: point; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; }
 .landing-points li { counter-increment: point; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .landing-points li::before { content: counter(point, decimal-leading-zero); font: 700 16px/1.4 var(--font-mono); color: var(--accent); }
@@ -999,9 +1009,11 @@ a.att-name:hover { color: var(--accent-text); }
   .landing-nav { gap: 14px; }
   .landing-nav-signin { display: inline; }
   .landing-section { padding: 32px 0; }
+  .landing-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 560px) {
   .landing-points { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .landing-steps { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .shot-body { grid-template-columns: minmax(0, 1fr); padding: 12px; }
   /* A phone gets a slice of the picture: the top bar's counts and the lane with the question and
      the claimed card. The Sessions list would push the sign-in form two screens down. */

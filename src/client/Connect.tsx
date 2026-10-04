@@ -298,21 +298,21 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         </li>
         <li className={hasSample ? "done" : undefined}>
           <b>Add a sample agent card</b>
-          <span>A real card tagged <code>#agent</code>. It has the agent look around a folder, suggest a small fix, and ask you which one before it changes anything.</span>
+          <span>A real card tagged <code>#agent</code>. The agent reads the folder you start it in, asks which small improvement to plan, and writes that plan on the card. It changes no files.</span>
           <button className={`btn${signedIn && !hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || hasSample} onClick={onAddSample}>
             {hasSample ? <><IconCheck />Added</> : "Add a sample agent card"}
           </button>
         </li>
         <li>
           <b>Copy the command</b>
-          <span>One line for Claude Code. It connects this board with a new access token and starts Claude on your <code>#agent</code> cards.</span>
+          <span>One line for Claude Code. It connects this board with a new access token and starts Claude on your <code>#agent</code> cards, with the board's tools approved ahead of time.</span>
           <button className={`btn${hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || busy} onClick={() => void copy()}>
             {busy ? "Making it…" : quick?.copied ? <><IconCheck />Copied. Copy again</> : "Copy the command"}
           </button>
         </li>
         <li>
           <b>Paste it in a terminal</b>
-          <span>In any project folder. Claude Code claims the card and asks its question on the card. Answer with one tap on the board, and it carries on.</span>
+          <span>In any folder. Say yes if Claude Code asks whether you trust it, then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
         </li>
       </ol>
       {error && (
@@ -333,7 +333,9 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         <b>What the command does:</b> it adds an MCP server named <code>tasks</code>, with a new access
         token, to Claude Code's config for the folder you run it in (replacing one of that name). Then
         it starts Claude with a one-line prompt, allowed to use the board's tools without asking each
-        time. The token is shown once, in the command; revoke it under {connectLink("#apps", "Connected apps")}.
+        time. That includes deleting cards and lanes; Undo on the board takes back anything an agent
+        does. The command doesn't approve writing files or running commands: for anything that changes
+        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command; revoke it under {connectLink("#apps", "Connected apps")}.
         OAuth is the other way, with no token on disk: {connectLink("#add", "the full steps")}, with Cursor and Codex too.
       </p>
     </>
@@ -552,7 +554,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
               paste this into the agent you just connected. The one line has the agent
               call <code>get_started</code>, and the server answers with the working rules: which cards
               are its own, to claim one before starting, to keep a status line on it, to ask you instead
-              of guessing, to come back for your answer, and to move the card to Done.
+              of guessing or when it's stuck, to wait for your answer, and to move the card to Done.
             </p>
             <div className="client-tabs" role="tablist" aria-label="Prompt">
               {PROMPTS.map((p) => (
@@ -570,11 +572,12 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
               </p>
             )}
             <p className="muted">
-              <b>Getting your answer back to it.</b> Nothing calls an agent when you answer. The rules have
-              it check the board every 20 seconds or so for 10 minutes while a question is open. After
-              that, or with an agent that can't wait, tell it <i>“check the board”</i>. Claude Code can do
-              better: run the one command under <a href="#sessions">Sessions</a> and it listens to the
-              event feed, so your answer wakes it right away. The same prompt works either way.
+              <b>Getting your answer back to it.</b> While a question is open, the rules have the agent
+              call <code>wait_for_answer</code>, which holds until you answer and hands it the card, for
+              up to 10 minutes. That works in any MCP client, with no shell. After 10 minutes it stops
+              and says so: tell it <i>“check the board”</i>. With the <a href="#sessions">Sessions</a> setup
+              on a machine, Claude Code can also listen to the event feed, which tells it about new
+              cards and edits as well as answers. The same prompt works either way.
             </p>
           </div>
         </section>
@@ -753,14 +756,16 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
                 <p>
                   When an agent needs a decision it calls <code>ask_ceo</code>. The card gets <code>#needs-ceo</code> and
                   shows the question with a button for each option, and the top bar counts what's waiting on
-                  you. One tap answers it. The answer is kept on the card.
+you. One tap answers it. The answer is kept on the card. An agent that can't go on, say
+                  because a tool was refused, asks the same way instead of stopping quietly.
                 </p>
               </li>
               <li>
                 <b>One card, one session.</b>
                 <p>
                   An agent calls <code>claim_card</code> before it starts a card, so two sessions never work the
-                  same one, and says what it is, its machine, and its folder. A claimed card shows the session's state under its title. A claim lapses 15
+                  same one, and says what it is and its folder. The server hands each agent a session id to
+                  claim with; a Claude Code session with the Sessions hooks uses its own, so it's one row. A claimed card shows the session's state under its title. A claim lapses 15
                   minutes after its session goes quiet. The server tells every agent about claims and
                   questions when it connects, so you don't have to.
                 </p>
@@ -772,8 +777,9 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
                   an <code>#agent</code> card, so an agent on your machine can act on it without polling.
                   The <a href="#sessions">Sessions setup</a> installs it
                   as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. Run it under Claude
-                  Code's Monitor tool; the rules tell Claude Code to do that when the script is there.
-                  Without it, an agent checks the board again for your answer. Changes an agent
+                  Code's Monitor tool; the rules tell Claude Code to do that when the Sessions hooks say
+                  the feed is installed. Claude Code asks once before it runs the script.
+                  Without it, an agent waits for your answer with <code>wait_for_answer</code>. Changes an agent
                   makes are left out, so it never wakes itself.
                 </p>
                 <Snippet lang="sh" code={eventsCommand()} />

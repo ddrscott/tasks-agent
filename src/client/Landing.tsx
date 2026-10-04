@@ -88,9 +88,9 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
               <h3>Agents ask. You answer in one tap.</h3>
               <p>
                 An agent that needs a call from you puts the question on the card with two to four options
-                and can mark the one it would pick. Tap one and the answer goes on the card. An agent
-                listening on the event feed hears it right then. Any other agent sees it the next time it
-                reads the board.
+                and can mark the one it would pick. Tap one and the answer goes on the card. The agent
+                is waiting on it and picks it up within a few seconds, in any MCP client. An agent that gets
+                stuck asks the same way instead of stopping quietly.
               </p>
             </li>
             <li>
@@ -123,16 +123,45 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
 
         <section className="landing-section" id="connect" aria-labelledby="connect-h">
           <h2 className="h" id="connect-h">CONNECT_AN_AGENT</h2>
-          <p className="landing-lede">One command puts Claude Code on your board.</p>
+          <p className="landing-lede">Four steps to Claude Code working a card on your board.</p>
+          <ol className="landing-steps">
+            <li>
+              <b>Sign in</b>
+              <span>Your email and a code. No password.</span>
+            </li>
+            <li>
+              <b>Add a sample agent card</b>
+              <span>One button on your new board. The card has the agent read a folder and plan one small improvement. It only reads.</span>
+            </li>
+            <li>
+              <b>Copy the command</b>
+              <span>One line that connects Claude Code to your board with a new access token and starts it on your <code>#agent</code> cards.</span>
+            </li>
+            <li>
+              <b>Paste it in a terminal</b>
+              <span>Claude Code claims the card and asks which improvement to plan. Tap an answer on the board. It writes the plan on the card and moves it to Done.</span>
+            </li>
+          </ol>
+          <p>
+            {signedIn ? <a className="btn primary" href={`${BASE}/`}>Open your board</a> : <a className="btn primary" href="#sign-in">Sign in to start</a>}
+          </p>
+          <p className="landing-note">
+            The command lets Claude Code use the board's tools without asking each time, deleting cards
+            included, and Undo on the board takes any of it back. It doesn't pre-approve writing files or
+            running commands.
+          </p>
+          <p className="landing-note">
+            <b>The other way is OAuth</b>, which leaves no token on disk. Add the server with this:
+          </p>
           <div className="copy-row">
             <code className="mono-box live">{command}</code>
             <CopyButton text={command} />
           </div>
           <p className="landing-note">
             Then run <code>/mcp</code> in Claude Code, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser
-            opens here to sign in and allow it. Tag a card <code>#agent</code> and tell the agent to work the board.
+            opens here to sign in and allow it. Tag a card <code>#agent</code> and paste in the starter prompt.
             Cursor, VS Code, Codex, ChatGPT, and Claude have their own steps on
-            the <a href={`${BASE}/connect`}>Connect page</a>, with a starter prompt to paste in. You can read it all before you sign up.
+            the <a href={`${BASE}/connect`}>Connect page</a>. You can read it all before you sign up.
           </p>
         </section>
 

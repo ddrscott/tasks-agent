@@ -71,9 +71,16 @@ export const TOOL_DOCS = {
     description:
       "Ask the board's owner to decide something, as a multiple-choice question on a card. The card gets #needs-ceo and " +
       "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
-      "the notes. The answer comes back in the `answered` event and shows in get_board as ANSWERED. Keep the question to " +
-      "one line, make the options complete actions, and put the reasoning in the card's notes. Don't wait on it: move on to other work.",
+      "the notes, and when you can't go on with a card: say what you need. The answer shows in get_board as ANSWERED. Keep the question to " +
+      "one line, make the options complete actions, and put the reasoning in the card's notes. Move on to other work, and call wait_for_answer when none is left.",
     about: "Ask you a multiple-choice question on a card. You answer with one tap.",
+  },
+  wait_for_answer: {
+    description:
+      "Wait for the owner to answer questions you asked with ask_ceo. Pass the ids of the cards you asked on. It holds for up to 30 seconds " +
+      "(seconds changes that) and returns as soon as one is answered, with that card in full. If nothing is answered in that time it says so: " +
+      "call it again to keep waiting. Use this instead of sleeping or calling get_board over and over.",
+    about: "Wait for your answer. It holds for up to 30 seconds and returns the moment you answer one of the agent's questions.",
   },
   claim_card: {
     description:

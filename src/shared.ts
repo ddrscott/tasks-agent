@@ -313,6 +313,21 @@ export function answerAsk(b: Board, id: string, input: { choice?: number; text?:
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
 }
 
+/**
+ * The agent's STATUS line, without the label, when the notes open with one. The board's ANSWER:
+ * lines sit above it (answerAsk), so those and blank lines are skipped. Null when the first real
+ * line is anything else: notes a person wrote aren't a status.
+ */
+export function statusLine(notes: string): string | null {
+  for (const raw of notes.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("ANSWER:")) continue;
+    const m = /^STATUS:\s*(\S.*)$/.exec(line);
+    return m ? m[1].slice(0, 200) : null;
+  }
+  return null;
+}
+
 /** A card's open question or last answer in one line, for agents. */
 export function describeAsk(c: Card): string {
   if (c.ask) return ` — ASKING: ${c.ask.question} [${c.ask.options.map((o, i) => `${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`).join(" | ")}]`;
@@ -489,6 +504,17 @@ export function describeLaneCounts(b: Board): string {
   return b.lanes.map((l) => `${l.name} ${laneCards(b, l.id).length}`).join(" · ");
 }
 
+const ASKING = "Asking the owner: ";
+const ANSWERED = "Owner answered: ";
+/** How many lines describeCard writes before the question or answer. Titles and tags are one line each. */
+const CARD_HEAD_LINES = 5;
+
+/** Where a card's question stands, read back from describeCard's text (wait_for_answer in mcp.ts). */
+export function askState(described: string): "asking" | "answered" | "none" {
+  const line = described.split("\n")[CARD_HEAD_LINES] ?? "";
+  return line.startsWith(ASKING) ? "asking" : line.startsWith(ANSWERED) ? "answered" : "none";
+}
+
 /** Everything on one card, as plain text: the full notes, and each attachment with its id, type, and size. */
 export function describeCard(b: Board, id: string): string | null {
   const c = b.cards.find((x) => x.id === id);
@@ -502,8 +528,8 @@ export function describeCard(b: Board, id: string): string | null {
     `Due: ${c.due ?? "(none)"}`,
     `Created: ${c.createdAt}${c.updatedAt && c.updatedAt !== c.createdAt ? ` · updated: ${c.updatedAt}` : ""}`,
   ];
-  if (c.ask) lines.push(`Asking the owner: ${c.ask.question}`, ...c.ask.options.map((o, i) => `  ${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`));
-  if (c.answer) lines.push(`Owner answered: "${c.answer.answer}" to "${c.answer.question}"`);
+  if (c.ask) lines.push(`${ASKING}${c.ask.question}`, ...c.ask.options.map((o, i) => `  ${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`));
+  if (c.answer) lines.push(`${ANSWERED}"${c.answer.answer}" to "${c.answer.question}"`);
   lines.push(c.attachments?.length
     ? `Attachments (${c.attachments.length}):\n${c.attachments.map((a) => `  - [${a.id}] ${a.name} (${a.type}, ${kb(a.size)})`).join("\n")}`
     : "Attachments: (none)");

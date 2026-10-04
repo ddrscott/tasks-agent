@@ -109,9 +109,24 @@ run ahead of whatever serves the zone.
   are `QuickStart` in `Connect.tsx`, and the Connect page shows them too (`// CONNECT_AN_AGENT`
   has the command).
   - The sample card (`SAMPLE` in `FirstRun.tsx`) is a real card tagged `#agent`. Its notes have
-    the agent look at the folder it was started in, find 2 or 3 small improvements, and ask
-    which to do with `ask_ceo` before it changes a file, so the visitor sees a question land on
-    the card and answers it in one tap. Adding it is one change, so one undo takes it back out.
+    the agent read the folder it was started in, find 2 or 3 small improvements, ask which one
+    with `ask_ceo`, then write a plan for the answer into the card's notes as a `- [ ]`
+    checklist and move the card to Done. So the visitor sees a question land on the card,
+    answers it in one tap, and watches the card finish. Adding it is one change, so one undo
+    takes it back out.
+  - **It has to finish on what the command allows.** The copied command pre-approves the
+    board's tools and nothing else, and the visitor is looking at the browser, not the
+    terminal. So the card asks for no file write and no command that changes anything: only MCP
+    calls, listing the folder, and reading files in it, which Claude Code doesn't ask about.
+    (2.1.289 has no Glob tool. It lists with a read-only `ls`, which it runs without asking.
+    A card that said "no shell, not even ls" left the agent guessing at file names, and it
+    asked on the card how to go on.) An earlier sample had the agent make the
+    change, and it stopped at a Write approval nobody saw. In an empty or non-code folder the
+    card has it offer first steps instead. Checked with real `claude -p` runs (2.1.289,
+    `--allowedTools mcp__tasks`, no user settings) in an empty folder, a folder of two recipe
+    text files, and a small Python project: question on the card within 30 seconds, one tap,
+    Done 11 to 13 seconds later, no refused tool call. A `-p` run refuses what an interactive
+    session would stop and ask about, so no refusals there means no prompts here.
   - The block stays up while that sample card is open and no agent has connected, so step 3 is
     still there after step 2 (`quickStartOpen`). It goes away when an agent connects, when the
     sample is deleted or done, or when the board has cards and none is the sample. An encrypted
@@ -458,7 +473,16 @@ strip, and the not-found page link to it too.
   - Everything is single-quoted and the prompt is one plain line with no `$`, `!`, quotes, or
     backticks, so no shell expands anything. The prompt comes before `--allowedTools`, which
     takes a list and would swallow it. `--allowedTools mcp__tasks` lets Claude use the board's
-    tools without a prompt per call; file edits and shell commands still ask.
+    tools without a prompt per call; file edits and shell commands still ask. The page says
+    both halves under the steps: the board's tools include deleting cards and lanes, which
+    Undo takes back, and writing files and running commands aren't pre-approved. Write, Edit,
+    and Bash stay out of `--allowedTools` on purpose; the sample card is built to not need them.
+  - Step 4 says what happens and no more: Claude Code may ask once whether you trust the
+    folder, a question lands on the card, and an answer gets a plan in the notes and the card
+    in Done. The lede after step 2 says two steps are left, not that Claude Code is working.
+  - The front page tells the same four steps under `// CONNECT_AN_AGENT`, without the buttons
+    (a signed-out page can't mint a token), with a Sign in to start button. The OAuth command
+    sits under them as the other way.
   - Quick start tokens that were never used are commands that were copied and never run. The
     button revokes those before it makes a new one, so clicking it again doesn't eat the 10.
   - Codex has the same shape on its tab (`codexQuickCommand`): `export TASKS_TOKEN=… && codex
@@ -471,19 +495,44 @@ strip, and the not-found page link to it too.
   (`workingRules` in the same file). The rules live on the server so the pasted prompt is easy
   to quote, works in every client, and can't go stale. A second tab, "The full rules", shows
   the same text for reading or pasting whole. The rules cover: only `#agent` cards; a session
-  id, plus `agent`, `machine`, and `project` for `claim_card` (without them the board shows
-  "unknown"); `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
+  id, plus `agent`, `machine`, and `project` for `claim_card`, none of which the agent runs a
+  command to find; `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
   Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
   notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo`, release, move
   on; Done and `release_card`.
-  - **Coming back for an answer.** Nothing calls an agent when the owner answers. The rules
-    have it check `get_board` about every 20 seconds for up to 10 minutes while a question it
-    asked is open, pick the card up again when it shows ANSWERED, and otherwise say plainly
-    "answer on the board, then tell me to check the board".
-  - **The event feed is an upgrade, in the same rules.** If `~/.config/tasks/tasks-events.mjs`
-    exists (the Sessions setup installs it) and the agent has Claude Code's Monitor tool, it
-    runs the feed with `--require agent` and an answer wakes it at once. If not, it skips that
-    part. So the quick start command works before the Sessions setup has been run.
+  - **The session id needs no shell.** `get_started` makes an id for the call (`tasks-` and 8
+    characters; nothing is stored until it claims) and the rules say to use it. That works in
+    every client and under the quick start's permissions, where `echo $CLAUDE_CODE_SESSION_ID`
+    would be a Bash approval. With the Sessions hooks installed the board already has a row
+    under Claude Code's own session id, so a made-up id would be a second row. For that case
+    the hook prints `Tasks session id: <id>` on `SessionStart`, which Claude Code adds to the
+    session's context, and the rules say to use that id when the line is there. One row either
+    way. A machine whose hooks were installed before this prints nothing and gets the second
+    row until the setup command is run again. The Connect page's copy of the rules has no
+    server to make an id, so it says to make one up once.
+  - **Waiting for an answer.** Nothing calls an agent when the owner answers, and an agent
+    with only MCP tools can't sleep. So the server holds: `wait_for_answer` takes the ids of
+    the cards the agent asked on and returns the moment one is answered, or after 30 seconds
+    (`seconds`, at most 45, under the 60 seconds most MCP clients allow a call). The rules
+    have the agent call it again for up to 10 minutes, then say plainly "answer on the board,
+    then tell me to check the board" and stop. It's the same in an interactive Claude Code
+    session, a `claude -p` run, and any other MCP client. The MCP server stays stateless: the
+    Worker rereads the cards every 2 seconds (`cardDetail`, at most 30 reads a call) and keeps
+    nothing; a client that hangs up ends the loop.
+  - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
+    failing: the rules have the agent call `ask_ceo` on the card with what it needs and options
+    that are whole actions ("I've allowed it in the terminal, try again", "Do it another way:
+    …", "Skip this card"), so it lands on the card face and in "need you". Writing blocked in
+    the notes and releasing isn't enough, because nobody sees it. It can't cover a permission
+    prompt that's still open in an interactive terminal, since the agent is stopped inside the
+    tool call; the Sessions hooks report that one as a session that needs input.
+  - **The event feed is an upgrade, in the same rules.** The agent starts it only when its
+    context has the line `Tasks event feed: installed`, which the Sessions hook prints on
+    `SessionStart` when `tasks-events.mjs` sits next to it, or when the owner says to, and it
+    has Claude Code's Monitor tool. It doesn't go looking for the file, which is outside the
+    folder it's allowed to read. The feed adds new cards, edits, and deletes to what
+    `wait_for_answer` hears. Claude Code asks once before it runs the script unless it's been
+    allowed. So the quick start command works before the Sessions setup has been run.
   - When a tool's behavior changes, check `src/agent-rules.ts` against `src/tool-docs.ts`,
     `src/mcp.ts`, and `src/shared.ts`.
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
@@ -499,7 +548,7 @@ strip, and the not-found page link to it too.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
   rules, above), `get_board`, `get_card`,
-  `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
+  `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
@@ -550,7 +599,8 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
 agent definition (`~/.claude/agents/lead.md`) does this itself, and the working rules from
-`get_started` tell Claude Code to do it whenever the script is installed. The Sessions setup command (`// SESSIONS`)
+`get_started` tell Claude Code to do it when the Sessions hook has said the script is installed
+(it prints `Tasks event feed: installed` into the session when it starts). The Sessions setup command (`// SESSIONS`)
 installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
@@ -611,12 +661,24 @@ When an agent needs you to decide something, it asks on the card and you answer 
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
   Taking `#needs-ceo` off by hand clears the question without an answer.
-- **The agent hears it.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
+- **The agent waits for it.** `wait_for_answer` over MCP holds for up to 30 seconds and
+  returns as soon as one of the cards it was given is answered, with that card in full. It also
+  returns when a card was deleted or its question was cleared by hand. The working rules have
+  an agent call it in a loop for up to 10 minutes (`// CONNECT_AN_AGENT`). No shell, no feed.
+- **The feed says it too.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
   and `question`, so the agent acts on it without reading the card:
   `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?"}`.
   `get_board` shows an open question as `ASKING: … [1) … | 2) …]` and the last answer as
   `ANSWERED: "…" to "…"`, ahead of the notes. An `answered` event without `answer` still means
   what it always did: you took `#needs-ceo` off yourself.
+- **Stuck is a question too.** An agent that can't go on (a tool was refused, something is
+  missing) asks with `ask_ceo` what to do about it, so the card shows it and "need you" counts it.
+- **The status line is on the card.** When a card's notes open with a `STATUS:` line (under
+  any `ANSWER:` lines), the card face shows it as one line of small mono text, two lines at
+  most, so nobody opens a card to see what its agent is doing (`statusLine` in
+  `src/shared.ts`, drawn by `CardFace`). A card with an open question shows the question
+  instead, and a card in the last lane shows neither. An encrypted board is the same as any
+  other here: the browser has the decrypted notes, and nothing new is stored or sent.
 - **Undo.** Undoing an answer puts the question back, but nothing tells the agent, the same as
   every other undo. If it already acted, say so on the card.
 - **Encrypted boards** have no questions. They'd be stored unencrypted, and MCP is closed there.
@@ -751,7 +813,10 @@ It uses the same token file as `// AGENT_EVENTS`: `~/.config/tasks/token`, or `T
 
 `scripts/tasks-presence.mjs` reads the hook's JSON on stdin and posts about 200 bytes: session
 id, folder, event name, tool name, file path, and notification text. The rest of the payload
-never leaves the machine. It never prints, always exits 0, gives up after 3 seconds, and sends
+never leaves the machine. It prints only on `SessionStart`, where Claude Code adds a hook's
+output to the session's context: `Tasks session id: <id>`, so the agent claims cards under
+the id this row has without running a command, and `Tasks event feed: installed` when
+`tasks-events.mjs` sits next to it. It always exits 0, gives up after 3 seconds, and sends
 tool-use events at most once every 30 seconds per session. The two events that fire constantly
 (`UserPromptSubmit`, `PostToolUse`) run in the background with `async`. The rest run in line,
 which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
@@ -807,8 +872,9 @@ below). The browser reads the list over its own WebSocket,
 `/tasks/presence`, which takes the session cookie and refuses other origins like the board's.
 
 **Claiming cards.** Several lead agents can work one board. Before starting a card, a lead calls
-the MCP tool `claim_card` with the card's id and its session id (`CLAUDE_CODE_SESSION_ID` in
-Claude Code). The `Presence` object handles one call at a time, so of two leads asking at once,
+the MCP tool `claim_card` with the card's id and its session id: Claude Code's own when the
+hooks have printed it into the session, otherwise the one `get_started` handed it
+(`// CONNECT_AN_AGENT`). The `Presence` object handles one call at a time, so of two leads asking at once,
 one gets the card and the other is told who has it. `get_board` ends with the list of claimed
 cards, and `release_card` gives one back. A claim holds for 15 minutes after its session was
 last heard from, which is longer than the 5-minute stale mark on purpose: a lead that's thinking
@@ -867,7 +933,8 @@ What a hookless session can't say: that it's stopped at a prompt (its questions 
 the claim. For a lead agent's instructions:
 
 ```
-Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
+Before you move a card to Doing, call claim_card with its id, your session id (the "Tasks
+session id:" line in your context, or $CLAUDE_CODE_SESSION_ID), and
 agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
 card you're working at least every 10 minutes, and release_card when you hand it to Scott with
 needs-ceo. Moving a card to Done releases it for you.

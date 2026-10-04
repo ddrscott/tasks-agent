@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Check when the board says "No agent connected yet" (src/shared.ts: markAgentSeen,
-// agentConnected, needsAgent, waitsForAgent, keepSettings). Exits 1 on a failure.
+// agentConnected, needsAgent, waitsForAgent, keepSettings), plus what a card's notes and
+// question read as (statusLine, askState). Exits 1 on a failure.
 //
 //   npm run check:nudge
 
@@ -13,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-nudge");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { markAgentSeen, agentConnected, needsAgent, waitsForAgent, keepSettings, addCard, updateCard, moveCard, deleteCards, newBoard } = await import(pathToFileURL(outfile).href);
+const { markAgentSeen, agentConnected, needsAgent, waitsForAgent, keepSettings, addCard, updateCard, moveCard, deleteCards, newBoard, statusLine, askState, describeCard, askCard, answerAsk } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -66,6 +67,19 @@ check("undo keeps the theme and the passphrase envelope too",
   keepSettings({ ...board(), theme: "nord", sealed: { ...sealed, kid: "old" } }, { ...board(), theme: "paper", themeChosen: true, sealed }),
   { lanes, cards: [], theme: "paper", themeChosen: true, sealed });
 check("a board that isn't encrypted comes back with no envelope", "sealed" in keepSettings({ ...board(), sealed }, board()), false);
+
+// What the card face shows of the notes (statusLine), and what wait_for_answer reads off a card (askState).
+check("a STATUS line on top shows, without its label", statusLine("STATUS: working — writing the retry\n\nmore"), "working — writing the retry");
+check("ANSWER lines and blank lines above it are skipped", statusLine("ANSWER: Ship it (asked: Now?) — 2026-10-04 05:20 UTC\n\nSTATUS: on it"), "on it");
+check("notes a person wrote aren't a status", statusLine("Call the vendor first.\nSTATUS: later"), null);
+check("an empty STATUS line isn't one", statusLine("STATUS:   "), null);
+check("no notes, no status", statusLine(""), null);
+let asked = addCard(newBoard(), { title: "Asking the owner: a title that looks like a question", notes: "Owner answered: not really" });
+const askedId = asked.card.id;
+check("a card nobody asked on has no question", askState(describeCard(asked.board, askedId)), "none");
+asked = askCard(asked.board, askedId, { question: "Now or later?", options: ["Now", "Later"] });
+check("an open question reads as asking", askState(describeCard(asked, askedId)), "asking");
+check("an answered one reads as answered", askState(describeCard(answerAsk(asked, askedId, { choice: 0 }), askedId)), "answered");
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);
