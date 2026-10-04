@@ -30,6 +30,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 
 ```
 askscottpierce.com/tasks/assets/*  ──▶ static assets (no Worker hop)
+askscottpierce.com/tasks/<page>    ──▶ Worker ──▶ the app's HTML for a page in src/routes.ts, a 404 for anything else
 askscottpierce.com/tasks/api/*     ──▶ Worker ──▶ D1 (codes, sessions), EMAIL.send
 askscottpierce.com/tasks/agent     ──▶ Worker ──session──▶ your TodoAgent (Durable Object)
                                           board state ⇄ UI · chat ─▶ Workers AI + board tools
@@ -55,7 +56,11 @@ run ahead of whatever serves the zone.
   rejects state pushed directly from clients.
 - **Signed out.** `/tasks/` is the landing page (`src/client/Landing.tsx`), with the sign-in
   form (`src/client/Login.tsx`) in it. Above the fold at 1280x800: the headline, the form, a
-  "Try the demo board" link to `/tasks/demo`, and a picture of the product. The picture is not
+  "Try the demo board" link to `/tasks/demo`, and a picture of the product. On a phone the
+  order is headline, pitch, demo button, a slice of the picture (the top bar and the Doing
+  lane, no Sessions list), then the form, so the first screen shows the product and the form
+  is one short scroll or the Sign in link away. The form's email field takes focus on load
+  only on a wide screen, because focusing it scrolls to it. The picture is not
   an image. It's `CardFace`, `AskBlock`, and the Sessions `SessionRow` fed sample data and marked
   `inert`, so it follows the theme and changes when the real components do. Keep it showing a
   question with a `REC` option, a claimed card, and a needs-input session. Its top bar counts
@@ -63,13 +68,33 @@ run ahead of whatever serves the zone.
   bar would. Below the fold:
   `// WHATS_DIFFERENT` (which says the encryption trade-off plainly: an encrypted board is
   closed to outside agents), the `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the
-  same one the Connect page shows) with a link to the public Connect page, and `// PRICING` (see `// BILLING`). Nothing on the page
-  claims users, stars, or quotes we don't have. Arriving with `?next=` (an agent's OAuth
-  consent) shows only the form.
+  same one the Connect page shows) with a link to the public Connect page,
+  `// CHECK_IT_YOURSELF`, and `// PRICING` (see `// BILLING`). Arriving with `?next=` (an
+  agent's OAuth consent) shows only the form.
+- **Proof on the landing page.** `// CHECK_IT_YOURSELF` (`Proof` in `Landing.tsx`) lists only
+  what a visitor can verify, each row with the link that proves it: the demo board, the public
+  repo, the changelog, the encryption format, the protocol, and what Sessions stores. Beside it
+  is who makes Tasks and why, in Scott's own words. The changelog numbers (how many changes since
+  the newest release, and in all) are counted from `CHANGELOG.md` when the build starts
+  (`counts` in `vite.config.ts`); never type one in. Nothing on the page claims users, stars,
+  logos, or quotes we don't have, and a row goes away if it stops being true. The copy holds to
+  the same rule: an answer reaches an agent on the event feed right away and any other agent
+  the next time it reads the board, so the page says both.
+- **Pricing has an address.** `/tasks/pricing` is the landing page scrolled to `// PRICING`,
+  signed in or out. Signed in, a "signed in as" card with a link to the board stands where the
+  form would (`SignedInCard`).
 - **Not found.** An address under `/tasks/` that isn't a page gets `src/client/NotFound.tsx`,
-  signed in or not. The pages are listed in `KNOWN` there: the board, `connect`, `privacy`,
-  `terms`, `demo`. Add a new page to that list. The response is still a 200, because the
-  Worker's assets serve the app shell for every unknown path.
+  signed in or not, and the response is a real **404**. The pages are listed once, in
+  `src/routes.ts` (`PAGES`): `connect`, `privacy`, `terms`, `demo`, `pricing`, plus `/tasks/`
+  itself. The client uses the list to pick the page and the Worker uses it to pick the status,
+  so add a new page there and nowhere else. To make that possible the Worker answers every
+  `/tasks` address (`run_worker_first` in `wrangler.jsonc`) except `/tasks/assets/*` and
+  `/tasks/needle/*`, which the asset layer serves by itself, and `not_found_handling` is
+  `none`: a page gets the app's HTML, a file in `public/tasks/` gets the file, and everything
+  else gets the app's HTML with a 404. A missing file under `/tasks/assets/` is a bare 404.
+- **Who's signed in.** `GET /tasks/api/me` answers 200 either way: the user, or `null` when
+  nobody is signed in. It isn't a 401, so a signed-out visit leaves the browser console clean.
+  Everything that needs a session still answers 401 without one.
 - **First run.** A board with no cards shows `// START_HERE` above its lanes
   (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
   with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
@@ -816,7 +841,7 @@ true facts in there: no ratings, no user counts, and no price until billing is o
   a network connection for the Google Fonts, and fails if a PNG comes out the wrong size.
 - **Static files go in `public/tasks/`**, so their path matches their URL and the asset layer
   serves them. A file anywhere else under `public/` isn't reachable on the `/tasks` routes,
-  and a missing one gets the app's HTML back with a 200. After adding one, check
+  and a missing one gets the not-found page with a 404. After adding one, check
   `curl -sI localhost:5173/tasks/og.png` says `image/png`.
 - X, Slack, and iMessage cache previews. After changing the image, rename it (and the URLs in
   `index.html`) if the old one has to stop showing.
@@ -870,6 +895,7 @@ npm run db:migrate:local
 npm run dev          # http://localhost:5173/tasks/ — Workers AI is always remote, so `npx wrangler login` first
 npm run dev:local    # no Cloudflare login needed; everything works except the assistant
 npm run typecheck
+npm run build && npx vite preview   # the built Worker, for checking status codes: /tasks/nope is a 404
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
@@ -935,7 +961,8 @@ the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newe
 - `vite.config.ts` reads the version, the commit, and the changelog when the build starts and
   bakes them in as `__BUILD__` (`src/client/Footer.tsx` reads it). Nothing is fetched at run
   time. The footer shows the newest two releases with entries, 14 lines at most, newest first
-  within each group.
+  within each group. `__BUILD__.counts` is how many entries the changelog holds (all of them,
+  the ones under `[Unreleased]`, and the newest release's), which the landing page quotes.
 - A `+` after the commit means the build had uncommitted changes, so the commit doesn't fully
   say what's running. A deploy from a clean `main` never has one.
 - Cutting a release: `[Unreleased]` becomes `[X.Y.Z] - YYYY-MM-DD` with a fresh empty
