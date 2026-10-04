@@ -23,6 +23,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
+import { fitTopbar } from "./topbarFit";
 
 type Me = { email: string; id: string; model: string };
 type Page = "board" | "connect" | "privacy" | "terms";
@@ -396,11 +397,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     <AskContext.Provider value={answerAsk}>
     <div className="app">
       <div className="main">
-        <header className="topbar">
+        <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
           {board.sealed && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" onClick={() => setEncOpen(true)}>
-              <IconLock /><span className="hide-sm">encrypted</span>
+              <IconLock /><span className="hide-sm label">encrypted</span>
             </button>
           )}
           <div className="stats" aria-label="Summary">
@@ -417,8 +418,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
             <div className="btn-pair">
-              <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"}>
-                <IconUndo /><span className="hide-sm">Undo</span>
+              <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"} aria-label="Undo">
+                <IconUndo /><span className="hide-sm label">Undo</span>
               </button>
               <button className="btn icon" onClick={() => void redo()} disabled={!stack.redo} title={stack.redo ? `Redo ${stack.redo.toLowerCase()} (⇧⌘Z)` : "Nothing to redo"} aria-label="Redo">
                 <IconRedo />
@@ -432,11 +433,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
               />
             )}
             <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => void agent.stub.setTheme(t)} />
-            <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)">
-              <IconChat />Assistant
+            <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
+              <IconChat /><span className="label">Assistant</span>
             </button>
             <div className="anchor">
-              <button className="btn icon" title={me.email} aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser /></button>
+              <button className="btn icon account-btn" title={me.email} aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser /></button>
               {menuOpen && (
                 <Popover onClose={() => setMenuOpen(false)}>
                   <div className="menu">

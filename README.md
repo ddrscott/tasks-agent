@@ -80,6 +80,15 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
+- **The top bar.** Open questions, a session count, due stats, and a tag filter all add to
+  the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
+  guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
+  gives up space one step at a time and stops at the first step that fits: the search box
+  becomes its icon (click it or press `⌘K` and it opens across the bar), then Undo, "need
+  you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
+  summary goes, and last the tag filter chip moves to its own row under the bar. A phone
+  always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
+  attribute, and `styles.css` does the rest.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
@@ -329,7 +338,8 @@ When an agent needs you to decide something, it asks on the card and you answer 
 - **Answering.** The card face shows the question with a button per option, the recommended one
   outlined. The card editor shows the same plus a box for a typed answer. While anything is
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
-  they can be cleared in a row. On a phone the count is all that shows.
+  they can be cleared in a row. When the bar is short on room, and always on a phone, the
+  count is all that shows.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.

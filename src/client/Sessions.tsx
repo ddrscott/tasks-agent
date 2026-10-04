@@ -159,7 +159,7 @@ export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
         className={`btn sess-btn${waiting ? " waiting" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}
         title={waiting ? `${waiting} session${waiting === 1 ? "" : "s"} waiting on you` : `${live.length} live session${live.length === 1 ? "" : "s"}`}
       >
-        <IconSessions /><span className="hide-sm">Sessions</span>
+        <IconSessions /><span className="hide-sm label">Sessions</span>
         {sessions.length > 0 && <span className="sess-count">{waiting || live.length}</span>}
       </button>
       {open && (

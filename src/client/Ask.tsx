@@ -79,7 +79,7 @@ export function AsksButton({ cards, open, setOpen, onOpenCard }: ButtonProps) {
         title="Questions waiting on you" aria-label={`${asking.length} question${asking.length === 1 ? "" : "s"} waiting on you`}
       >
         <span className="asks-count">?{asking.length}</span>
-        <span className="hide-sm">need{asking.length === 1 ? "s" : ""} you</span>
+        <span className="hide-sm label">need{asking.length === 1 ? "s" : ""} you</span>
       </button>
       {open && (
         <Popover onClose={() => setOpen(false)}>

@@ -341,8 +341,10 @@ kbd {
 .main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 
 .topbar {
+  /* The opened search box and the filter chip's own row are placed against the bar. */
+  position: relative; --bar-pad: 24px;
   display: flex; align-items: center; gap: 16px;
-  padding: 14px 24px; border-bottom: var(--border-w) solid var(--line);
+  padding: 14px var(--bar-pad); border-bottom: var(--border-w) solid var(--line);
 }
 .wordmark { font: 700 22px/1 var(--font-display); letter-spacing: -.01em; margin: 0; }
 .wordmark span { color: var(--accent); }
@@ -365,7 +367,23 @@ kbd {
 .search mark, .search-results mark { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
 .search-note { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); }
 .topbar .spacer { flex: 1; }
-.topbar .actions { display: flex; gap: 6px; align-items: center; }
+.topbar .actions { display: flex; gap: 6px; align-items: center; flex: none; }
+
+/* When the buttons don't fit, the bar gives up space a step at a time (topbarFit.ts measures it and
+   lists the steps taken in data-tight). First the search box becomes its icon; the input lies over
+   the icon so a click focuses it, and focus opens it across the bar. */
+.topbar[data-tight~="search"] .search { width: 34px; padding: 0; justify-content: center; flex: none; }
+.topbar[data-tight~="search"] .search:not(:focus-within) input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.topbar[data-tight~="search"] .search:not(:focus-within) kbd { display: none; }
+.topbar[data-tight~="search"] .search:focus-within { position: absolute; left: var(--bar-pad); right: var(--bar-pad); width: auto; padding: 0 10px; z-index: 20; }
+.topbar[data-tight~="search"] .search:focus-within input { width: auto; }
+/* Then the button labels go, leaving icon plus count. */
+.topbar[data-tight~="labels"] .label { display: none; }
+/* Then the summary. */
+.topbar[data-tight~="stats"] .stats { display: none; }
+/* Last, the tag filter chip takes a row of its own under the bar. A phone always does this. */
+.topbar[data-tight~="chip"]:has(.filter-chip) { padding-bottom: 50px; }
+.topbar[data-tight~="chip"] .filter-chip { position: absolute; left: var(--bar-pad); bottom: 12px; max-width: calc(100% - 2 * var(--bar-pad)); }
 
 /* ============================================================ board */
 
@@ -887,7 +905,7 @@ a.att-name:hover { color: var(--accent); }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .topbar { padding: 12px 16px; gap: 10px; }
+  .topbar { --bar-pad: 16px; padding: 12px var(--bar-pad); gap: 10px; }
   .stats .hide-sm, .topbar .hide-sm { display: none; }
   .board { padding: 16px; gap: 12px; scroll-snap-type: x mandatory; scroll-padding: 16px; }
   .lane { flex-basis: min(86vw, 320px); }
@@ -916,8 +934,11 @@ a.att-name:hover { color: var(--accent); }
   .sessions, .asks { width: auto; max-width: none; }
   .asks-btn, .sess-btn { padding: 0 8px; }
   /* Room for the questions and sessions buttons beside the rest of the bar on a phone. */
-  .topbar { gap: 6px; padding: 12px; }
+  .topbar { gap: 6px; --bar-pad: 12px; }
   .topbar .actions { gap: 4px; }
+  /* A tag filter chip doesn't fit beside the buttons, so it gets a row of its own under them. */
+  .topbar:has(.filter-chip) { padding-bottom: 48px; }
+  .topbar .filter-chip { position: absolute; left: var(--bar-pad); bottom: 10px; max-width: calc(100% - 2 * var(--bar-pad)); }
   .ask-opt { min-height: 42px; }
   .search { width: 34px; padding: 0; justify-content: center; flex: none; }
   .search:focus-within { position: absolute; left: 12px; right: 12px; width: auto; padding: 0 10px; z-index: 20; }
@@ -965,7 +986,8 @@ a.att-name:hover { color: var(--accent); }
 @media (hover: none) and (pointer: coarse) {
   /* Fingers need about 40px. */
   .btn { height: 40px; }
-  .btn.icon, .search { width: 40px; }
+  .btn.icon, .search, .topbar[data-tight~="search"] .search { width: 40px; }
+  .topbar[data-tight~="search"] .search:focus-within { width: auto; }
   .search { height: 40px; }
   .lane-head { padding: 6px 4px 4px 14px; gap: 4px; }
   .lane-head .btn { height: 40px; width: 40px; }
