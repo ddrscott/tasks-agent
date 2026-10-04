@@ -9,6 +9,7 @@ import { hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortB
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
+import { AgentNudge, NoAgentChip } from "./AgentNudge";
 
 export type Actions = {
   addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
@@ -240,6 +241,8 @@ export function BoardView(p: Props) {
       onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
       onDragCancel={() => { setDrag(null); p.onDragging(false); }}
     >
+      {/* "No agent connected yet", until one is (AgentNudge.tsx). */}
+      <AgentNudge board={board} say={p.toast} />
       <div className="board">
         {board.lanes.map((lane, i) => (
           <LaneView
@@ -440,6 +443,7 @@ function CardFace(p: {
               onClick={(e) => { e.stopPropagation(); p.onTag?.(t); }}
             >#{t}</button>
           ))}
+          <NoAgentChip card={card} />
           {card.due && <DueChip due={card.due} done={p.isDone} />}
           {card.notes && <span className="chip" title={card.notes}><IconNotes />notes</span>}
           {!!card.attachments?.length && (

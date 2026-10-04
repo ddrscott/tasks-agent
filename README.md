@@ -60,6 +60,19 @@ run ahead of whatever serves the zone.
   (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
   with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
   never shows it.
+- **No agent connected yet.** From the first card on, a board no agent has ever reached says
+  so (`src/client/AgentNudge.tsx`): one line above the lanes, a `no agent connected` chip on
+  each open `#agent` or `#gauntlet` card, and the same in plain words in that card's editor,
+  each linking to `/tasks/connect`. The X hides the line for that browser tab's session; the
+  chips stay. The board remembers the first MCP request that got through (`agentSeenAt`, set
+  by `noteAgentSeen` in `src/agent.ts`), and when it lands every open tab drops all three
+  without a reload and says "An agent just connected". It's a setting like the theme: no undo
+  step, no event on the feed, no card flashes, and undo, redo, and a board reset keep it
+  (`keepSettings` in `src/shared.ts`). The handshake counts, so adding the server in a client
+  is enough. Session hooks and the event feed don't count, since neither can read or change a
+  card. A question or an answer on a card counts too, which covers boards that had agents
+  before the timestamp existed. An encrypted board never shows any of it and records nothing.
+  `npm run check:nudge` covers the rules.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
@@ -303,7 +316,8 @@ can work the board. The in-app page at **/tasks/connect** shows the server URL, 
 for each client, connected apps, and tokens, then the session hooks (`#sessions`), how the
 `#agent` tag, questions, claims, and the event feed fit together (`#working`), and the tool
 list (`#tools`). It's the first item in the user menu, the `// START_HERE` block on an empty
-board links to it, and so does the Sessions list.
+board links to it, and so do the Sessions list and the "No agent connected yet" line, chip,
+and card note a board shows until its first agent connects (`// HOW_IT_WORKS`).
 
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
   never points at this file. It hands out `scripts/tasks-presence.mjs` and
@@ -737,6 +751,7 @@ npm run typecheck
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
+npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
+import { NoAgentLine } from "./AgentNudge";
 import { Attachments } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { Markdown, toggleTask } from "./Markdown";
@@ -136,6 +137,8 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
         <CardSession cardId={card.id} />
+        {/* Save and close first, like answering a question: the link leaves the board. */}
+        <NoAgentLine card={card} before={save} />
         {lanes.length > 1 && (
           <div className="move-row" role="group" aria-label="Move to lane">
             <span className="move-label">Move to</span>
