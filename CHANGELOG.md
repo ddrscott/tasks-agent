@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-04
+
 ### Added
 - The footer shows the running version; click it for the latest changes
 - Sort a lane from its menu by due date, title, newest, oldest, or recently updated. The lane remembers it: it stays sorted as cards come and go, after a reload, and in any browser you sign in from
@@ -73,10 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A session with no project is listed under "No project" and a machine it didn't name is left off, instead of the word "unknown" twice. A session with no folder no longer offers a resume command
 - "Need you" counts one decision once: a session waiting on a card that has an open question shows under that question instead of adding to the count
 - With the Sessions hooks, a permission prompt you approved or denied stops reading "needs input" on the session's next tool call. It could sit there for a minute, counted in "need you" with nothing waiting
-- The working rules no longer start the event feed on their own, so the quick start asks for nothing in the terminal beyond the board's tools. Ask for the event feed in your prompt to get it
 - A card's session line and the Sessions list show the same agent name. A later `claim_card` without `agent` put "agent" on the card
 - An agent without hooks that finished and exited stops counting in "N live sessions" as soon as it holds no card, not 5 minutes later
-- The sample board on the front page and the demo's scripted agent read the way real sessions do: the same `asked:` line, tool lines like `mcp__tasks__wait_for_answer` and `Edit: 0007_sessions.sql`, and a waiting session that was heard from seconds ago
 - Tapping the search icon on a phone opens search
 - iPhones no longer zoom in when you tap a field
 - The "Add card" label in quick add was unreadable against its button
@@ -84,7 +84,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The account button no longer slides off screen when agents have questions open or sessions are reporting in
 - Muted text in Solarized, Sakura, Ocean, and Nord was too faint to read comfortably
 - Screen readers announce every button by name. The account button used to be read out as your email address
-- The Connect page's tool list was missing `get_card` and didn't say `update_card` can set tags
 - On a phone, the Undo toast no longer lands on top of an open quick add
 - Two changes a few milliseconds apart could leave the board showing the older one until the next change
 - With the assistant open and more lanes than fit, the board no longer sits scrolled a little sideways with the first lane tight against the left edge
@@ -124,5 +123,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Encrypted boards refuse plaintext from every path — chat, uploads, MCP, and stale tabs — and turning encryption off or changing the passphrase needs a key proof
 - Cookie-bearing requests from other origins are refused, including sibling subdomains
 
-[Unreleased]: https://github.com/ddrscott/tasks-agent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ddrscott/tasks-agent/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ddrscott/tasks-agent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ddrscott/tasks-agent/releases/tag/v0.1.0
