@@ -56,12 +56,14 @@ run ahead of whatever serves the zone.
 - **Signed out.** `/tasks/` is the landing page (`src/client/Landing.tsx`), with the sign-in
   form (`src/client/Login.tsx`) in it. Above the fold at 1280x800: the headline, the form, a
   "Try the demo board" link to `/tasks/demo`, and a picture of the product. The picture is not
-  an image. It's `CardFace`, `AskBlock`, and the Sessions `Row` fed sample data and marked
+  an image. It's `CardFace`, `AskBlock`, and the Sessions `SessionRow` fed sample data and marked
   `inert`, so it follows the theme and changes when the real components do. Keep it showing a
-  question with a `REC` option, a claimed card, and a needs-input session. Below the fold:
+  question with a `REC` option, a claimed card, and a needs-input session. Its top bar counts
+  them by the app's own rules (`blockedSessions`), so "need you" and Sessions read what the real
+  bar would. Below the fold:
   `// WHATS_DIFFERENT` (which says the encryption trade-off plainly: an encrypted board is
   closed to outside agents), the `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the
-  same one the Connect page shows), and `// PRICING` (see `// BILLING`). Nothing on the page
+  same one the Connect page shows) with a link to the public Connect page, and `// PRICING` (see `// BILLING`). Nothing on the page
   claims users, stars, or quotes we don't have. Arriving with `?next=` (an agent's OAuth
   consent) shows only the form.
 - **Not found.** An address under `/tasks/` that isn't a page gets `src/client/NotFound.tsx`,
@@ -93,7 +95,8 @@ run ahead of whatever serves the zone.
   goes back to working, updates the card's `STATUS:` line, moves the card to Done, then picks up
   the next card and asks again. Where the agent is comes from the board itself, so undoing an
   answer puts it back to waiting. A strip under the top bar says it's a demo and nothing is
-  saved, with links to sign up and to Connect; a reload or Start over resets it. The only
+  saved, with links to sign up and to Connect; a reload or Start over resets it. The seed has
+  `agentSeenAt` set, so "No agent connected yet" never shows there. The only
   request the page makes is the `GET /tasks/api/me` every page starts with. What needs an
   account says so instead of failing: the Assistant button explains itself, and the card dialogs
   show a note where Attachments go. There's no account menu, encryption, or billing there.
@@ -341,23 +344,20 @@ they came from anywhere else, including sibling subdomains that `SameSite=Lax` l
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
-can work the board. The in-app page at **/tasks/connect** shows the server URL, setup steps
-for each client, connected apps, and tokens, then the session hooks (`#sessions`), how the
-`#agent` tag, questions, claims, and the event feed fit together (`#working`), and the tool
-list (`#tools`). It's the first item in the user menu, the `// START_HERE` block on an empty
-board links to it, and so do the Sessions list and the "No agent connected yet" line, chip,
-and card note a board shows until its first agent connects (`// HOW_IT_WORKS`).
 can work the board. The page at **/tasks/connect** shows the server URL, setup steps
 for each client, the starter prompt (`#prompt`), connected apps and tokens (`#apps`), the
 one-command Sessions setup (`#sessions`), how the `#agent` tag, questions, claims, and the
 event feed fit together (`#working`), and the tool list (`#tools`). It's the first item in
-the user menu, the `// START_HERE` block on an empty board links to it, and so does the
-Sessions list.
+the user menu, the `// START_HERE` block on an empty board links to it, and so do the
+Sessions list and the "No agent connected yet" line, chip, and card note a board shows until
+its first agent connects (`// HOW_IT_WORKS`). Signed out, the landing page, the demo board's
+strip, and the not-found page link to it too.
 
 - **The page is public.** Someone deciding whether to sign up can read every step first.
   Signed out, the two parts that read or change an account (connected apps, tokens) become a
   "Sign in to create a token" link, which goes to `/tasks/?next=/tasks/connect#…` so sign-in
-  lands back on the same section. `App.tsx` routes `connect` ahead of the sign-in check and
+  lands back on the same section. The top bar's back link goes to the board signed in and to
+  the landing page signed out. `App.tsx` routes `connect` ahead of the sign-in check and
   passes `signedIn`; the page is a static asset, so the Worker never gated it.
 - **The starter prompt.** Step 03 is the text to paste into a freshly connected agent, with a
   Copy button: list cards with `get_board` and `tag: "agent"`, claim before starting, move to
@@ -873,9 +873,9 @@ npm run typecheck
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
-npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
+npm run og               # re-render the share image and home-screen icon from scripts/og/
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
