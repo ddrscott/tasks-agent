@@ -1,0 +1,40 @@
+#!/bin/sh
+# Start the gauntlet agent (~/.claude/agents/gauntlet.md) for the repo you're in, with
+# permission prompts off, so cards you tag #gauntlet in the Tasks app get worked with nobody
+# at the terminal. It runs in the foreground: start it under whatever keeps your sessions
+# alive (relay-tty, tmux, a plain terminal).
+#
+#   tasks-gauntlet                 # work this folder's #gauntlet cards
+#   tasks-gauntlet --resume <id>   # anything after the name goes to claude as is
+#
+# The project is the folder's name, the same tag the cards carry next to #gauntlet. One per repo.
+#
+# Permission prompts are off (bypassPermissions), which Claude Code makes you accept once per
+# machine: run `claude --dangerously-skip-permissions` by hand first. What the agent may not
+# do without you (deploy, push to main, delete, send, spend) is in its instructions, and the
+# tools in DENY below are taken away outright.
+#
+# It bills your Claude subscription, never the API: ANTHROPIC_API_KEY is unset before claude
+# starts. Needs claude and tasks-events on PATH, and a token in ~/.config/tasks/token.
+
+set -eu
+
+case "${1:-}" in
+  -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
+esac
+
+project=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-' | tr -cd '[:alnum:]_-')
+
+# Whole MCP servers and commands an unattended session never needs. A deny still holds with
+# prompts off.
+DENY='AskUserQuestion mcp__claude_ai_Gmail mcp__claude_ai_Google_Drive mcp__claude_ai_Google_Calendar mcp__claude_ai_Claude_Docs mcp__claude_ai_Cloudflare_Developer_Platform mcp__plugin_stripe_stripe mcp__analytics-mcp Bash(git push --force*) Bash(git push -f*) Bash(sudo *)'
+
+for need in claude tasks-events; do
+  command -v "$need" >/dev/null || { echo "tasks-gauntlet: $need isn't on PATH" >&2; exit 1; }
+done
+[ -f "$HOME/.claude/agents/gauntlet.md" ] || { echo "tasks-gauntlet: no ~/.claude/agents/gauntlet.md" >&2; exit 1; }
+[ -n "${TASKS_TOKEN:-}" ] || [ -s "$HOME/.config/tasks/token" ] || { echo "tasks-gauntlet: no token in ~/.config/tasks/token" >&2; exit 1; }
+
+unset ANTHROPIC_API_KEY
+exec claude --agent gauntlet --permission-mode bypassPermissions --disallowedTools "$DENY" \
+  -n "gauntlet-$project" "$@" "Work the #gauntlet cards for #$project. Read the board first."

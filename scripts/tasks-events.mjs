@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// Stream the changes you make to #agent cards on your Tasks board, one JSON object per
+// Stream the changes you make to #agent and #gauntlet cards on your Tasks board, one JSON object per
 // line on stdout. Built for Claude Code's Monitor tool, where each line wakes the session:
 //
 //   node scripts/tasks-events.mjs                     # every #agent card
 //   node scripts/tasks-events.mjs --tag receptionist  # only cards also tagged #receptionist
 //
 // --tag scopes the feed to one project, so several lead agents (one per repo) each hear
-// only their own cards. Repeat it to match any of several tags.
+// only their own cards. Repeat it to match any of several tags. --require narrows it to
+// cards that also carry that tag, which keeps a lead and a gauntlet agent in one repo apart:
+//
+//   node scripts/tasks-events.mjs --tag receptionist --require agent     # the lead's cards
+//   node scripts/tasks-events.mjs --tag receptionist --require gauntlet  # the gauntlet agent's
 //
 // The first line after each connect is {"type":"hello","cards":[…]}: every open #agent
-// card, so nothing is missed while offline. After that, one line per change you make:
+// or #gauntlet card, so nothing is missed while offline. After that, one line per change you make:
 // added, tagged, answered (#needs-ceo came off), edited, moved, deleted. Changes an agent
 // makes over MCP never show up here. After 5 failed connects in a row it prints one
 // {"type":"offline",…} line (a bad token looks the same as Tasks being unreachable), keeps
@@ -41,22 +45,29 @@ function token() {
 const say = (line) => process.stdout.write(line + "\n");
 const log = (msg) => process.stderr.write(`tasks-events: ${msg}\n`);
 
+// Same cleaning as the board (cleanTag in src/shared.ts), so "#Receptionist" matches.
+const clean = (t) => t.trim().replace(/^#+/, "").toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "");
+
 function tagsFromArgs(argv) {
-  const tags = [];
+  const any = [], all = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--tag" && argv[i + 1]) tags.push(argv[++i]);
-    else if (a.startsWith("--tag=")) tags.push(a.slice(6));
-    else if (a === "-h" || a === "--help") { console.error("usage: tasks-events [--tag <project>]..."); process.exit(0); }
+    if (a === "--tag" && argv[i + 1]) any.push(argv[++i]);
+    else if (a.startsWith("--tag=")) any.push(a.slice(6));
+    else if (a === "--require" && argv[i + 1]) all.push(argv[++i]);
+    else if (a.startsWith("--require=")) all.push(a.slice(10));
+    else if (a === "-h" || a === "--help") { console.error("usage: tasks-events [--tag <project>]... [--require <tag>]..."); process.exit(0); }
     else { console.error(`tasks-events: unknown argument ${a}`); process.exit(2); }
   }
-  // Same cleaning as the board (cleanTag in src/shared.ts), so "#Receptionist" matches.
-  return tags.map((t) => t.trim().replace(/^#+/, "").toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "")).filter(Boolean);
+  return { any: any.map(clean).filter(Boolean), all: all.map(clean).filter(Boolean) };
 }
 
 // Arguments first, so --help and typos never open a connection.
 const only = tagsFromArgs(process.argv.slice(2));
-const mine = (card) => !only.length || only.some((t) => (card.tags ?? []).includes(t));
+const mine = (card) => {
+  const tags = card.tags ?? [];
+  return (!only.any.length || only.any.some((t) => tags.includes(t))) && only.all.every((t) => tags.includes(t));
+};
 
 const tok = token();
 let backoff = 1000;
