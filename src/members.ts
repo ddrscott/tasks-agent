@@ -106,7 +106,13 @@ export type AuditAction =
 export type AuditCard = { card: string; title: string; lane: string; via?: "assistant" | "agent" | "undo" | "redo" };
 
 export type AuditEntry = {
-  id: number; at: number; actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null;
+  /** The row's id in the whole table, for paging (`before`). It has gaps: other boards' entries sit between. */
+  id: number;
+  /** This board's own count, 1 for its first entry and no gaps. It never changes: the log is append-only. Exports use it. */
+  seq: number;
+  /** When, as epoch milliseconds, and the same instant as ISO-8601 in UTC. */
+  at: number; time: string;
+  actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null;
   /** Set on `card_deleted` and `card_restored`, null on membership entries. */
   detail: AuditCard | null;
 };
@@ -118,7 +124,7 @@ function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction,
 
 const audit = (...args: Parameters<typeof auditRow>) => auditRow(...args).run();
 
-type AuditDbRow = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null; detail: string | null };
+type AuditDbRow = { id: number; seq: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null; detail: string | null };
 function cardDetail(raw: string | null): AuditCard | null {
   if (!raw) return null;
   try {
@@ -130,7 +136,7 @@ function cardDetail(raw: string | null): AuditCard | null {
     return null;
   }
 }
-const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, at: r.at, actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail) });
+const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, seq: r.seq, at: r.at, time: new Date(r.at).toISOString(), actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail) });
 
 /**
  * Write down cards that were deleted from a board, or brought back by undo: who, when, the
@@ -411,7 +417,8 @@ async function auditPage(req: Request, env: Env, owner: User): Promise<Response>
   const before = Number(q.get("before"));
   const limit = Math.min(200, num(q.get("limit") ?? undefined, AUDIT_PAGE));
   const { results } = await env.DB.prepare(
-    "SELECT id, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3",
+    `SELECT id, (SELECT COUNT(*) FROM board_audit b WHERE b.owner_id = a.owner_id AND b.id <= a.id) AS seq, at, actor, action, target, from_role, to_role, detail
+     FROM board_audit a WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3`,
   ).bind(owner.id, Number.isInteger(before) && before > 0 ? before : 0, limit + 1).all<AuditDbRow>();
   const page = results.slice(0, limit);
   return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null });
@@ -419,18 +426,21 @@ async function auditPage(req: Request, env: Env, owner: User): Promise<Response>
 
 async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promise<Response> {
   const { results } = await env.DB.prepare(
-    "SELECT id, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
+    "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
   ).bind(owner.id, AUDIT_EXPORT_MAX).all<AuditDbRow>();
   const name = `tasks-audit-${new Date().toISOString().slice(0, 10)}.${format}`;
   const headers = { "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (format === "json") {
-    return new Response(JSON.stringify({ board: owner.id, owner: owner.email, exportedAt: new Date().toISOString(), entries: results.map(toEntry) }, null, 2),
+    // The table's own row id stays out of a download: it counts every board's entries, so one
+    // board's would show gaps that look like missing rows. `seq` is this board's 1..N.
+    const entries = results.map(toEntry).map(({ id: _, ...e }) => e);
+    return new Response(JSON.stringify({ board: owner.id, owner: owner.email, exportedAt: new Date().toISOString(), entries }, null, 2),
       { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
   }
-  const lines = ["id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
+  const lines = ["seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
   for (const r of results) {
     const d = cardDetail(r.detail);
-    lines.push([r.id, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? null].map(csvCell).join(","));
+    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? null].map(csvCell).join(","));
   }
   return new Response(`${lines.join("\r\n")}\r\n`, { headers: { ...headers, "Content-Type": "text/csv; charset=utf-8" } });
 }

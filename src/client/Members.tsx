@@ -712,7 +712,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <a className="btn" href={api("/api/board/audit.csv")} download>Download CSV</a>
         <a className="btn" href={api("/api/board/audit.json")} download>Download JSON</a>
         <button type="button" className="btn ghost" disabled={busy} onClick={() => { paged.current = false; void load(null); }}>Refresh</button>
-        <span className="mem-foot">Downloads hold the whole log, oldest first, with times in UTC.</span>
+        <span className="mem-foot">Downloads hold the whole log, oldest first, numbered from 1 with no gaps, with times in UTC (ISO 8601).</span>
       </div>
       {error && <p className="mem-error" role="alert">{error}</p>}
       {!entries && !error && <p className="mem-loading">loading the audit log</p>}
@@ -731,6 +731,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
                 <td data-th="When">
                   <time dateTime={iso(e.at)}>{stampSeconds(e.at)}</time>
                   <span className="audit-utc">{iso(e.at)}</span>
+                  <span className="audit-utc">entry {e.seq}</span>
                 </td>
                 <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (plan change)" : e.actor}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
                 <td data-th="What"><span>{ACTIONS[e.action] ?? e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>

@@ -1158,17 +1158,31 @@ section("the audit log");
   ok("the log pages, newest first", p1.data.entries.length === 3 && p1.data.next === p1.data.entries[2].id && p2.data.entries.length === 3 && p2.data.entries[0].id < p1.data.entries[2].id, [p1.data.next, p2.data.entries.map((e) => e.id)]);
   const csv = await call(owner, "GET", "/api/board/audit.csv");
   const lines = csv.text.trim().split("\r\n");
-  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && lines.length === entries.length + 1, [lines.length, entries.length]);
+  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && lines.length === entries.length + 1, [lines.length, entries.length]);
   ok("the CSV names the people and the times", csv.text.includes(`${owner.email},member_removed,${removed.email},writer,`) && /\d{4}-\d\d-\d\dT/.test(lines[1]));
   const js = await call(owner, "GET", "/api/board/audit.json");
   ok("and as JSON", js.status === 200 && js.data.owner === owner.email && js.data.entries.length === entries.length);
+  // What an auditor reads: numbered 1..N with no gaps, and every time in ISO-8601 UTC.
+  const seqs = lines.slice(1).map((l) => Number(l.split(",")[0]));
+  const isoUtc = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
+  ok("the CSV numbers this board's entries 1 to N with no gaps", seqs.length > 0 && seqs.every((n, i) => n === i + 1), seqs.slice(0, 5));
+  ok("every CSV time is ISO-8601 in UTC", lines.slice(1).every((l) => isoUtc.test(l.split(",")[1])), lines[1]);
+  ok("the JSON has the same numbers, and each time both as milliseconds and as ISO-8601 UTC", js.data.entries.every((e, i) => e.seq === i + 1 && isoUtc.test(e.time) && new Date(e.time).getTime() === e.at) && !("id" in js.data.entries[0]), js.data.entries[0]);
+  const gaps = d1(`SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(*) AS n FROM board_audit WHERE owner_id = ${q(owner.id)}`)[0];
+  ok("even though the table's own ids have other boards' rows between them", gaps.hi - gaps.lo + 1 > gaps.n, gaps);
+  ok("the list in the app carries the same numbers", entries.every((e) => js.data.entries[e.seq - 1]?.at === e.at && js.data.entries[e.seq - 1]?.action === e.action && e.time === js.data.entries[e.seq - 1].time));
+  const firstTen = lines.slice(1, 11).join("\n");
+  await invite(owner, `tb-numbering-${run}@example.com`, "viewer");
+  await call(owner, "POST", "/api/board/invites/revoke", { email: `tb-numbering-${run}@example.com` });
+  const csvAfter = (await call(owner, "GET", "/api/board/audit.csv")).text.trim().split("\r\n");
+  ok("the numbers are stable: new entries go on the end and the old ones keep theirs", csvAfter.slice(1, 11).join("\n") === firstTen && csvAfter.length === lines.length + 2 && Number(csvAfter[csvAfter.length - 1].split(",")[0]) === csvAfter.length - 1, csvAfter.length);
   const who = (await call(owner, "GET", "/api/board/members")).data.members;
   ok("the members list answers who has access right now", who.filter((m) => m.status === "accepted").map((m) => `${m.email}:${m.role}`).sort().join() === [`${viewer.email}:viewer`, `${writer.email}:writer`].sort().join(), who);
   let blocked = 0;
   for (const sql of [`UPDATE board_audit SET actor = 'nobody' WHERE owner_id = ${q(owner.id)}`, `DELETE FROM board_audit WHERE owner_id = ${q(owner.id)}`]) {
     try { d1(sql); } catch { blocked++; }
   }
-  ok("the log can't be edited or deleted, even straight in the database", blocked === 2 && (await audit(owner)).length === entries.length);
+  ok("the log can't be edited or deleted, even straight in the database", blocked === 2 && (await audit(owner)).length === entries.length + 2);
   ok("a member still can't read it", !(await call(writer, "GET", "/api/board/audit")).text.includes(owner.email) && !(await call(writer, "GET", "/api/board/audit.json")).text.includes(removed.email));
 }
 

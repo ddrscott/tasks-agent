@@ -1471,7 +1471,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
 | `POST /api/board/members/remove` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `GET /api/board/audit?limit=50&before=<id>` | | `{ entries: AuditEntry[], next: number\|null }`, newest first; pass `next` as `before`. `limit` up to 200 |
-| `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. CSV columns: `id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via` |
+| `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. The columns are under **The audit exports**, below |
 | `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
 | `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found` |
 | `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
@@ -1479,7 +1479,9 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
-`AuditEntry` is `{ id, at, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null }`.
+`AuditEntry` is `{ id, seq, at, time, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null }`.
+`id` is the row's id in the whole table and is only for paging (`before`). `seq` is the entry's
+number on this board, `at` is epoch milliseconds, and `time` is the same instant as ISO-8601 UTC.
 `actor` is the signed-in email that did it, or `system`. `from` and `to` are the role before and
 after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
@@ -1488,6 +1490,26 @@ late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_s
 deleted it**, above), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when the board
 rechecks with members connected, or when the owner opens the members list, whichever is first.
 The log is kept for as long as the account exists; nothing prunes it.
+
+**The audit exports.** Both hold the whole log (up to 50,000 entries), oldest first. The CSV
+is UTF-8 with CRLF line ends and one header row:
+
+| Column | What's in it |
+|---|---|
+| `seq` | The entry's number on this board: 1 for its first entry, then 2, 3, with no gaps. The log is append-only, so an entry keeps its number in every later export. (The table's own row id isn't exported: it counts every board's entries, so one board's would show gaps that look like missing rows.) |
+| `time` | When, ISO-8601 in UTC with milliseconds: `2026-10-04T20:51:31.853Z` |
+| `actor` | The signed-in email that did it, or `system` for a plan change |
+| `action` | One of the action codes above |
+| `target` | The email it was done to. Empty for plan and card entries |
+| `from_role`, `to_role` | `viewer`, `writer`, or empty: the role before and after |
+| `card_id`, `card_title`, `lane` | On `card_deleted` and `card_restored`: the card's id, its title, and the lane it was in. Empty otherwise |
+| `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo` |
+
+A cell that starts with `=`, `+`, `-`, `@`, a tab, or a return gets a `'` in front, so a
+spreadsheet shows it as text instead of running it. The JSON is
+`{ board, owner, exportedAt, entries }`, where each entry is an `AuditEntry` without `id`:
+`seq`, `at` (epoch milliseconds), `time` (ISO-8601 UTC), `actor`, `action`, `target`, `from`,
+`to`, `detail`. The audit tab shows each entry's number under its time.
 
 **Invite links.** `https://askscottpierce.com/tasks/invite#t=<token>`. The token is 32 random
 bytes and sits in the fragment, so it never reaches the server in a URL, a log, or a Referer.
