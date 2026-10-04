@@ -59,7 +59,7 @@ export const PLOT: Beat[] = [
 ];
 
 /** The status line when the visitor moves the agent's card to Done before the agent got there. */
-export const CLOSED_BY_YOU = "STATUS: done — you closed this one, so I stopped and took the next card";
+export const CLOSED_BY_YOU = "STATUS: done — you closed this one, so I took my question back and stopped";
 
 /** Swap a note's STATUS line for a new one, or put one on top when it has none. */
 export function withStatus(notes: string, line: string): string {

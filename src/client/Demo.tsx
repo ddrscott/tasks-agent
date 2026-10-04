@@ -20,7 +20,7 @@ import { BASE } from "./base";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
-import { allChecked, demoPresence, PLOT, seedBoard, withStatus, type Beat, type Scene } from "./demoData";
+import { allChecked, CLOSED_BY_YOU, demoPresence, PLOT, seedBoard, withStatus, type Beat, type Scene } from "./demoData";
 import { Footer } from "./Footer";
 import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
@@ -50,15 +50,18 @@ export function Demo(p: Props) {
 const HISTORY_LIMIT = 50;
 const FILES_NOTE = "Files are stored with an account. Sign up to attach screenshots and logs.";
 
-/** How far the scripted agent has got with a card of its script. No entry means it hasn't touched it. */
-type Stage = "picked" | "asked" | "working" | "done";
+/**
+ * How far the scripted agent has got with a card of its script. No entry means it hasn't touched
+ * it. "done" is a card it finished; "left" is one it gave up, because the visitor closed it first.
+ */
+type Stage = "picked" | "asked" | "working" | "done" | "left";
 /** A board plus the agent's progress on it. Undo and redo swap the pair, never one half. */
 type World = { board: Board; at: Record<string, Stage> };
 type Entry = { label: string; world: World };
 
 /** What the scripted agent does next, and how long it takes to get around to it. */
-type Step = "pickup" | "ask" | "ack" | "finish";
-const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 2500, finish: 8000 };
+type Step = "pickup" | "ask" | "ack" | "finish" | "yield";
+const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 2500, finish: 8000, yield: 1500 };
 /** The card the agent is on and its next step. `step` is null while it waits on an answer. */
 type Spot = { beat: Beat; card: Card; step: Step | null };
 
@@ -71,14 +74,18 @@ function whereIsIt(w: World): Spot | null {
   for (const beat of PLOT) {
     const card = w.board.cards.find((c) => c.id === beat.cardId);
     const stage = w.at[beat.cardId];
-    if (!card || stage === "done") continue;
+    if (!card || stage === "done" || stage === "left") continue;
+    const closed = card.laneId === done;
     if (!stage) {
-      if (card.laneId === done) continue; // the visitor finished it first
+      if (closed) continue; // the visitor finished it first
       return { beat, card, step: "pickup" };
     }
+    // With an answer in hand it finishes the job wherever the card is.
     if (stage === "working") return { beat, card, step: "finish" };
-    if (stage === "picked") return { beat, card, step: "ask" };
-    return { beat, card, step: card.ask ? null : "ack" };
+    if (stage === "asked" && !card.ask) return { beat, card, step: "ack" };
+    // The visitor moved its card to Done before it had an answer, so it takes its question back.
+    if (closed) return { beat, card, step: "yield" };
+    return { beat, card, step: stage === "picked" ? "ask" : null };
   }
   return null;
 }
@@ -104,7 +111,8 @@ function advance(w: World, { beat, card, step }: Spot): World {
     const said = ops.updateCard(b, id, { notes: allChecked(withStatus(card.notes, beat.done(went))) });
     return to("done", done && card.laneId !== done ? ops.moveCard(said, id, done) : said);
   }
-  return w;
+  // Taking #needs-ceo off a card takes its question off too (updateCard).
+  return to("left", ops.updateCard(b, id, { notes: withStatus(card.notes, CLOSED_BY_YOU), tags: (card.tags ?? []).filter((t) => t !== ops.NEEDS_CEO_TAG) }));
 }
 
 function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset(): void }) {
@@ -167,7 +175,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     const id = spot.card.id;
     let after: World;
     // The card changed under it in some way the script can't follow, so it leaves the card alone.
-    try { after = advance(before, spot); } catch { after = { board: before.board, at: { ...before.at, [id]: "done" } }; }
+    try { after = advance(before, spot); } catch { after = { board: before.board, at: { ...before.at, [id]: "left" } }; }
     const also = (e: Entry): Entry => {
       const there = whereIsIt(e.world);
       if (!there || there.card.id !== id || there.step !== spot.step) return e;
