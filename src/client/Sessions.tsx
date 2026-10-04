@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { STALE_MS, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isStale, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -75,10 +75,15 @@ export function CardPresence({ cardId }: { cardId: string }) {
   const claim = claims.find((c) => c.cardId === cardId);
   const session = claim && sessions.find((s) => s.id === claim.sessionId);
   if (!claim || !session) return null;
+  return <PresenceLine session={session} agent={claim.agent} now={now} />;
+}
+
+/** A session in one line. Under a claimed card's title, and under a question its session is waiting on. */
+export function PresenceLine({ session, agent, now }: { session: Session; agent?: string; now: number }) {
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
-      <span className="sess-where">{claim.agent || session.agent || "agent"} · {session.machine}</span>
+      <span className="sess-where">{agent || session.agent || "agent"} · {session.machine}</span>
       <span className="sess-seen">{ago(now - session.seenAt)}</span>
     </div>
   );
@@ -97,7 +102,9 @@ export function CardSession({ cardId }: { cardId: string }) {
   );
 }
 
-export const isStale =(s: Session, now: number) => now - s.seenAt > STALE_MS;
+// The rules for what's stale and what's waiting on you live with the shared shapes, so
+// `npm run check:presence` can run them without a browser.
+export { blockedSessions, isStale };
 
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -111,15 +118,6 @@ const RANK: Record<Session["state"], number> = { "needs-input": 0, working: 1, i
 /** Waiting on you first, then working, then idle; stale ones sink; newest first within each. */
 const order = (now: number) => (a: Session, b: Session) =>
   Number(isStale(a, now)) - Number(isStale(b, now)) || RANK[a.state] - RANK[b.state] || b.seenAt - a.seenAt;
-
-/**
- * The sessions that are stopped until you do something, longest wait first. They count in the top
- * bar's "need you" with the open questions (Ask.tsx). Stale ones are left out: a session that's
- * been quiet for 5 minutes is as likely closed as waiting, and Claude Code's "waiting for your
- * input" notice puts every finished session in this state after a minute.
- */
-export const blockedSessions = (sessions: Session[], now: number): Session[] =>
-  sessions.filter((s) => s.state === "needs-input" && !isStale(s, now)).sort((a, b) => a.seenAt - b.seenAt);
 
 /** One session's state, as the orange $ and a word. Shared with the line on a claimed card. */
 export function StateMark({ session, now }: { session: Session; now: number }) {

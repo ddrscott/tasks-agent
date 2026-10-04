@@ -163,7 +163,7 @@ const CLAIMS: Claim[] = [
 const PRESENCE = { sessions: SESSIONS, claims: CLAIMS, now: NOW };
 // The top bar's two counts, by the app's own rules: "need you" is open questions plus sessions
 // stopped at a prompt, and Sessions is the ones that are live.
-const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length + blockedSessions(SESSIONS, NOW).length;
+const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length + blockedSessions(SESSIONS, NOW, CLAIMS, [...TODO, ...DOING]).length;
 const LIVE = SESSIONS.filter((s) => !isStale(s, NOW)).length;
 const titleOf = (id: string) => [...TODO, ...DOING].find((c) => c.id === id)?.title;
 
