@@ -52,7 +52,8 @@ export type Card = {
 export const MAX_ATTACHMENTS_PER_CARD = 20;
 export const MAX_TAGS_PER_CARD = 10;
 
-export type Lane = { id: string; name: string };
+/** `sort` is the order the lane keeps itself in (see `shownCards`). Without it, the lane is in manual order: the order of `Board.cards`. */
+export type Lane = { id: string; name: string; sort?: SortBy };
 
 export type Board = {
   lanes: Lane[];
@@ -282,6 +283,33 @@ export function sortedIds(cards: Card[], by: SortBy): string[] {
   return cards.map((c, i) => ({ c, i })).sort((x, y) => f(x.c, y.c) || x.i - y.i).map((x) => x.c.id);
 }
 
+/**
+ * A lane's cards in the order it shows them: by the lane's saved sort when it has one, else in
+ * board order. The sort is a setting on the lane rather than a one-time shuffle, so a card that's
+ * added, edited, or moved in later falls into place, and the choice follows the account to any
+ * browser. On the server's copy of an encrypted board the titles and dates are ciphertext, so
+ * there the cards stay in board order and the browser sorts its decrypted view.
+ */
+export function shownCards(b: Board, laneId: string): Card[] {
+  const cards = laneCards(b, laneId);
+  const by = b.lanes.find((l) => l.id === laneId)?.sort;
+  if (!by || !SORTS.some((o) => o.by === by) || cards.some((c) => isSealed(c.title))) return cards;
+  const order = sortedIds(cards, by);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  return order.map((id) => byId.get(id)!);
+}
+
+/** Keep a lane sorted by `by` from now on, or pass null to go back to manual order. */
+export function setLaneSort(b: Board, laneRef: string, by: SortBy | null): Board {
+  const lane = requireLane(b, laneRef);
+  if (by !== null && !SORTS.some((o) => o.by === by)) throw new Error(`Unknown sort ${String(by)}`);
+  return { ...b, lanes: b.lanes.map((l) => {
+    if (l.id !== lane.id) return l;
+    const { sort: _was, ...rest } = l;
+    return by ? { ...rest, sort: by } : rest;
+  }) };
+}
+
 /** Put a lane's cards in the order of `ids`, which must be exactly that lane's cards. Other lanes don't move. */
 export function orderLane(b: Board, laneRef: string, ids: string[]): Board {
   const lane = requireLane(b, laneRef);
@@ -406,14 +434,15 @@ export function describeCard(b: Board, id: string): string | null {
 export function describeBoard(b: Board, tag?: string): string {
   return b.lanes
     .map((l) => {
-      const cards = laneCards(b, l.id).filter((c) => !tag || hasTag(c, tag));
+      const cards = shownCards(b, l.id).filter((c) => !tag || hasTag(c, tag));
+      const sorted = l.sort ? `, sorted by ${SORTS.find((o) => o.by === l.sort)?.say ?? l.sort}` : "";
       const lines = cards.map(
         (c) =>
           `  - [${c.id}] ${c.title}${c.tags?.length ? ` ${c.tags.map((t) => `#${t}`).join(" ")}` : ""}` +
           `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${previewNotes(c.notes)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
-      return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards)\n${lines.join("\n") || "  (empty)"}`;
+      return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards${sorted})\n${lines.join("\n") || "  (empty)"}`;
     })
     .join("\n");
 }

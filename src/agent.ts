@@ -266,6 +266,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.mutate("Sort lane", (b) => ops.orderLane(b, id, ids));
   }
 
+  /** Keep a lane sorted by `by` from now on (null for manual order). Saved on the lane, so it holds across reloads and browsers. */
+  @callable()
+  setLaneSort(id: string, by: ops.SortBy | null) {
+    this.mutate(by ? "Sort lane" : "Manual order", (b) => ops.setLaneSort(b, id, by));
+  }
+
   @callable()
   clearLane(id: string) {
     this.mutate("Clear lane", (b) => ops.deleteCards(b, ops.laneCards(b, id).map((c) => c.id)));
@@ -567,7 +573,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         ...(tags.length ? { tags } : {}),
       });
     }
-    const lanes = raw.lanes.map((l) => ({ id: l.id, name: String(l.name) }));
+    // A lane's sort is a plain setting, not content, so it rides along unencrypted either way.
+    const lanes: ops.Lane[] = raw.lanes.map((l) => ({ id: l.id, name: String(l.name), ...(ops.SORTS.some((o) => o.by === l.sort) ? { sort: l.sort } : {}) }));
     if (!wantSealed) {
       // Plain text follows the same limits as any other edit.
       for (const l of lanes) l.name = ops.clean(l.name, 40);

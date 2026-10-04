@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Check lane sorting (src/shared.ts: sortedIds and orderLane): each sort gives the right
-// order, ties keep their place, and only the sorted lane's cards move. Exits 1 on a failure.
+// Check lane sorting (src/shared.ts: sortedIds, orderLane, setLaneSort, shownCards): each sort
+// gives the right order, ties keep their place, only the sorted lane's cards move, and a lane
+// with a saved sort stays sorted as cards come and go. Exits 1 on a failure.
 //
 //   npm run check:sort
 
@@ -13,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-sort");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { sortedIds, orderLane, SORTS } = await import(pathToFileURL(outfile).href);
+const { sortedIds, orderLane, setLaneSort, shownCards, addCard, describeBoard, SORTS } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -61,6 +62,25 @@ throws("orderLane refuses a missing card", () => orderLane(board, "todo", ["a", 
 throws("orderLane refuses a repeated card", () => orderLane(board, "todo", ["a", "a", "c", "d", "e"]));
 throws("orderLane refuses a card from another lane", () => orderLane(board, "todo", ["a", "b", "c", "d", "x"]));
 throws("orderLane refuses an unknown lane", () => orderLane(board, "nope", []));
+
+// A saved sort: the lane keeps itself in order, and the stored card order is left alone.
+const ids = (b, lane) => shownCards(b, lane).map((c) => c.id);
+const kept = setLaneSort(board, "todo", "title");
+check("setLaneSort: the lane remembers its sort", kept.lanes.find((l) => l.id === "todo").sort, "title");
+check("setLaneSort: the lane shows in that order", ids(kept, "todo"), ["e", "d", "c", "b", "a"]);
+check("setLaneSort: the stored order doesn't change", kept.cards.map((c) => c.id), board.cards.map((c) => c.id));
+check("setLaneSort: other lanes stay in manual order", ids(kept, "done"), ["x", "y"]);
+const added = addCard(kept, { title: "Aardvark", laneId: "todo" });
+check("a card added to a sorted lane falls into place", ids(added.board, "todo")[0], added.card.id);
+check("the text board agents read is in the same order, and says so", describeBoard(added.board).split("\n").slice(0, 3).map((l) => l.replace(/\[c\w+\]/, "[new]").slice(0, 52)), ["To do (lane id todo, 6 cards, sorted by title)", "  - [new] Aardvark", "  - [e] audit (due 2026-10-01)"]);
+const manual = setLaneSort(kept, "todo", null);
+check("manual order: the sort is gone, not set to nothing", "sort" in manual.lanes.find((l) => l.id === "todo"), false);
+check("manual order: back to the stored order", ids(manual, "todo"), ["a", "b", "c", "d", "e"]);
+check("takes a lane name too", setLaneSort(board, "Done", "due").lanes[1].sort, "due");
+throws("setLaneSort refuses an unknown sort", () => setLaneSort(board, "todo", "color"));
+throws("setLaneSort refuses an unknown lane", () => setLaneSort(board, "nope", "due"));
+const sealedBoard = { ...kept, cards: kept.cards.map((c) => ({ ...c, title: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiayJ9..aaaa.bbbb.cccc" })) };
+check("ciphertext titles are left in stored order", ids(sealedBoard, "todo"), ["a", "b", "c", "d", "e"]);
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);
