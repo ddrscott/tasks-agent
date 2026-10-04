@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admins get an Admin page from the account menu: every account, with a switch to make someone an admin and a switch to give them Pro without a subscription. An email that hasn't signed in yet can be added ahead of time
 - Pro given by an admin counts for team boards like a paid plan: that owner can invite people, and if an admin takes it back, members can only look from that moment, on the boards they have open, until Pro returns
 - On a shared board a member can't use a tag that only looks like one of yours either: `ship_ok`, `agent-`, or `agent` spelled with a look-alike letter from another alphabet is refused, and so is a title that ends in one behind a full stop or an invisible character
+- A card a member wrote keeps saying so after you move it, tag it, or answer a question on it. Agents see it in `get_card`, `get_board`, and on the event feed (`memberText`), and you see "words by" on the card. It goes away only when you retitle the card and replace its notes yourself
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

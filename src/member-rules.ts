@@ -284,8 +284,8 @@ export type Room = { cards: number; bytes: number };
 export function memberRoom(b: Board): Room {
   return { cards: Math.max(0, MEMBER_LIMITS.cards - b.cards.length), bytes: MEMBER_LIMITS.boardBytes - jsonBytes(b) };
 }
-/** Room kept for the "who added it" mark the board stamps on a card after this is asked (stampBy). */
-const BY_ROOM = 320;
+/** Room kept for the two marks the board stamps on a card after this is asked: who added it, and that its words are a member's (stampBy). */
+const BY_ROOM = 640;
 
 /**
  * Why a member can't add this one new card, or null when there's room, in which case the room

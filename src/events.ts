@@ -12,14 +12,15 @@
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { doneLaneId } from "./lanes";
-import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card, type MemberText } from "./shared";
 
 // The tags live in shared.ts, where the app can reach them too.
 export { AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
 
-type CardRef = { id: string; title: string; lane: string; tags: string[] };
+/** `memberText` is there when a member wrote the card's title or notes (shared.ts): the words aren't the owner's, whoever made this change. */
+type CardRef = { id: string; title: string; lane: string; tags: string[]; memberText?: MemberText };
 /**
  * Who made the change an event reports. `role` is always "owner" on the feed: a member's
  * change never publishes (agentEvents). `via` is "app" for a change made by hand and
@@ -35,6 +36,7 @@ export type TaskEvent =
 
 const ref = (b: Board, c: Card): CardRef => ({
   id: c.id, title: c.title, lane: b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId, tags: c.tags ?? [],
+  ...(c.memberText ? { memberText: c.memberText } : {}),
 });
 
 /**

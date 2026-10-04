@@ -658,7 +658,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // Before anything is written: a member's change has to be one a writer may make. It's
     // judged twice, as made and as it will be stored (with who made it marked on each card).
     this.guard(before, changed);
-    const after = ops.stampBy(before, changed, this.by(actor));
+    const after = ops.stampBy(before, changed, this.by(actor), { member: callers.getStore()?.kind === "member" });
     this.guard(before, after);
     ops.assertSealedBoard(after);
     // On a shared board a deleted card is written down. A member's deletions are counted first.
@@ -983,7 +983,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const before = this.state;
     // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
     // Whoever undid or redid it made the last change to the cards that came back different.
-    this.setState(ops.stampBy(before, ops.keepSettings(board, before), this.by("you")));
+    this.setState(ops.stampBy(before, ops.keepSettings(board, before), this.by("you"), { restore: true }));
     // Undoing "Add card" deletes a card, and undoing a delete brings one back. Both are written down.
     const who = this.by("you");
     const stamp = who ? { email: who.email, via: how } : null;

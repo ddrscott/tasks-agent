@@ -194,18 +194,42 @@ export function ByLine({ card }: { card: Card }) {
   return (
     <div className="by-line" title={new Date(card.updatedAt).toLocaleString()}>
       {verb(card)} by <b>{whoText(card.by, who.me)}</b> · {ago(card.updatedAt, who.now)}
+      <WroteLine card={card} />
     </div>
+  );
+}
+
+/**
+ * Whose words the title and notes are, when they're a member's and the last change was someone
+ * else's (`memberText` in shared.ts). The owner sees it before tagging the card for an agent.
+ */
+function wroteBy(card: Card): string | null {
+  const t = card.memberText;
+  return t && (t.email !== card.by?.email || !!card.by?.via) ? t.email : null;
+}
+function WroteLine({ card }: { card: Card }) {
+  const who = useContext(WhoContext);
+  const email = wroteBy(card);
+  if (!who || !email || !card.memberText) return null;
+  return (
+    <span className="by-wrote" title={new Date(card.memberText.at).toLocaleString()}>
+      Title or notes written by <b>{email === who.me ? "you" : email}</b>, a member · {ago(card.memberText.at, who.now)}
+    </span>
   );
 }
 
 /** On the card face, only when the last change wasn't yours by hand: that's the one worth a line. */
 export function ByFace({ card }: { card: Card }) {
   const who = useContext(WhoContext);
-  if (!who || !card.by || (card.by.email === who.me && !card.by.via)) return null;
+  if (!who || !card.by) return null;
+  // A member's words under the owner's last change: say whose they are, on the face, for everyone but that member.
+  const wrote = wroteBy(card);
+  const words = wrote && wrote !== who.me ? <span className="card-by-wrote">words by {wrote}</span> : null;
+  if (card.by.email === who.me && !card.by.via) return words ? <div className="card-by" title={`Title or notes written by ${wrote}, a member of this board`}>{words}</div> : null;
   const text = whoText(card.by, who.me);
   return (
-    <div className="card-by" title={`${verb(card)} by ${text}, ${new Date(card.updatedAt).toLocaleString()}`}>
-      <span className="card-by-who">{text}</span><span className="card-by-when">· {ago(card.updatedAt, who.now)}</span>
+    <div className="card-by" title={`${verb(card)} by ${text}, ${new Date(card.updatedAt).toLocaleString()}${wrote ? `. Title or notes written by ${wrote}, a member of this board` : ""}`}>
+      <span className="card-by-who">{text}</span><span className="card-by-when">· {ago(card.updatedAt, who.now)}</span>{words}
     </div>
   );
 }

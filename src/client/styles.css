@@ -1632,6 +1632,8 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .card-by-when { flex: none; white-space: nowrap; }
 .by-line { margin-top: 4px; overflow-wrap: anywhere; }
 .by-line b { font-weight: 600; color: var(--ink); }
+.by-wrote { display: block; }
+.card-by-wrote { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
 
 /* The card as a viewer opens it: everything to read, one button. */
 .card-view .dialog-top { justify-content: flex-start; }

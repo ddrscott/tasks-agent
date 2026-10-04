@@ -738,7 +738,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const editingCard = board.cards.find((c) => c.id === editing);
   // Names on cards show once a board is shared: you're a member of it, or someone else has
   // changed a card on it. A board only its owner has touched shows none (member.tsx).
-  const showWho = member || board.cards.some((c) => c.by && c.by.email !== me.email);
+  const showWho = member || board.cards.some((c) => (c.by && c.by.email !== me.email) || !!c.memberText);
   const banner = access ? bannerText(access) : null;
 
   return (
