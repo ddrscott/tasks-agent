@@ -624,7 +624,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.guard(before, after);
     ops.assertSealedBoard(after);
     // On a shared board a deleted card is written down. A member's deletions are counted first.
-    const gone = this.goneCards(before, after);
+    // On any board, the owner is told when their agent deletes one: nobody was at a screen for it.
+    const gone = this.goneCards(before, after, actor === "agent");
     if (gone.length) this.spendDeletes(gone.length);
     const top = this.sql<{ grp: string | null }>`SELECT grp FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!group || top?.grp !== group) {
@@ -704,9 +705,13 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this._shared = true;
   }
 
-  /** The cards in `before` that `after` no longer has, as the log keeps them. Nothing on a board that was never shared, or an encrypted one. */
-  private goneCards(before: Board, after: Board): AuditCard[] {
-    if (before.sealed || after.sealed || before.cards === after.cards || !this.sharedEver()) return [];
+  /**
+   * The cards in `before` that `after` no longer has, as the log keeps them. Nothing on an
+   * encrypted board, and nothing on a board that was never shared unless `always` (an outside
+   * agent's deletion, which the owner's open tabs are told about on any board).
+   */
+  private goneCards(before: Board, after: Board, always = false): AuditCard[] {
+    if (before.sealed || after.sealed || before.cards === after.cards || !(always || this.sharedEver())) return [];
     const kept = new Set(after.cards.map((c) => c.id));
     const lanes = new Map(before.lanes.map((l) => [l.id, l.name]));
     return before.cards.filter((c) => !kept.has(c.id)).map((c) => ({ card: c.id, title: c.title.slice(0, 200), lane: lanes.get(c.laneId) ?? "" }));
@@ -735,7 +740,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private noteCards(action: "card_deleted" | "card_restored", cards: AuditCard[], by: { email: string; via?: AuditCard["via"] } | null, step?: number) {
     const who = by ?? { email: this.ownerEmail() ?? "the owner" };
     const rows = cards.map((c) => ({ ...c, ...(who.via ? { via: who.via } : {}) }));
-    this.ctx.waitUntil(logCards(this.env, this.name, who.email, action, rows).catch((e: Error) => console.error("recording a card change failed", action, e.message)));
+    // The log is for boards that have been shared. On one that never was, this is only the line in the owner's tabs.
+    if (this.sharedEver()) this.ctx.waitUntil(logCards(this.env, this.name, who.email, action, rows).catch((e: Error) => console.error("recording a card change failed", action, e.message)));
     const frame: ActivityFrame = {
       type: "tasks_activity", action, by: { email: who.email, ...(who.via ? { via: who.via } : {}) },
       cards: cards.slice(0, 3).map((c) => ({ id: c.card, title: c.title, lane: c.lane })), count: cards.length,
@@ -974,6 +980,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   undoIf(step: number): string | null {
     const top = this.sql<{ id: number }>`SELECT id FROM history ORDER BY id DESC LIMIT 1`[0];
     return top && top.id === step ? this.undo() : null;
+  }
+
+  /**
+   * Undo a run of steps, all of them or none. The toast that says "dana deleted 4 cards" names
+   * the four steps it means, oldest first. They're undone only if they are exactly the last
+   * steps in history, in that order, so its Undo never takes back anything else and never
+   * takes back half. Returns how many steps it undid, or null when the board has moved on.
+   */
+  @callable()
+  undoRun(steps: number[]): number | null {
+    if (!Array.isArray(steps) || !steps.length || steps.length > HISTORY_LIMIT || !steps.every((n) => Number.isInteger(n))) return null;
+    const want = [...new Set(steps)].sort((a, b) => b - a);
+    const top = this.sql<{ id: number }>`SELECT id FROM history ORDER BY id DESC LIMIT ${want.length}`.map((r) => r.id);
+    if (top.length !== want.length || top.some((id, i) => id !== want[i])) return null;
+    for (let i = 0; i < want.length; i++) this.undo();
+    return want.length;
   }
 
   /** Redo the last undone change. Returns what was redone, or null when there's nothing to redo. */

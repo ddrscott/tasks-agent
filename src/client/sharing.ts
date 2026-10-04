@@ -31,6 +31,10 @@ export function sharingFacts(members: number | null): Fact[] {
       a: "The board and every card on it belong to the board's owner, whoever added them. A writer's cards stay when the writer leaves or is removed, and still show who added or last changed them.",
     },
     {
+      q: "Can a member give my agents work?",
+      a: "No. The tags your agents act on (#agent, #gauntlet, #needs-ceo, #ship-ok) are yours alone: a member can't put one on a card or take one off, and a card that carries #agent or #gauntlet is read only to members. Only you can answer an agent's question.",
+    },
+    {
       q: "Can a board have two owners?",
       a: "No, not in this version. A board has one owner, and it can't be handed to someone else.",
     },

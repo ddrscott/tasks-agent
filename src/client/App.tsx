@@ -29,7 +29,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { MemberChat } from "./MemberChat";
-import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, modeOf, roleWord, WhoContext, type Boards, type MemberAccess } from "./member";
+import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
@@ -222,8 +222,16 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     // On a shared board the panel starts closed; the saved choice is about your own board.
     return !member && chatSaved.current === "open" && innerWidth > 900;
   });
-  /** `step` is the one undo step the toast's Undo means (a card someone else deleted): it's undone only if it's still the last. */
-  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number; step?: number } | null>(null);
+  /**
+   * `steps` are the undo steps the toast's Undo means (cards someone else deleted, oldest
+   * first): they're undone only if they're still the last ones, all of them or none.
+   * `cards` is how many cards that brings back, for what the toast says afterwards.
+   */
+  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number; steps?: number[]; cards?: number } | null>(null);
+  const toastKey = useRef<number | null>(null);
+  toastKey.current = toast?.key ?? null;
+  // A run of deletions by one person, shown as one toast (joinRun in member.tsx).
+  const run = useRef<ActivityRun | null>(null);
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
@@ -386,12 +394,19 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
   // Someone else deleted a card, or brought one back with undo. The card is already gone from
   // the board by the time this arrives, so the toast is the only place its name shows. The
   // owner's has Undo, for that one step and only while it's still the last.
+  // Several in a row from one person are one toast ("dana@… deleted 4 cards"), and its Undo
+  // covers exactly that run: every step, or nothing if the board has changed since.
   const onActivity = useCallback((raw: unknown) => {
     const f = asActivity(raw);
-    const text = f && activityText(f, me.email);
-    if (!f || !text) return;
-    const step = !member && f.action === "card_deleted" && typeof f.undo === "number" ? f.undo : undefined;
-    setToast({ text, action: step !== undefined ? "undo" : null, key: Date.now(), ms: DESTRUCTIVE_TOAST_MS, step });
+    if (!f || !activityText(f, me.email)) return;
+    const key = Date.now();
+    const next = joinRun(run.current, f, toastKey.current, key, !member);
+    run.current = next;
+    const text = activityText(f, me.email, next);
+    if (!text) return;
+    // Set here as well as on render: the next frame can arrive before React has drawn this one.
+    toastKey.current = key;
+    setToast({ text, action: next.steps.length ? "undo" : null, key, ms: DESTRUCTIVE_TOAST_MS, steps: next.steps.length ? next.steps : undefined, cards: next.count });
   }, [me.email, member]);
 
   const agent = useAgent<TodoAgent, Board>({
@@ -539,13 +554,18 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     setToast({ text: label ? `Redid: ${label.toLowerCase()}` : "Nothing to redo", action: label ? "undo" : null, key: Date.now() });
   }, [agent, member]);
 
-  const undo = useCallback(async (step?: number) => {
+  const undo = useCallback(async (steps?: number[], cards?: number) => {
     if (member) return;
-    if (step !== undefined) {
-      const done = await agent.stub.undoIf(step);
-      setToast(done
-        ? { text: `Undid: ${done.toLowerCase()}`, action: "redo", key: Date.now() }
-        : { text: "The board has changed since then, so that can't be undone from here. Undo in the top bar steps back through what came after.", action: null, key: Date.now(), ms: DESTRUCTIVE_TOAST_MS });
+    if (steps?.length) {
+      const moved = { text: "The board has changed since then, so that can't be undone from here. Undo in the top bar steps back through what came after.", action: null, key: Date.now(), ms: DESTRUCTIVE_TOAST_MS };
+      if (steps.length === 1) {
+        const done = await agent.stub.undoIf(steps[0]);
+        setToast(done ? { text: `Undid: ${done.toLowerCase()}`, action: "redo", key: Date.now() } : moved);
+        return;
+      }
+      // A run: every step or none. Redo in the top bar puts them back one at a time, so no Redo is offered here.
+      const n = await agent.stub.undoRun(steps);
+      setToast(n ? { text: `Brought back ${cards ?? n} cards`, action: null, key: Date.now() } : moved);
       return;
     }
     const label = await agent.stub.undo();
@@ -898,7 +918,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
       {toast && (
         <div className="toast" role="status" key={toast.key}>
           <span>{toast.text}</span>
-          {toast.action === "undo" && <button onClick={() => { const step = toast.step; setToast(null); void undo(step); }}>Undo</button>}
+          {toast.action === "undo" && <button onClick={() => { const { steps, cards } = toast; run.current = null; setToast(null); void undo(steps, cards); }}>Undo</button>}
           {toast.action === "redo" && <button onClick={() => { setToast(null); void redo(); }}>Redo</button>}
         </div>
       )}

@@ -472,16 +472,35 @@ async function changeRole(env: Env, owner: User, body: Record<string, unknown>):
 const AUDIT_PAGE = 50;
 const AUDIT_EXPORT_MAX = 50_000;
 
+/** The two kinds of entry the audit tab can be narrowed to. */
+const AUDIT_KINDS = ["membership", "cards"] as const;
+
+/**
+ * One page of the log, newest first. `who` narrows it to entries a person made or that were
+ * made about them (actor or target), and `kind` to membership entries or card deletions. The
+ * filter is here and not in the browser because the log is paged: filtering 25 loaded entries
+ * would hide matches on the pages not loaded yet. `seq` is still the entry's number in the
+ * whole log. The first page also lists everyone who appears in the log, for the filter.
+ */
 async function auditPage(req: Request, env: Env, owner: User): Promise<Response> {
   const q = new URL(req.url).searchParams;
   const before = Number(q.get("before"));
   const limit = Math.min(200, num(q.get("limit") ?? undefined, AUDIT_PAGE));
+  const who = (q.get("who") ?? "").trim().toLowerCase().slice(0, 254);
+  const kind = (AUDIT_KINDS as readonly string[]).includes(q.get("kind") ?? "") ? q.get("kind")! : "";
+  const first = !(Number.isInteger(before) && before > 0);
   const { results } = await env.DB.prepare(
     `SELECT id, (SELECT COUNT(*) FROM board_audit b WHERE b.owner_id = a.owner_id AND b.id <= a.id) AS seq, at, actor, action, target, from_role, to_role, detail
-     FROM board_audit a WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3`,
-  ).bind(owner.id, Number.isInteger(before) && before > 0 ? before : 0, limit + 1).all<AuditDbRow>();
+     FROM board_audit a WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2)
+       AND (?4 = '' OR actor = ?4 OR target = ?4)
+       AND (?5 = '' OR (?5 = 'cards') = (action IN ('card_deleted', 'card_restored')))
+     ORDER BY id DESC LIMIT ?3`,
+  ).bind(owner.id, first ? 0 : before, limit + 1, who, kind).all<AuditDbRow>();
   const page = results.slice(0, limit);
-  return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null });
+  const people = first ? (await env.DB.prepare(
+    "SELECT actor AS p FROM board_audit WHERE owner_id = ?1 UNION SELECT target FROM board_audit WHERE owner_id = ?1 AND target IS NOT NULL ORDER BY p LIMIT 500",
+  ).bind(owner.id).all<{ p: string }>()).results.map((r) => r.p) : undefined;
+  return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null, ...(people ? { people } : {}) });
 }
 
 async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promise<Response> {
@@ -502,7 +521,9 @@ async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promi
     const d = cardDetail(r.detail);
     lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? null].map(csvCell).join(","));
   }
-  return new Response(`${lines.join("\r\n")}\r\n`, { headers: { ...headers, "Content-Type": "text/csv; charset=utf-8" } });
+  // The byte-order mark is what tells Excel on Windows the file is UTF-8 when it's opened with
+  // a double-click; without it, a card title that isn't plain ASCII comes out garbled.
+  return new Response(`\uFEFF${lines.join("\r\n")}\r\n`, { headers: { ...headers, "Content-Type": "text/csv; charset=utf-8" } });
 }
 
 // ---------- invitee side ----------

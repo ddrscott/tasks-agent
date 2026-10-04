@@ -1182,7 +1182,8 @@ each card.
   pending invite.", or "Only you can see this board."). Then `// INVITE`: an email field, a
   viewer or writer choice with a line on what each can do, the Invite button, and the counts
   against both caps ("3 of 10 people, pending invites included. 17 of 20 invite emails left
-  today"). `// ON_THIS_BOARD` lists the owner and each member with the date they joined, a
+  today"). `// ON_THIS_BOARD` lists the owner and each member with the date and time they
+  joined (local, with the zone; the UTC ISO time is the tooltip), a
   role menu that changes the role in place, and Remove. `// PENDING_INVITES` lists each
   invite with when it was sent, when it expires (or an `expired` label), a role menu, Resend,
   and Revoke. Remove and Revoke take two taps, like Clear in a lane's menu: the first changes
@@ -1213,7 +1214,12 @@ each card.
   title, the lane it was in, and its id where a member's address would be. Each time is shown in local time
   with its zone and, under it, the UTC ISO time, so it can be pasted into a ticket. Each
   action shows in words and as its code (`role_changed`). Download CSV and Download JSON are
-  plain links to `/api/board/audit.csv` and `.json`.
+  plain links to `/api/board/audit.csv` and `.json`. Two menus narrow the list: **Show**
+  (everything, membership, or cards deleted and brought back) and **Person** (anyone who
+  appears in the log, as the one who did it or the one it was done to). The server filters
+  (`?kind=` and `?who=` on `GET /api/board/audit`), over the whole log, because the list is
+  paged and filtering the 25 on screen would hide matches further back. Downloads are never
+  filtered.
 - **"Shared with N"** is a button in the top bar, left of the account button, on a board with
   at least one member or pending invite ("Invited N" until someone accepts). It opens
   Members. When the top bar runs out of room it's the last button to give way: the count moves onto
@@ -1619,6 +1625,18 @@ per card.
   `undo`, the id of the undo step that reverses it, and their toast has an Undo button that
   calls `undoIf(step)`: it undoes that step only while it's still the last one, and otherwise
   says the board has moved on. Members get no `undo` and can't call `undoIf`.
+- **The owner's own agent.** A card the owner's agent deletes over MCP isn't deleted in any
+  tab, so the owner's open board says it too: `Your agent deleted "Ship the invoice"`, with
+  Undo. That one holds on a board that was never shared as well (the frame goes to the
+  owner's tabs; nothing is logged there).
+- **A run of them is one toast.** Deletions that come one after another from the same person
+  read as one line, `dana@example.com deleted 4 cards: "Ship the invoice" and 3 more`, instead
+  of each replacing the last. For the owner the run only grows while each deletion's undo
+  step is the very next one (`joinRun` in `src/client/member.tsx`), so the toast's Undo can
+  mean exactly those steps: it calls `undoRun(steps)`, which undoes them all if they are still
+  the last steps in history, in order, and nothing at all otherwise. A deletion that comes
+  after some other change starts a toast of its own. Undo never takes back part of what the
+  toast says, and never anything it doesn't say.
 - **What isn't logged.** Edits, moves, and removed files. The card is still there for those,
   and it carries the name of whoever changed it last. Only a deletion leaves nothing behind.
 - **The cap.** A member can delete `MEMBER_LIMITS.deletesPerDay` (200) cards per board per UTC
@@ -1649,7 +1667,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
 | `POST /api/board/members/remove` | `{ email }` | `200 { ok: true }`, `404 not_found` |
-| `GET /api/board/audit?limit=50&before=<id>` | | `{ entries: AuditEntry[], next: number\|null }`, newest first; pass `next` as `before`. `limit` up to 200 |
+| `GET /api/board/audit?limit=50&before=<id>&kind=<membership\|cards>&who=<email>` | | `{ entries: AuditEntry[], next: number\|null, people?: string[] }`, newest first; pass `next` as `before`. `limit` up to 200. `kind` and `who` are optional filters (`who` matches the actor or the target). `people`, on the first page only, is everyone who appears in the log |
 | `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. The columns are under **The audit exports**, below |
 | `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
 | `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found`, `429 slow_down` with `Retry-After` for someone else's board asked about too fast |
@@ -1671,7 +1689,8 @@ rechecks with members connected, or when the owner opens the members list, which
 The log is kept for as long as the account exists; nothing prunes it.
 
 **The audit exports.** Both hold the whole log (up to 50,000 entries), oldest first. The CSV
-is UTF-8 with CRLF line ends and one header row:
+is UTF-8 with a byte-order mark (so Excel on Windows reads a title that isn't plain ASCII
+when the file is opened with a double-click), CRLF line ends, and one header row:
 
 | Column | What's in it |
 |---|---|

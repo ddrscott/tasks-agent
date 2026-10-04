@@ -161,7 +161,7 @@ export function SharedNote({ userId }: { userId: string }) {
 // What each role can do, from the Roles table in the README and MEMBER_CALLS in member-rules.ts.
 const ROLES: { role: MemberRole; label: string; can: string }[] = [
   { role: "viewer", label: "Viewer", can: "Sees the board live, searches it, and downloads its files. Can't change anything." },
-  { role: "writer", label: "Writer", can: "Everything a viewer can, plus adding, editing, moving, and deleting cards and their files. Lanes, undo, agents' questions, the cloud assistant, and every setting stay yours." },
+  { role: "writer", label: "Writer", can: "Everything a viewer can, plus adding, editing, moving, and deleting cards and their files. Lanes, undo, your agents' cards and questions, the cloud assistant, and every setting stay yours." },
 ];
 
 type Failure = { status: number; code?: string; error?: string; also?: string[] };
@@ -202,7 +202,6 @@ async function post<T>(path: string, body: unknown): Promise<{ ok: true; status:
 // Times. An admin pastes these into a ticket, so every one says its zone, and the UTC time is
 // printed next to it in the audit log instead of hiding in a tooltip a phone can't open.
 const iso = (ms: number) => new Date(ms).toISOString();
-const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 const stamp = (ms: number) => new Date(ms).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 const stampSeconds = (ms: number) => new Date(ms).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
 const When = ({ at, text }: { at: number; text: string }) => <time dateTime={iso(at)} title={`${iso(at)} (UTC)`}>{text}</time>;
@@ -594,7 +593,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
                   <div className="mem-who">
                     <span className="mem-email">{m.email}</span>
                     <span className="mem-meta">
-                      member since <When at={m.acceptedAt ?? m.invitedAt} text={day(m.acceptedAt ?? m.invitedAt)} />
+                      member since <When at={m.acceptedAt ?? m.invitedAt} text={stamp(m.acceptedAt ?? m.invitedAt)} />
                       {board.sharing === "suspended" && m.role === "writer" && <> · <span className="mem-chip">view only for now</span></>}
                     </span>
                   </div>
@@ -673,28 +672,41 @@ const VIA: Record<NonNullable<NonNullable<AuditEntry["detail"]>["via"]>, string>
 };
 const AUDIT_PAGE = 25;
 
+type AuditKind = "" | "membership" | "cards";
+
 function AuditLog({ me }: { me: Props["me"] }) {
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The filter is applied by the server, over the whole log, not over the page that's loaded.
+  const [who, setWho] = useState("");
+  const [kind, setKind] = useState<AuditKind>("");
+  const [people, setPeople] = useState<string[]>([]);
+  const filtered = !!(who || kind);
+  const asked = useRef(0);
 
   const load = useCallback(async (before: number | null) => {
+    const n = ++asked.current;
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(api(`/api/board/audit?limit=${AUDIT_PAGE}${before ? `&before=${before}` : ""}`), { headers: { Accept: "application/json" } });
-      const data = (await r.json().catch(() => null)) as { entries?: AuditEntry[]; next?: number | null } | null;
+      const query = `limit=${AUDIT_PAGE}${before ? `&before=${before}` : ""}${who ? `&who=${encodeURIComponent(who)}` : ""}${kind ? `&kind=${kind}` : ""}`;
+      const r = await fetch(api(`/api/board/audit?${query}`), { headers: { Accept: "application/json" } });
+      const data = (await r.json().catch(() => null)) as { entries?: AuditEntry[]; next?: number | null; people?: string[] } | null;
       if (!r.ok || !Array.isArray(data?.entries)) throw new Error(r.status === 401 ? SIGNED_OUT : "The audit log didn't load. Try again in a minute.");
+      // A slower answer for a filter that's since been changed is dropped.
+      if (n !== asked.current) return;
       const page = data.entries;
       setEntries((have) => (before && have ? [...have, ...page] : page));
       setNext(data.next ?? null);
+      if (Array.isArray(data.people)) setPeople(data.people);
     } catch (e) {
-      setError(e instanceof TypeError ? OFFLINE : (e as Error).message);
+      if (n === asked.current) setError(e instanceof TypeError ? OFFLINE : (e as Error).message);
     } finally {
-      setBusy(false);
+      if (n === asked.current) setBusy(false);
     }
-  }, []);
+  }, [who, kind]);
   useEffect(() => { void load(null); }, [load]);
   // Something just changed on the board: show it, unless older pages are open, where
   // reloading would throw away the reader's place. Refresh is right there for that.
@@ -718,10 +730,29 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <button type="button" className="btn ghost" disabled={busy} onClick={() => { paged.current = false; void load(null); }}>Refresh</button>
         <span className="mem-foot">Downloads hold the whole log, oldest first, numbered from 1 with no gaps, with times in UTC (ISO 8601).</span>
       </div>
+      <div className="audit-filter" role="group" aria-label="Filter the log">
+        <label>
+          Show
+          <select className="field" value={kind} onChange={(e) => { paged.current = false; setKind(e.target.value as AuditKind); }}>
+            <option value="">everything</option>
+            <option value="membership">membership: invites, roles, removals, plan</option>
+            <option value="cards">cards deleted or brought back</option>
+          </select>
+        </label>
+        <label>
+          Person
+          <select className="field" value={who} onChange={(e) => { paged.current = false; setWho(e.target.value); }}>
+            <option value="">everyone</option>
+            {people.map((p) => <option key={p} value={p}>{p === "system" ? "system (plan change)" : p === me.email ? `${p} (you)` : p}</option>)}
+          </select>
+        </label>
+        {filtered && <button type="button" className="btn ghost" onClick={() => { paged.current = false; setWho(""); setKind(""); }}>Clear filter</button>}
+        {filtered && <span className="mem-foot">Filtered over the whole log, as someone who did it or had it done to them. Downloads are never filtered.</span>}
+      </div>
       {error && <p className="mem-error" role="alert">{error}</p>}
       {!entries && !error && <p className="mem-loading">loading the audit log</p>}
       {entries && entries.length === 0 && (
-        <p className="mem-empty">Nothing here yet. The first entry shows up when you invite someone.</p>
+        <p className="mem-empty">{filtered ? "No entries match that filter." : "Nothing here yet. The first entry shows up when you invite someone."}</p>
       )}
       {entries && entries.length > 0 && (
         <table className="audit">
@@ -754,8 +785,8 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <div className="mem-actions">
           {next
             ? <button type="button" className="btn" disabled={busy} onClick={() => { paged.current = true; void load(next); }}>{busy ? "Loading…" : "Show older entries"}</button>
-            : <span className="mem-foot">That's the whole log: {entries.length} {entries.length === 1 ? "entry" : "entries"}.</span>}
-          {next && <span className="mem-foot">Showing the newest {entries.length}.</span>}
+            : <span className="mem-foot">{filtered ? "That's every match" : "That's the whole log"}: {entries.length} {entries.length === 1 ? "entry" : "entries"}.</span>}
+          {next && <span className="mem-foot">Showing the newest {entries.length}{filtered ? " that match" : ""}.</span>}
         </div>
       )}
     </>

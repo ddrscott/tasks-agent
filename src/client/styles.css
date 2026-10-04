@@ -1489,6 +1489,11 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .btn.mem-drop.armed, .btn.mem-drop.armed:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: var(--bg); font-weight: 600; }
 
 .audit-actions .mem-foot { flex: 1 1 220px; }
+/* Narrow the log by kind and by person. The server filters; these only ask. */
+.audit-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.dialog-body .audit-filter label { flex: 0 1 260px; min-width: 0; }
+.audit-filter .field { height: 36px; padding: 0 8px; font: 12px var(--font-mono); }
+.audit-filter .mem-foot { flex: 1 1 220px; }
 .audit { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .audit th:nth-child(1) { width: 22%; } .audit th:nth-child(2) { width: 27%; } .audit th:nth-child(3) { width: 15%; } .audit th:nth-child(4) { width: 23%; } .audit th:nth-child(5) { width: 13%; }
 .audit th { text-align: left; vertical-align: bottom; padding: 6px 12px 6px 0; font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: var(--border-w) solid var(--line); }

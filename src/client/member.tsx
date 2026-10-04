@@ -49,7 +49,7 @@ export const roleWord = (a: MemberAccess) => (a.reason === "plan_lapsed" && a.ro
 /** What a role lets you do, in one plain line. The invite page and the board's banner both say it. */
 export const ROLE_LINE = {
   viewer: "You can read the board and download its files. You can't change anything.",
-  writer: "You can add, edit, move, and delete cards and attach files. Lanes, undo, and board settings stay with the owner.",
+  writer: "You can add, edit, move, and delete cards and attach files. Lanes, undo, the owner's agent cards, and board settings stay with the owner.",
 } as const;
 
 /** The line under the top bar of a shared board: whose it is, what you can do, and what would change that. */
@@ -142,15 +142,45 @@ export function asActivity(f: unknown): ActivityFrame | null {
 /**
  * What to say when somebody else deletes a card on a shared board, or brings one back:
  * `dana@example.com deleted "Ship the invoice"`. Null for your own doing, which the tab that
- * did it already said.
+ * did it already said. The one exception is your own agent over MCP: no tab did that, so the
+ * owner hears "Your agent deleted …". `count` and `first` let a run of them read as one line.
  */
-export function activityText(f: ActivityFrame, me: string): string | null {
-  const first = f.cards[0];
-  if (f.by.email === me || !first || typeof first.title !== "string") return null;
-  const how = f.by.via === "agent" ? " via MCP" : f.by.via === "assistant" ? " via the assistant" : f.by.via === "undo" ? ", with Undo," : f.by.via === "redo" ? ", with Redo," : "";
-  const title = first.title.length > 60 ? `${first.title.slice(0, 60)}…` : first.title;
-  const what = f.count > 1 ? `${f.count} cards: "${title}" and ${f.count - 1} more` : `"${title}"`;
-  return `${f.by.email}${how} ${f.action === "card_deleted" ? "deleted" : "brought back"} ${what}`;
+export function activityText(f: ActivityFrame, me: string, run?: { count: number; first: string }): string | null {
+  const first = run?.first ?? f.cards[0]?.title;
+  const count = run?.count ?? f.count;
+  const mine = f.by.email === me;
+  if ((mine && f.by.via !== "agent") || typeof first !== "string") return null;
+  const who = mine ? "Your agent" : f.by.email;
+  const how = mine ? "" : f.by.via === "agent" ? " via MCP" : f.by.via === "assistant" ? " via the assistant" : f.by.via === "undo" ? ", with Undo," : f.by.via === "redo" ? ", with Redo," : "";
+  const title = first.length > 60 ? `${first.slice(0, 60)}…` : first;
+  const what = count > 1 ? `${count} cards: "${title}" and ${count - 1} more` : `"${title}"`;
+  return `${who}${how} ${f.action === "card_deleted" ? "deleted" : "brought back"} ${what}`;
+}
+
+/**
+ * Deletions that came one after another from the same person, shown as one toast. `steps` are
+ * the undo steps that reverse them, oldest first, on the owner's board (a member has none).
+ */
+export type ActivityRun = { key: string; count: number; first: string; steps: number[]; toast: number };
+
+/**
+ * Fold a new frame into the run on screen, or start a new one. It joins only when it's the
+ * same person doing the same thing, the run's toast is still the one showing, and, for the
+ * owner, its undo step is the very next one (or the same one: two cards in one step). A step
+ * that isn't next means something else changed the board in between, and then one Undo
+ * couldn't honestly cover both, so that frame gets a toast of its own.
+ */
+export function joinRun(prev: ActivityRun | null, f: ActivityFrame, showing: number | null, toast: number, canUndo: boolean): ActivityRun {
+  const key = `${f.action}|${f.by.email}|${f.by.via ?? ""}`;
+  const step = canUndo && f.action === "card_deleted" && typeof f.undo === "number" ? f.undo : null;
+  const fresh: ActivityRun = { key, count: f.count, first: f.cards[0]?.title ?? "", steps: step === null ? [] : [step], toast };
+  if (!prev || prev.key !== key || showing !== prev.toast) return fresh;
+  const last = prev.steps[prev.steps.length - 1];
+  if (canUndo && f.action === "card_deleted") {
+    if (step === null || last === undefined || (step !== last && step !== last + 1)) return fresh;
+    return { ...prev, count: prev.count + f.count, steps: step === last ? prev.steps : [...prev.steps, step], toast };
+  }
+  return { ...prev, count: prev.count + f.count, toast };
 }
 
 const verb = (c: Card) => (c.createdAt === c.updatedAt ? "Added" : "Edited");

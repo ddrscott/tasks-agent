@@ -64,6 +64,7 @@ const rules = await load("src/member-rules.ts");
 const shared = await load("src/shared.ts");
 const auth = await load("src/auth.ts");
 const sealedLib = await load("src/sealed.ts");
+const memberUi = await load("src/client/member.tsx");
 
 section("access rules (pure)");
 {
@@ -236,6 +237,22 @@ section("access rules (pure)");
   const lost = await withRetries(flaky(99), SIGNAL_WAITS_MS, (e, n) => heard.push(`${n}:${e.message}`), noWait).then(() => null, (e) => e);
   ok(`one that never works is tried ${SIGNAL_WAITS_MS.length} times, each failure is reported, and the last error comes out`, lost?.message === `down ${SIGNAL_WAITS_MS.length}` && heard.length === SIGNAL_WAITS_MS.length && heard[0] === "1:down 1");
   ok("one that works the first time doesn't wait at all", (await withRetries(flaky(0), SIGNAL_WAITS_MS, undefined, async () => { throw new Error("waited"); })).tries === 1);
+
+  // What the toast says about a deletion, and how a run of them becomes one toast (member.tsx).
+  const { activityText, joinRun } = memberUi;
+  const frame = (more = {}) => ({ type: "tasks_activity", action: "card_deleted", by: { email: "dana@example.com" }, cards: [{ id: "c1", title: "Ship the invoice", lane: "To do" }], count: 1, ...more });
+  ok("someone else's deletion is said by name", activityText(frame(), "me@example.com") === 'dana@example.com deleted "Ship the invoice"');
+  ok("your own, by hand or through the assistant or Undo, isn't said twice", activityText(frame({ by: { email: "me@example.com" } }), "me@example.com") === null && activityText(frame({ by: { email: "me@example.com", via: "assistant" } }), "me@example.com") === null && activityText(frame({ by: { email: "me@example.com", via: "undo" } }), "me@example.com") === null);
+  ok("your own agent's is: nobody was at a screen for it", activityText(frame({ by: { email: "me@example.com", via: "agent" } }), "me@example.com") === 'Your agent deleted "Ship the invoice"' && activityText(frame({ by: { email: "dana@example.com", via: "agent" } }), "me@example.com") === 'dana@example.com via MCP deleted "Ship the invoice"');
+  let runNow = joinRun(null, frame({ undo: 10 }), null, 1, true);
+  ok("one deletion is a run of one, with its undo step", runNow.count === 1 && runNow.steps.join() === "10" && runNow.first === "Ship the invoice");
+  runNow = joinRun(runNow, frame({ undo: 11, cards: [{ id: "c2", title: "Second", lane: "To do" }] }), 1, 2, true);
+  runNow = joinRun(runNow, frame({ undo: 12, cards: [{ id: "c3", title: "Third", lane: "To do" }] }), 2, 3, true);
+  ok("three in a row by one person are one toast that names all three steps", runNow.count === 3 && runNow.steps.join() === "10,11,12" && activityText(frame(), "me@example.com", runNow) === 'dana@example.com deleted 3 cards: "Ship the invoice" and 2 more');
+  ok("two cards in one step count as two cards and one step", (() => { const r = joinRun(runNow, frame({ undo: 12, count: 2 }), 3, 4, true); return r.count === 5 && r.steps.join() === "10,11,12"; })());
+  ok("a step that isn't the next one starts a new toast: something else changed the board in between", (() => { const r = joinRun(runNow, frame({ undo: 14, cards: [{ id: "c9", title: "Later", lane: "To do" }] }), 3, 4, true); return r.count === 1 && r.steps.join() === "14" && r.first === "Later"; })());
+  ok("so does another person, another way of doing it, or a toast that's no longer showing", joinRun(runNow, frame({ undo: 13, by: { email: "sam@example.com" } }), 3, 4, true).count === 1 && joinRun(runNow, frame({ undo: 13, by: { email: "dana@example.com", via: "assistant" } }), 3, 4, true).count === 1 && joinRun(runNow, frame({ undo: 13 }), null, 4, true).count === 1 && joinRun(runNow, frame({ undo: 13 }), 99, 4, true).count === 1);
+  ok("a member's run has no undo steps, and still reads as one line", (() => { let r = joinRun(null, frame(), null, 1, false); r = joinRun(r, frame(), 1, 2, false); return r.count === 2 && r.steps.length === 0; })());
 
   const by = { email: "w@example.com" };
   const b2 = shared.addCard(b, { title: "Two" }).board;
@@ -746,7 +763,7 @@ const OWNER_ONLY_CALLS = [
   // Not callable by anyone over the socket, and a member mustn't be the exception.
   ["attach", [seed, { id: "a0000000000000000", name: "x", size: 1, type: "text/plain", addedAt: "now" }]], ["runTool", ["add_lane", { name: "Hacked" }]],
   ["askCeo", [{ id: seed, question: "Q?", options: ["a", "b"] }]], ["mutate", ["x"]], ["setState", [{ lanes: [], cards: [], theme: "paper" }]],
-  ["undoIf", [1]], ["markShared", []], ["noteCards", ["card_deleted", [{ card: "c0000", title: "Forged", lane: "To do" }], { email: "owner@example.com" }]],
+  ["undoIf", [1]], ["undoRun", [[1, 2]]], ["fileFor", ["x", "a0000000000000000"]], ["markShared", []], ["noteCards", ["card_deleted", [{ card: "c0000", title: "Forged", lane: "To do" }], { email: "owner@example.com" }]],
   ["goneCards", [{}, {}]], ["spendDeletes", [-200]], ["logCards", []],
   ["membersChanged", []], ["sweepMembers", []], ["noteAgentSeen", []], ["collectAttachments", []], ["persistMessages", [[]]], ["destroy", []],
   ["describe", []], ["cardDetail", [seed]], ["agentQueue", []], ["hasAttachment", ["x"]], ["uploadPolicy", []], ["onChatMessage", []], ["saveMessages", [[]]],
@@ -895,10 +912,34 @@ section("who deleted it");
   const viaA = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === cardId && e.detail.via === "assistant");
   ok("a card the writer's assistant deletes is logged as theirs, via the assistant", viaAssistant.result?.outcomes?.[0]?.ok === true && viaA?.actor === writer.email, viaA);
 
+  // A run of deletions by one person: each is its own undo step, one after the next, and the
+  // owner's one Undo for the run takes back all of them or none.
+  const runIds = [];
+  for (const t of ["Run one", "Run two", "Run three"]) runIds.push((await writerSock.rpc("addCard", [lanes[0].id, t])).result);
+  await ownerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === runIds[2]));
+  oMark = ownerSock.frames.length;
+  for (const id of runIds) await writerSock.rpc("deleteCard", [id]);
+  await ownerSock.wait((f) => f.type === "tasks_activity" && f.cards?.[0]?.id === runIds[2], 3000, oMark);
+  const runFrames = ownerSock.frames.slice(oMark).filter((f) => f.type === "tasks_activity" && f.action === "card_deleted");
+  const steps = runFrames.map((f) => f.undo);
+  ok("three deletions in a row reach the owner as three frames with consecutive undo steps", runFrames.length === 3 && steps[1] === steps[0] + 1 && steps[2] === steps[1] + 1, steps);
+  let toastRun = null;
+  runFrames.forEach((f, i) => { toastRun = memberUi.joinRun(toastRun, f, i === 0 ? null : i, i + 1, true); });
+  ok("which the app shows as one toast for all three", toastRun.count === 3 && toastRun.steps.join() === steps.join() && memberUi.activityText(runFrames[2], owner.email, toastRun) === `${writer.email} deleted 3 cards: "Run one" and 2 more`);
+  ok("an Undo for part of the run, or with a step that isn't there, undoes nothing", (await ownerSock.rpc("undoRun", [[steps[0], steps[1]]])).result === null && (await ownerSock.rpc("undoRun", [[steps[0], steps[1], steps[2], steps[2] + 1]])).result === null && (await ownerSock.rpc("undoRun", [[]])).result === null && (await ownerSock.rpc("undoRun", ["x"])).result === null && !ownerSock.state().cards.some((c) => runIds.includes(c.id)));
+  const ranBack = await ownerSock.rpc("undoRun", [steps]);
+  await ownerSock.wait((f) => f.type === "cf_agent_state" && runIds.every((id) => f.state.cards.some((c) => c.id === id)), 3000, oMark);
+  ok("the owner's one Undo brings back the whole run", ranBack.result === 3 && runIds.every((id) => ownerSock.state().cards.some((c) => c.id === id)), ranBack);
+  ok("and it can't be used twice", (await ownerSock.rpc("undoRun", [steps])).result === null);
+  for (const id of runIds) await ownerSock.rpc("deleteCard", [id]);
+
   const agentCard = (await ownerSock.rpc("addCard", [lanes[0].id, "Card the owner's agent deletes"])).result;
   const token = (await call(owner, "POST", "/api/tokens", { name: "check deletes" })).data.token;
   vMark = viewerSock.frames.length;
+  oMark = ownerSock.frames.length;
   const byAgent = await mcp(token, "delete_cards", { ids: [agentCard] });
+  const oAgent = await ownerSock.wait((f) => f.type === "tasks_activity" && f.cards?.[0]?.id === agentCard, 3000, oMark);
+  ok("the owner's open board is told when their own agent deletes a card, with the step that undoes it", oAgent?.by.email === owner.email && oAgent.by.via === "agent" && Number.isInteger(oAgent.undo) && memberUi.activityText(oAgent, owner.email) === `Your agent deleted "Card the owner's agent deletes"`, oAgent);
   const viaM = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === agentCard);
   const vAgent = await viewerSock.wait((f) => f.type === "tasks_activity" && f.cards?.[0]?.id === agentCard, 3000, vMark);
   ok("a card the owner's agent deletes over MCP is logged as the owner's, via their agent", !byAgent.isError && viaM?.actor === owner.email && viaM.detail.via === "agent" && vAgent?.by.via === "agent", [byAgent.text.slice(0, 120), viaM]);
@@ -925,6 +966,16 @@ section("who deleted it");
   await solo.rpc("deleteCard", [soloCard]);
   await sleep(600);
   ok("a board that was never shared keeps no deletion log", (await audit(stranger)).length === 0 && !solo.frames.some((f) => f.type === "tasks_activity"), solo.frames.map((f) => f.type));
+  // Its owner still hears about their own agent's deletions, with Undo: nobody was at a screen for those.
+  const soloAgentCard = (await solo.rpc("addCard", [solo.state().lanes[0].id, "Solo card the agent deletes"])).result;
+  const soloToken = (await call(stranger, "POST", "/api/tokens", { name: "check solo" })).data.token;
+  const sMark = solo.frames.length;
+  await mcp(soloToken, "delete_cards", { ids: [soloAgentCard] });
+  const sFrame = await solo.wait((f) => f.type === "tasks_activity" && f.cards?.[0]?.id === soloAgentCard, 3000, sMark);
+  ok("on a board nobody shares, the owner is still told when their agent deletes a card", sFrame?.by.via === "agent" && sFrame.by.email === stranger.email && Number.isInteger(sFrame.undo), sFrame);
+  ok("and Undo for that step brings it back", typeof (await solo.rpc("undoIf", [sFrame.undo])).result === "string" && !!(await solo.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === soloAgentCard), 3000, sMark)));
+  await sleep(400);
+  ok("with still nothing in a log", (await audit(stranger)).length === 0);
   solo.close();
 }
 
@@ -1558,9 +1609,9 @@ section("a member's HTTP calls are counted too");
   // (A token comes back every 200 ms, so each of these spends what trickled in first.)
   const drain = (who, fn = accessOf) => Promise.all(Array.from({ length: 8 }, () => fn(who)));
   await drain(watcher);
-  const knock = await open(watcher, { board: floodOwner.id, unpaced: true });
-  ok("the board's socket is counted with them", refused(knock, 429), how(knock));
-  knock.close();
+  const knocks = await Promise.all(Array.from({ length: 10 }, () => open(watcher, { board: floodOwner.id, unpaced: true })));
+  ok("the board's socket is counted with them: ten more at once, and all but the odd one that caught a token are refused", knocks.filter((k) => refused(k, 429)).length >= 8, knocks.map(how));
+  for (const k of knocks) k.close();
   ok("their own board isn't counted against it", (await call(watcher, "GET", "/api/board/access")).status === 200 && (await call(watcher, "GET", "/api/boards")).status === 200);
 
   // Downloads, by another member with a full allowance. These read R2, and the board counts them exactly.
@@ -1721,6 +1772,9 @@ section("the audit log");
   const csv = await call(owner, "GET", "/api/board/audit.csv");
   const lines = csv.text.trim().split("\r\n");
   ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && lines.length === entries.length + 1, [lines.length, entries.length]);
+  const rawCsv = new Uint8Array(await (await fetch(`${BASE}/tasks/api/board/audit.csv`, { headers: { Cookie: owner.cookie } })).arrayBuffer());
+  ok("the CSV opens with a UTF-8 byte-order mark, so Excel reads titles that aren't plain ASCII", rawCsv[0] === 0xef && rawCsv[1] === 0xbb && rawCsv[2] === 0xbf && new TextDecoder("utf-8", { ignoreBOM: true }).decode(rawCsv.slice(3, 6)) === "seq" && !new TextDecoder("utf-8", { ignoreBOM: true }).decode(rawCsv.slice(3)).includes("\uFEFF"));
+  ok("and still ends every line with CRLF, the last one too", csv.text.endsWith("\r\n") && !/[^\r]\n/.test(csv.text));
   ok("the CSV names the people and the times", csv.text.includes(`${owner.email},member_removed,${removed.email},writer,`) && /\d{4}-\d\d-\d\dT/.test(lines[1]));
   const js = await call(owner, "GET", "/api/board/audit.json");
   ok("and as JSON", js.status === 200 && js.data.owner === owner.email && js.data.entries.length === entries.length);
@@ -1738,6 +1792,22 @@ section("the audit log");
   await call(owner, "POST", "/api/board/invites/revoke", { email: `tb-numbering-${run}@example.com` });
   const csvAfter = (await call(owner, "GET", "/api/board/audit.csv")).text.trim().split("\r\n");
   ok("the numbers are stable: new entries go on the end and the old ones keep theirs", csvAfter.slice(1, 11).join("\n") === firstTen && csvAfter.length === lines.length + 2 && Number(csvAfter[csvAfter.length - 1].split(",")[0]) === csvAfter.length - 1, csvAfter.length);
+  // The audit tab's filter, done by the server over the whole log.
+  const cardActions = ["card_deleted", "card_restored"];
+  const all = (await call(owner, "GET", "/api/board/audit?limit=200")).data;
+  const onlyCards = (await call(owner, "GET", "/api/board/audit?limit=200&kind=cards")).data.entries;
+  const onlyMembership = (await call(owner, "GET", "/api/board/audit?limit=200&kind=membership")).data.entries;
+  ok("the log filters to card deletions, or to membership, and the two add up to the whole", onlyCards.length > 0 && onlyCards.every((e) => cardActions.includes(e.action)) && onlyMembership.length > 0 && onlyMembership.every((e) => !cardActions.includes(e.action)) && onlyCards.length + onlyMembership.length === all.entries.length, [onlyCards.length, onlyMembership.length, all.entries.length]);
+  const aboutWriter = (await call(owner, "GET", `/api/board/audit?limit=200&who=${encodeURIComponent(writer.email)}`)).data.entries;
+  ok("and to one person: what they did, and what was done to them", aboutWriter.length > 0 && aboutWriter.every((e) => e.actor === writer.email || e.target === writer.email) && aboutWriter.some((e) => e.actor === owner.email && e.target === writer.email) && aboutWriter.some((e) => e.actor === writer.email && e.action === "card_deleted") && aboutWriter.length === all.entries.filter((e) => e.actor === writer.email || e.target === writer.email).length, aboutWriter.length);
+  const both = (await call(owner, "GET", `/api/board/audit?limit=200&kind=cards&who=${encodeURIComponent(writer.email.toUpperCase())}`)).data.entries;
+  ok("both at once, and an entry keeps its number in the whole log", both.length > 0 && both.every((e) => e.actor === writer.email && cardActions.includes(e.action) && all.entries.find((x) => x.id === e.id)?.seq === e.seq), both.length);
+  const fp1 = (await call(owner, "GET", "/api/board/audit?limit=2&kind=cards")).data;
+  const fp2 = (await call(owner, "GET", `/api/board/audit?limit=2&kind=cards&before=${fp1.next}`)).data;
+  ok("a filtered log pages through matches only", fp1.entries.length === 2 && fp2.entries.length > 0 && [...fp1.entries, ...fp2.entries].every((e) => cardActions.includes(e.action)) && fp2.entries[0].id < fp1.entries[1].id);
+  ok("the first page lists everyone in the log, for the filter", Array.isArray(all.people) && [owner.email, writer.email, removed.email, "system"].every((p) => all.people.includes(p)) && !("people" in fp2), all.people?.length);
+  ok("a filter that matches nobody is an empty page, and a made-up kind is no filter", (await call(owner, "GET", "/api/board/audit?who=nobody@example.com")).data.entries.length === 0 && (await call(owner, "GET", "/api/board/audit?limit=200&kind=nope")).data.entries.length === all.entries.length);
+  ok("a member's filtered log is still their own, empty one", (await call(writer, "GET", `/api/board/audit?who=${encodeURIComponent(owner.email)}`)).data.entries.length === 0);
   const who = (await call(owner, "GET", "/api/board/members")).data.members;
   ok("the members list answers who has access right now", who.filter((m) => m.status === "accepted").map((m) => `${m.email}:${m.role}`).sort().join() === [`${viewer.email}:viewer`, `${writer.email}:writer`].sort().join(), who);
   let blocked = 0;
