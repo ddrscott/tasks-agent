@@ -87,14 +87,22 @@ run ahead of whatever serves the zone.
   signed in or not, and the response is a real **404**. The pages are listed once, in
   `src/routes.ts` (`PAGES`): `connect`, `privacy`, `terms`, `demo`, `pricing`, plus `/tasks/`
   itself. The client uses the list to pick the page and the Worker uses it to pick the status,
-  so add a new page there and nowhere else. To make that possible the Worker answers every
+  so add a new page there, with a row in `PAGE_META` beside it for its title and description
+  (`// LINK_PREVIEWS_AND_TITLES`; a page without a row doesn't compile). To make that possible the Worker answers every
   `/tasks` address (`run_worker_first` in `wrangler.jsonc`) except `/tasks/assets/*` and
   `/tasks/needle/*`, which the asset layer serves by itself, and `not_found_handling` is
   `none`: a page gets the app's HTML, a file in `public/tasks/` gets the file, and everything
-  else gets the app's HTML with a 404. A missing file under `/tasks/assets/` is a bare 404.
+  else gets the app's HTML with a 404, marked `noindex`. A missing file under `/tasks/assets/` is a bare 404.
 - **Who's signed in.** `GET /tasks/api/me` answers 200 either way: the user, or `null` when
   nobody is signed in. It isn't a 401, so a signed-out visit leaves the browser console clean.
   Everything that needs a session still answers 401 without one.
+- **The assistant panel** opens the way you left it: the Assistant button saves `open` or
+  `closed` in this browser (`localStorage["todo-chat"]`). With nothing saved, the first board to
+  load decides (`receive` in `App.tsx`). A board with cards opens the panel, as it always has.
+  A board with no cards keeps it closed and saves that, so a new account's first screen is
+  `// START_HERE` and the lanes at full width, and the panel doesn't spring open on a later
+  visit: it opens when you open it (the Assistant button, or `/`). Under 900px wide it's always
+  closed to start, behind the Ask button.
 - **First run.** A board with no cards shows `// START_HERE` above its lanes
   (`src/client/FirstRun.tsx`): four steps that end with Claude Code working a card. Sign in
   (done), **Add a sample agent card**, **Copy the command**, paste it in a terminal. The steps
@@ -687,9 +695,9 @@ transcripts in `~/.claude/projects` on the machine that ran them.
 resume command), machine, agent kind, state, the last-action line, when it started, and when it
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
-(`Claude needs your permission to use Bash`). For a session that only claims cards it's
-`claimed "<card title>"` or `released "<card title>"`, the one place a card's title is copied
-here. Rows are deleted 24 hours after they were last
+(`Claude needs your permission to use Bash`). For a session that only claims cards it's a line
+about the card, like `claimed "<card title>"` or `finished "<card title>"`, the one place a
+card's title is copied here. Rows are deleted 24 hours after they were last
 updated, when the session ends, and all at once when the board turns encryption on. At most 200
 are kept.
 
@@ -793,7 +801,9 @@ slow a session; the `X-Tasks-Presence` response header says what happened (`stor
 **Kept apart from the board.** Sessions and claims live in their own Durable Object, `Presence`
 (`src/presence.ts`), one per user, in its own SQLite tables. Nothing goes through
 `TodoAgent.mutate`, so a session reporting in never adds an undo step, flashes a card, reindexes
-search, or publishes an agent event. The browser reads the list over its own WebSocket,
+search, or publishes an agent event. The board tells `Presence` one thing, and nothing comes
+back: which cards a change just finished or deleted, so their claims can end (Claiming cards,
+below). The browser reads the list over its own WebSocket,
 `/tasks/presence`, which takes the session cookie and refuses other origins like the board's.
 
 **Claiming cards.** Several lead agents can work one board. Before starting a card, a lead calls
@@ -805,6 +815,27 @@ last heard from, which is longer than the 5-minute stale mark on purpose: a lead
 keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
 being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
 on the card, so they don't show up in undo, notes, or search.
+
+**A finished card isn't claimed.** A claim says a session is working on the card, and nothing is
+working on a card that's done or gone. So a claim ends the moment its card reaches the last lane
+or is deleted, whoever did it: the agent over MCP (with or without `release_card`), you in the
+app, or the assistant. The card stops saying "working" right then instead of 15 minutes later.
+A `release_card` that arrives afterward finds nothing to release and says so, which is fine.
+
+- **Where it happens.** `TodoAgent.mutate` (and undo and redo, which change the board without it)
+  compares the board before and after with `endedCards` in `src/presence-shared.ts`. If a card
+  ended, it calls `Presence.finish`, which drops the claim. That call is one-way and runs after
+  the change is saved: no undo step, no flash, no agent event. A board with one lane has no done
+  lane, so only a delete ends a claim there. An encrypted board keeps no presence and is skipped.
+- **What counts.** Being in the last lane now and not before. That covers a move, a card added
+  straight to the last lane, and a lane change that makes another lane the last one. A card
+  moved back out of the last lane is just a card again.
+- **Undo doesn't bring a claim back.** Undo the move and the card returns to its lane unclaimed.
+  The agent claims it again if it's still on it; a claim the board invented would say a session
+  is working when nobody has heard that from the session. Redoing the move, or undoing the
+  "Add card" that made a claimed card, ends the claim like any other change does.
+- **The session's row.** A session that reports through hooks keeps the row its hooks wrote.
+  One that only claims gets a new last-action line, below.
 
 **A session that only claims.** An agent with no hooks is heard from through `claim_card` and
 `release_card` alone, so those two calls write its whole row. `agent`, `machine`, and `project`
@@ -818,13 +849,19 @@ names the card by its title.
 | `claim_card`, refused | working if it holds another card, else idle | asked for "Fix the login redirect", which another session holds |
 | `release_card`, holds another card | working | released "Fix the login redirect" |
 | `release_card`, its last card | idle | released "Fix the login redirect" |
+| An agent moved the card to the last lane | idle, or working if it holds another card | finished "Fix the login redirect" |
+| You or the assistant moved it there | same | "Fix the login redirect" was moved to Done |
+| The card was deleted | same | "Fix the login redirect" was deleted |
 | 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
 
 So such a session is "working" only while it holds a card. A refused claim counts as being heard
 from and nothing more. Once a hook reports for a session, the event table above is in charge of
 its row, and a claim or release only moves its last-seen time (and fills in the agent kind when
-the hooks didn't send one). The rules are `afterClaim` and `afterRelease` in
-`src/presence-shared.ts`; `npm run check:presence` runs them, along with the "need you" count.
+the hooks didn't send one). The rules are `afterClaim`, `afterRelease`, `endedCards`, and
+`afterEnded` in `src/presence-shared.ts`; `npm run check:presence` runs them, along with the
+"need you" count. The last three rows don't count as hearing from the session, so its last-seen
+time stays put: the line says "finished" only when an agent made the move, since the board can't
+tell which agent, and says what happened to the card when a person did.
 What a hookless session can't say: that it's stopped at a prompt (its questions go through
 `ask_ceo`), or that it's alive between claims, which is why the lead instructions below renew
 the claim. For a lead agent's instructions:
@@ -832,8 +869,8 @@ the claim. For a lead agent's instructions:
 ```
 Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
 agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
-card you're working at least every 10 minutes, and release_card when you move it to Done or
-hand it to Scott with needs-ceo.
+card you're working at least every 10 minutes, and release_card when you hand it to Scott with
+needs-ceo. Moving a card to Done releases it for you.
 ```
 
 **Encrypted boards keep no presence.** It's metadata about sessions, not card text, so it could
@@ -952,10 +989,41 @@ step with what the app stores: update it when you add a table, a processor, or a
 
 ## // LINK_PREVIEWS_AND_TITLES
 
-`index.html` carries what a shared link shows: the title, description, canonical URL, `og:*`
-and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. It's static, so every path
-serves the same tags and they all point at `https://askscottpierce.com/tasks/`. Only put
+`index.html` carries what a shared link shows for the front page: the title, description,
+canonical URL, `og:*` and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. Only put
 true facts in there: no ratings, no user counts, and no price until billing is on.
+
+**Every page gets its own head.** Link-preview fetchers (Slack, X, iMessage, Hacker News) read
+the raw HTML and don't run JavaScript, and every page is the same `index.html`. So the Worker,
+which answers every `/tasks` page itself, rewrites the head on the way out with `HTMLRewriter`
+(`shell` and `withHead` in `src/server.ts`), from one table: `PAGE_META` in `src/routes.ts`.
+
+| Address | `<title>`, `og:title`, `twitter:title` | Description | Canonical and `og:url` |
+|---|---|---|---|
+| `/tasks/` | the default title | as written in `index.html` | `https://askscottpierce.com/tasks/` |
+| `/tasks/demo` | Demo board · Tasks | a live demo board, no sign-up | `…/tasks/demo` |
+| `/tasks/connect` | Connect an agent · Tasks | from the table | `…/tasks/connect` |
+| `/tasks/pricing` | Pricing · Tasks | from the table | `…/tasks/pricing` |
+| `/tasks/privacy`, `/tasks/terms` | Privacy · Tasks, Terms · Tasks | from the table | their own address |
+| anything else (404) | Not found · Tasks | "There's no page at this address." | removed, and `robots` is `noindex` |
+
+- **To add a page or change a title**, edit `PAGE_META`. A row has a `name` and a
+  `description`; the description is written to `meta description`, `og:description`, and
+  `twitter:description` alike. The client's tab titles come from the same rows: `useTitle`
+  only accepts a name that's in the table, so a title can't say one thing in the HTML and
+  another in the tab.
+- **The front page is the exception.** Its descriptions and JSON-LD stay written out in
+  `index.html`, and the Worker only sets its title, from `DEFAULT_TITLE`. Every other page has
+  the JSON-LD block removed: it describes the product, on the front page.
+- **Canonical URLs always name production** (`SITE` in `src/routes.ts`), whatever host served
+  the page, and have no trailing slash except `/tasks/`. `/tasks/demo/` says `/tasks/demo`.
+- **`og:image` is the same picture everywhere.** A per-page image would need its own render.
+- **`/tasks/pricing` is the front page opened at its pricing section**, with its own title and
+  canonical so a shared pricing link previews as pricing.
+- **Rewritten pages carry no `ETag`**: the file's ETag describes `index.html`, not the page
+  made from it. The Worker never answered a page with a 304 anyway.
+- It works the same under `vite dev` and from the built Worker. Check a page with
+  `curl -s localhost:5173/tasks/demo | grep -iE '<title>|description|canonical|og:|twitter:'`.
 
 - **The share image** is `public/tasks/og.png` (1200x630), and the home-screen icon is
   `public/tasks/apple-touch-icon.png` (180x180). Both are screenshots of HTML kept in
@@ -970,9 +1038,11 @@ true facts in there: no ratings, no user counts, and no price until billing is o
 - X, Slack, and iMessage cache previews. After changing the image, rename it (and the URLs in
   `index.html`) if the old one has to stop showing.
 - **Tab titles** come from `useTitle` in `src/client/title.ts`: `useTitle("Connect an agent")`
-  gives "Connect an agent · Tasks". Each page calls it once at the top of its component. The
+  gives "Connect an agent · Tasks". Each page calls it once at the top of its component, with a
+  name from `PAGE_META` (or "Board", your own board's tab, which is never in served HTML). The
   sign-in screen calls it with no name and gets the full default title, because that's the
-  page a shared link lands on. `DEFAULT_TITLE` there has to match `<title>` in `index.html`.
+  page a shared link lands on. `DEFAULT_TITLE` in `src/routes.ts` is that title; `<title>` in
+  `index.html` should say the same, and the Worker overwrites it with the constant either way.
 
 ## // SIGN_IN_WITH_GOOGLE_AND_MICROSOFT
 

@@ -14,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-presence");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/presence-shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { afterClaim, afterRelease, askingSession, blockedSessions, needYouCount, isStale, known, projectName, whoWhere, STALE_MS } = await import(pathToFileURL(outfile).href);
+const { afterClaim, afterEnded, afterRelease, endedCards, askingSession, blockedSessions, needYouCount, isStale, known, projectName, whoWhere, STALE_MS } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -51,6 +51,37 @@ check("releasing its only card goes idle and says what it released",
   afterRelease(told, "Fix login", 0),
   { project: "shop-api", machine: "mini", agent: "cursor", state: "idle", last: 'released "Fix login"' });
 check("releasing one of two cards stays working", afterRelease(told, "Fix login", 1).state, "working");
+
+// ── A claimed card that's finished or gone ──────────────────────────────────────────────────
+const lanes = [{ id: "todo", name: "To do" }, { id: "doing", name: "Doing" }, { id: "done", name: "Done" }];
+const card = (id, laneId, title = id) => ({ id, laneId, title });
+const b0 = { lanes, cards: [card("a", "doing", "Fix login"), card("b", "todo"), card("z", "done")] };
+const moved = { lanes, cards: [card("a", "done", "Fix login"), card("b", "todo"), card("z", "done")] };
+check("a card moved to the last lane has ended, and one already there hasn't", endedCards(b0, moved, "agent"),
+  [{ cardId: "a", title: "Fix login", how: "done", lane: "Done", by: "agent" }]);
+check("a card moved between other lanes hasn't ended",
+  endedCards(b0, { lanes, cards: [card("a", "todo"), card("b", "doing"), card("z", "done")] }, "you"), []);
+check("moving a card back out of the last lane ends nothing", endedCards(moved, b0, "you"), []);
+check("a deleted card has ended", endedCards(b0, { lanes, cards: [card("b", "todo"), card("z", "done")] }, "you"),
+  [{ cardId: "a", title: "Fix login", how: "deleted", lane: "", by: "you" }]);
+check("a card added straight to the last lane has ended", endedCards(b0, { lanes, cards: [...b0.cards, card("n", "done")] }, "you").map((e) => e.cardId), ["n"]);
+check("a lane that becomes the last one ends its cards",
+  endedCards(b0, { lanes: [lanes[0], lanes[2], lanes[1]], cards: b0.cards }, "you").map((e) => [e.cardId, e.lane]), [["a", "Doing"]]);
+check("renaming a card ends nothing", endedCards(b0, { lanes, cards: [card("a", "doing", "Fix sign-in"), card("b", "todo"), card("z", "done")] }, "you"), []);
+check("a board with one lane has no done lane",
+  endedCards({ lanes: [lanes[0]], cards: [] }, { lanes: [lanes[0]], cards: [card("a", "todo")] }, "you"), []);
+check("the same board ends nothing", endedCards(b0, b0, "you"), []);
+
+check("an agent that moved its only card to the last lane is idle and finished it",
+  afterEnded(told, { title: "Fix login", how: "done", lane: "Done", by: "agent" }, 0),
+  { project: "shop-api", machine: "mini", agent: "cursor", state: "idle", last: 'finished "Fix login"' });
+check("when the person moved it, the line says so instead of crediting the session",
+  afterEnded(told, { title: "Fix login", how: "done", lane: "Shipped", by: "you" }, 0).last, '"Fix login" was moved to Shipped');
+check("a deleted card says it was deleted, and the session goes idle",
+  [afterEnded(told, { title: "Fix login", how: "deleted", lane: "", by: "you" }, 0).state, afterEnded(told, { title: "Fix login", how: "deleted", lane: "", by: "agent" }, 0).last],
+  ["idle", '"Fix login" was deleted']);
+check("finishing one of two cards stays working", afterEnded(told, { title: "Fix login", how: "done", lane: "Done", by: "agent" }, 1).state, "working");
+check("a finished card never reads as working on it", /claimed|working/.test(afterEnded(told, { title: "Fix login", how: "done", lane: "Done", by: "agent" }, 0).last), false);
 
 // ── Reading "unknown" ───────────────────────────────────────────────────────────────────────
 check("the word unknown counts as not known", [known("unknown"), known(""), known("mini")], ["", "", "mini"]);

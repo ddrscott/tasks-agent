@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Menus and popovers work from the keyboard: opening one puts you inside it, Esc puts you back on its button, and the arrow keys move through the account and lane menus
 - Tag a card `#gauntlet` to have an agent build and critique it round after round overnight without asking; `tasks-gauntlet` starts one per repo
 - `tasks-events --require <tag>` — hear only cards that carry that tag too, so a lead and a gauntlet agent can share a repo
-- A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board
+- A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board. Each page previews as itself: a link to `/tasks/demo` says it's a live demo board with no sign-up, and Connect, Pricing, Privacy, and Terms show their own titles and descriptions
 - Each page names itself in the browser tab, like `Connect an agent · Tasks`, and Tasks has a home-screen icon on iPhone and iPad
 - Signed out, `/tasks/` is a real front page: what Tasks is, the sign-in form, and a sample board showing an agent's question, a claimed card, and the Sessions list. Below that: what's different, including how an answer reaches your agent and that an encrypted board is closed to outside agents, the `claude mcp add` command with a Copy button, and a link to the demo board. On a phone the headline, the demo button, and a piece of the sample board come before the sign-in form
 - Pricing is on the front page, readable before you sign up: the daily assistant limits for Free and Pro, and the Pro price as Stripe has it
@@ -56,11 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Connect page opens without signing in, so you can read the setup steps before you make an account
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
 - The assistant's starter suggestions are about agent work: queue up cards tagged `agent`, ask what's waiting on your answer, ask which `#agent` cards aren't done
+- A new, empty board opens with the Assistant panel closed, so `// START_HERE` and the lanes get the whole screen. Open it with the Assistant button or `/`. If you've opened or closed it before, or your board has cards, it opens the way it did
 - "Need you" in the top bar is the one count of what's waiting on you. It adds sessions stopped at a permission prompt to the open questions and lists both, each session with its project, what it wants, its machine, and Copy resume command. The Sessions button just counts live sessions
 
 ### Fixed
 - An agent with no Claude Code hooks (Cursor, Codex, anything on MCP) reads true in the Sessions list: it's working only while it holds a card, releasing a card says `released "<card title>"` and goes idle, and a claim that was refused no longer says it claimed the card
 - Passing `agent`, `machine`, or `project` to `claim_card` again updates the session's row
+- A card moved to the last lane, or deleted, stops saying an agent is working on it right away, whether the agent, you, or the assistant moved it. Before, it read "working" for up to 15 minutes unless the agent called `release_card`. In the Sessions list an agent without hooks goes idle and says `finished "<card title>"`
 - A session's last action names the card by its title instead of its id
 - A session with no project is listed under "No project" and a machine it didn't name is left off, instead of the word "unknown" twice. A session with no folder no longer offers a resume command
 - "Need you" counts one decision once: a session stopped on a card that has an open question shows under that question instead of adding to the count
