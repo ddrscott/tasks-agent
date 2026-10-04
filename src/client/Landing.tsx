@@ -5,7 +5,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
-import type { Claim, Session } from "../presence-shared";
+import { withAsks, type Claim, type Session } from "../presence-shared";
 import type { Card } from "../shared";
 import { pageAt } from "../routes";
 import { api, BASE } from "./base";
@@ -13,7 +13,7 @@ import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
-import { blockedSessions, isStale, PresenceContext, SessionRow } from "./Sessions";
+import { blockedSessions, isLive, PresenceContext, SessionRow } from "./Sessions";
 import { useTitle } from "./title";
 
 const DEMO = `${BASE}/demo`;
@@ -304,22 +304,28 @@ const session = (id: string, more: Partial<Session>): Session => ({
   startedAt: NOW - 3_600_000, seenAt: NOW, ...more,
 });
 
-const SESSIONS: Session[] = [
-  session("7c1e04b2-sample", { state: "needs-input", machine: "mini", last: "Waiting on: Limit by IP or by account?", seenAt: NOW - 120_000 }),
-  session("3fa9d6e1-sample", { last: "Edit migrations/0007_sessions.sql", seenAt: NOW - 4_000 }),
-  session("b20c88a7-sample", { project: "docs-site", agent: "", state: "idle", last: "Finished: rebuilt the search index", cwd: "~/code/docs-site", seenAt: NOW - 180_000 }),
+// The rows as hooks write them (the event table in README, // SESSIONS). The first session asked
+// the question on s4 and is polling wait_for_answer, so it was heard from seconds ago; its claim
+// carries the question, and withAsks, the rule the app itself reads, turns its row into
+// "needs input" and "asked: …". Nothing here is wording the product doesn't produce.
+const HOOKS: Session[] = [
+  session("7c1e04b2-sample", { machine: "mini", last: "mcp__tasks__wait_for_answer", seenAt: NOW - 9_000 }),
+  session("3fa9d6e1-sample", { last: "Edit: 0007_sessions.sql", seenAt: NOW - 4_000 }),
+  session("b20c88a7-sample", { project: "docs-site", agent: "", state: "idle", last: "finished its turn", cwd: "~/code/docs-site", seenAt: NOW - 180_000 }),
 ];
 
 const CLAIMS: Claim[] = [
-  { cardId: "s4", sessionId: SESSIONS[0].id, agent: "lead", claimedAt: NOW - 600_000 },
-  { cardId: "s5", sessionId: SESSIONS[1].id, agent: "lead", claimedAt: NOW - 900_000 },
+  { cardId: "s4", sessionId: HOOKS[0].id, agent: "lead", claimedAt: NOW - 600_000, asked: DOING[0].ask!.question, askedAt: NOW - 120_000 },
+  { cardId: "s5", sessionId: HOOKS[1].id, agent: "lead", claimedAt: NOW - 900_000 },
 ];
+
+const SESSIONS = withAsks(HOOKS, CLAIMS);
 
 const PRESENCE = { sessions: SESSIONS, claims: CLAIMS, now: NOW };
 // The top bar's two counts, by the app's own rules: "need you" is open questions plus sessions
 // stopped at a prompt, and Sessions is the ones that are live.
 const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length + blockedSessions(SESSIONS, NOW, CLAIMS, [...TODO, ...DOING]).length;
-const LIVE = SESSIONS.filter((s) => !isStale(s, NOW)).length;
+const LIVE = SESSIONS.filter((s) => isLive(s, NOW)).length;
 const titleOf = (id: string) => [...TODO, ...DOING].find((c) => c.id === id)?.title;
 
 function SampleLane({ name, index, cards }: { name: string; index: number; cards: Card[] }) {
