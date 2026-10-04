@@ -1203,3 +1203,27 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
 .msg.notice { font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); padding: 8px 10px; }
 button.att-thumb { padding: 0; cursor: pointer; }
 button.att-name { background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+
+/* ============================================================ no agent connected yet (AgentNudge.tsx) */
+/* One quiet line above the lanes, a chip on each card that's waiting for an agent, and a line in
+   that card's editor. Dashed full outlines and plain words carry it; nothing here is a colored edge. */
+.agent-nudge {
+  flex: none; margin: 12px 24px 0; padding: 3px 4px 3px 12px;
+  display: flex; align-items: center; gap: 10px;
+  font: 12px/1.5 var(--font-mono); color: var(--muted);
+  border: var(--border-w) dashed var(--line); border-radius: var(--radius-sm);
+}
+.agent-nudge + .board { padding-top: 12px; }
+.agent-nudge-mark { flex: none; color: var(--accent); font-weight: 700; }
+.agent-nudge-text { flex: 1; min-width: 0; padding: 4px 0; }
+.agent-nudge-text b { font-weight: 600; color: var(--ink); }
+.agent-nudge a, .no-agent-line a { color: var(--accent-text); text-underline-offset: 3px; white-space: nowrap; }
+.agent-nudge-x { flex: none; color: var(--muted); }
+.agent-nudge-x:hover:not(:disabled) { color: var(--ink); }
+a.chip.no-agent { color: var(--accent-text); border: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent); text-decoration: none; cursor: pointer; }
+a.chip.no-agent:hover { border-style: solid; }
+.dialog-body .no-agent-line { flex: none; margin: 0; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
+@media (max-width: 900px) {
+  .agent-nudge { margin: 10px 16px 0; align-items: flex-start; }
+  .agent-nudge-mark { padding-top: 4px; }
+}

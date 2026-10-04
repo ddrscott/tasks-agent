@@ -13,6 +13,7 @@
     "check:sort": "node scripts/check-sort.mjs",
     "check:events": "node scripts/check-events.mjs",
     "og": "node scripts/og/render.mjs",
+    "check:nudge": "node scripts/check-nudge.mjs",
     "db:migrate:local": "wrangler d1 migrations apply todo-agent-auth --local",
     "db:migrate:remote": "wrangler d1 migrations apply todo-agent-auth --remote",
     "dev:local": "LOCAL_ONLY=1 vite dev",

@@ -61,6 +61,8 @@ export type Board = {
   theme: string;
   /** True once the user picks a theme on this account; until then a new account keeps the browser's. */
   themeChosen?: boolean;
+  /** When an outside agent first reached this board over MCP. Set once and kept: not undoable, like the theme. */
+  agentSeenAt?: string;
   /** Present when the board is end-to-end encrypted: the passphrase envelope for its key. */
   sealed?: SealInfo;
 };
@@ -144,6 +146,51 @@ function withTags(c: Card, tags: string[]): Card {
 }
 
 export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
+
+/** The tag that marks a card as an agent's work. */
+export const AGENT_TAG = "agent";
+/** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */
+export const GAUNTLET_TAG = "gauntlet";
+/** Whether a card is meant for an agent to pick up. */
+export const forAgent = (c: Card) => hasTag(c, AGENT_TAG) || hasTag(c, GAUNTLET_TAG);
+
+// ---------- has an agent ever connected? ----------
+//
+// The board remembers the first time an outside agent reached it over MCP (mcp.ts). Until then
+// the app says so: a line above the lanes, and a chip on each card that's waiting for an agent
+// (src/client/AgentNudge.tsx). Session hooks and the event feed don't count: neither can read
+// or change a card, so a board that only has those still has nothing to pick its cards up.
+
+/** Record that an agent reached the board. The first time wins; an encrypted board is closed to agents, so it records nothing. */
+export function markAgentSeen(b: Board, at: string): Board {
+  return b.sealed || b.agentSeenAt ? b : { ...b, agentSeenAt: at };
+}
+
+/**
+ * Whether an agent has ever connected. A question or an answer on a card counts as well: only an
+ * agent can ask one (ask_ceo), which covers boards that had agents before the timestamp existed.
+ */
+export const agentConnected = (b: Board) => !!b.agentSeenAt || b.cards.some((c) => !!c.ask || !!c.answer);
+
+/** Whether to say "No agent connected yet": there's a card, no agent has ever connected, and the board isn't encrypted. */
+export const needsAgent = (b: Board) => !b.sealed && b.cards.length > 0 && !agentConnected(b);
+
+/** Whether this card is waiting for an agent that isn't there: tagged for one, not done, on a board `needsAgent` is true for. */
+export function waitsForAgent(b: Board, c: Card): boolean {
+  const done = b.lanes.length > 1 ? b.lanes[b.lanes.length - 1]?.id : undefined;
+  return needsAgent(b) && forAgent(c) && c.laneId !== done;
+}
+
+/** A board coming back from undo, redo, or a reset keeps what isn't undoable: the theme, the passphrase envelope, and whether an agent ever connected. */
+export function keepSettings(board: Board, from: Board): Board {
+  const { theme: _t, themeChosen: _c, sealed: _s, agentSeenAt: _a, ...rest } = board;
+  return {
+    ...rest, theme: from.theme,
+    ...(from.themeChosen ? { themeChosen: true } : {}),
+    ...(from.agentSeenAt ? { agentSeenAt: from.agentSeenAt } : {}),
+    ...(from.sealed ? { sealed: from.sealed } : {}),
+  };
+}
 
 export function addCard(
   b: Board,

@@ -15,6 +15,7 @@ import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Enc
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
 import { FirstRun } from "./FirstRun";
+import { NoAgentProvider } from "./AgentNudge";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
@@ -408,6 +409,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   return (
     <AskContext.Provider value={answerAsk}>
+    <NoAgentProvider board={board} onConnect={onConnect}>
     <div className="app">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
@@ -546,6 +548,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         </div>
       )}
     </div>
+    </NoAgentProvider>
     </AskContext.Provider>
   );
 }
