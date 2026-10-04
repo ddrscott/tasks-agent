@@ -1298,7 +1298,10 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
   `/agents/<class>/<name>` shape) gets a plain 404 from `strayUpgrade` in `src/server.ts`,
   before the OAuth provider, the asset layer, or the page shell see it, signed in or not. Under
   the local dev server such an upgrade used to reach the asset layer and take the whole
-  server down.
+  server down. (The hashed files under `/tasks/assets/` and anything outside `/tasks` never
+  reach the Worker; the asset layer answers those itself, and an upgrade there is just not
+  upgraded.) Vite doesn't pass a refused upgrade's status on, so `check:members` also sends the
+  `Upgrade` header on a plain request and reads the 404.
 - **Member sockets are not Agents SDK connections.** `TodoAgent.fetch` accepts them itself as
   plain hibernating WebSockets (`acceptMember` in `src/agent.ts`) and answers a small part of
   the same wire protocol, so `useAgent` works unchanged. The SDK and the chat SDK only handle

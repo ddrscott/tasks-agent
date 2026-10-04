@@ -20,6 +20,7 @@ import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import WebSocket from "ws";
@@ -399,11 +400,20 @@ section("stray WebSocket upgrades");
   // Vite hides the status of a refused upgrade, so read it the other way: the same header on a
   // plain request, which Node passes through as an ordinary one, gets the Worker's own answer.
   const plain = [];
-  for (const path of stray) {
-    const r = await fetch(`${BASE}${path}`, { headers: { Upgrade: "websocket" }, signal: AbortSignal.timeout(10_000) });
-    plain.push([path, r.status, (await r.text()).slice(0, 60)]);
-  }
-  ok("each of them answers a plain 404 that names no page, file, or board", plain.every(([, status, body]) => status === 404 && body === "There's no WebSocket at this address."), plain.filter(([, st, b]) => st !== 404 || b !== "There's no WebSocket at this address."));
+  // (fetch refuses to send an Upgrade header at all, so this is node:http.)
+  const plainGet = (path) => new Promise((resolve) => {
+    const req = httpRequest(`${BASE}${path}`, { headers: { Upgrade: "websocket" }, timeout: 10_000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8").on("data", (d) => { body += d; }).on("end", () => resolve([path, res.statusCode, body.slice(0, 60)]));
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout"))).on("error", (e) => resolve([path, 0, e.message])).end();
+  });
+  for (const path of stray) plain.push(await plainGet(path));
+  // Two of them never reach the Worker: the asset layer answers the site root and the hashed
+  // build files on its own (run_worker_first in wrangler.jsonc). Those only have to not upgrade.
+  const assetFirst = new Set(["/", "/tasks/assets/nope.js"]);
+  const wrong = plain.filter(([path, status, body]) => (assetFirst.has(path) ? status === 101 || status === 0 : status !== 404 || body !== "There's no WebSocket at this address."));
+  ok("each one the Worker answers gets a plain 404 that names no page, file, or board", wrong.length === 0, wrong);
   const real = await open(owner);
   ok("the board's own socket still opens", real.opened && !!(await real.wait((f) => f.type === "cf_agent_state")), how(real));
   real.close();
