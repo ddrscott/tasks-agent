@@ -259,8 +259,9 @@ run ahead of whatever serves the zone.
   gives up space one step at a time and stops at the first step that fits: the search box
   becomes its icon (click it or press `⌘K` and it opens across the bar), then Undo, "need
   you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
-  summary goes, then the tag filter chip moves to its own row under the bar, and last the
-  "Shared with N" button (`// TEAM_BOARDS`) folds into a count on the account button. A phone
+  summary goes, then the tag filter chip moves to its own row under the bar, then the
+  "Shared with N" button (`// TEAM_BOARDS`) folds into a count on the account button, and
+  last, only when a board switcher sits beside it, the wordmark goes. A phone
   always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
   attribute, and `styles.css` does the rest. There's one count of what's waiting on you: "need
   you" adds up the open questions (`// QUESTIONS`) and the sessions stopped at a prompt
@@ -1186,7 +1187,7 @@ each card.
   plain links to `/api/board/audit.csv` and `.json`.
 - **"Shared with N"** is a button in the top bar, left of the account button, on a board with
   at least one member or pending invite ("Invited N" until someone accepts). It opens
-  Members. When the top bar runs out of room it's the last thing to go: the count moves onto
+  Members. When the top bar runs out of room it's the last button to give way: the count moves onto
   the account button as a small badge, and the menu's Members item says "shared with N".
   It looks again when the tab gets focus, and the dialog rereads the list every 20 seconds
   while it's open, so an invite accepted elsewhere shows up without a reload.

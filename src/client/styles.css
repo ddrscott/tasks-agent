@@ -1534,6 +1534,10 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .board-switch-name { font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 .board-switch-caret { font-size: 10px; color: var(--muted); }
 .board-switch > .popover { left: 0; right: auto; }
+/* The last step of the top bar's fit (topbarFit.ts): on a phone, an owner who shares a board and is
+   on someone else's has the switcher, a question, and Sessions in one row, and the account button
+   would fall off the end. The wordmark gives up its place; screen readers still get the heading. */
+.topbar[data-tight~="mark"]:has(.board-switch) .wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .board-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); max-height: min(70dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
 .board-menu > * { flex: none; }
 .menu.board-menu [role="menuitemradio"] { display: flex; align-items: baseline; gap: 8px; }
