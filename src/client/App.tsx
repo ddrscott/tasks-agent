@@ -54,11 +54,12 @@ export function App() {
     const onPop = () => setPage(pageFromPath());
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
+    // Signed out is a 200 with `null`, not a 401, so a visitor's console stays clean.
   }, []);
 
   const load = useCallback(async () => {
     const r = await fetch(api("/api/me"));
-    setMe(r.ok ? ((await r.json()) as Me) : null);
+    setMe(r.ok ? ((await r.json()) as Me | null) : null);
   }, []);
 
   useEffect(() => {

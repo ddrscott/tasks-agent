@@ -224,7 +224,9 @@ export async function handleAuth(req: Request, env: Env, path: string): Promise<
   if (path === "/api/auth/logout" && req.method === "POST") return logout(req, env);
   if (path === "/api/me" && req.method === "GET") {
     const user = await currentUser(req, env);
-    return user ? json({ ...user, model: env.CHAT_MODEL }) : json({ error: "signed out" }, 401);
+    // "Not signed in" is an answer, not an error: every signed-out page asks, and a 401 would
+    // put a red line in each visitor's console. So it's a 200 with `null` for a body.
+    return json(user ? { ...user, model: env.CHAT_MODEL } : null);
   }
   return null;
 }
