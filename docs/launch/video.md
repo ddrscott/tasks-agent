@@ -32,7 +32,7 @@ voice-over needed; the captions carry it. Not recorded yet.
 | 7 | 0:50 to 0:58 | Click "need you" in the top bar. The list opens: the open question with its buttons, and under it the line for the session that's waiting on it. | One list of everything waiting on you. |
 | 8 | 0:58 to 1:05 | Close it. Click Sessions. Three sessions grouped by project: shop-api, shop-web, infra. One needs input, one is working, one is idle on another machine. | Every Claude Code session, on every machine. |
 | 9 | 1:05 to 1:11 | Cut to a phone (or a 390-wide window): the same board, one lane wide. A thumb taps "?1" in the top bar, the "need you" list opens, and one tap on an answer sends it. This is what `06-phone.png` shows. | It's a web page. Answer from your phone. |
-| 10 | 1:11 to 1:15 | Cut to a new account's empty board: `// START_HERE`, four numbered steps, the sample card added and the command copied (`05-quick-start.png`). Dot out the token if it's in frame. | Four steps to a working agent. |
+| 10 | 1:11 to 1:15 | Cut to a new account's empty board: `// START_HERE`, four numbered steps, the sample card added and the command copied (`05-quick-start.png` is a close-up of that command). Dot out the token if it's in frame. | Four steps to a working agent. |
 | 11 | 1:15 to 1:20 | Back to the demo board, full frame, with the strip that says it's a demo. Hold. | Try the demo. No sign-up. askscottpierce.com/tasks |
 
 That's 80 seconds. To get to 60, drop beats 8 and 10.

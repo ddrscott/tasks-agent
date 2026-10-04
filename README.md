@@ -1407,8 +1407,8 @@ npm run check:launch                           # count the copy against its limi
 
 Each image is one idea: a crop of the real app set on a 1270x760 dark canvas with a
 `// KICKER`, a headline, and usually a line under it, saved at 2x. In order: the board with an
-agent's question on a card, the "need you" list, the Sessions list, an open card, the four-step
-quick start, and the "need you" list on a phone. The canvas is HTML in `scripts/shots.mjs`
+agent's question on a card, the "need you" list, the Sessions list, an open card, the quick
+start's command, and the "need you" list on a phone. The canvas is HTML in `scripts/shots.mjs`
 (`canvas()`), so a headline is changed there and the gallery is shot again. A headline says
 "one tap" only over the "need you" list, because a card on the board takes two taps on a touch
 screen (`// QUESTIONS`).
@@ -1420,17 +1420,22 @@ never touches the Chrome you're signed in to. How the crops are made:
 - A list or a dialog is cropped to its own edges, with everything else on the page hidden for the
   shot, so no sliver of the board shows around it.
 - A crop that's taller than the canvas runs off the bottom edge, and the cut is put in the gap
-  between two rows (the open card's notes, the quick start's blocks), never through one.
+  between two rows of the open card's notes, never through one.
 - `05` is the only signed-in picture. The script signs up through the landing page's form with a
   made-up `shots-…@example.com` address and the code a dev server shows on screen
   (`DEV_LOGIN_CODES=1`), adds the sample card, copies the command, and presses Show the steps,
-  since the block folds after a copy. So `05` comes from a dev
+  since the block folds after a copy and the command is inside it. So `05` comes from a dev
   server only; against the live site it fails and says so. It finds the quick start by structure
   (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
   and 3, the command in a `role="status"` block), not by wording. The token in the command is
-  dotted out and the local address is swapped for the hosted one. It's drawn at 1.25x when the
-  command fits above the canvas's bottom edge at that size; when the steps' wording runs
-  longer, the script widens the page and steps the zoom down (to 1x at the least) until it does.
+  dotted out and the local address is swapped for the hosted one. The picture is the command
+  block alone (the command, its Copy button, and the line about the token), because Product
+  Hunt shows a gallery image 635px wide until it's clicked, and at that size the four steps'
+  small print can't be read at any zoom that keeps the command in frame. The steps are said in
+  the canvas's line under the headline instead. The script narrows the window until the block,
+  drawn at 2x, is as wide as the canvas, which puts the app in its narrow layout; when the
+  command runs longer it steps the zoom down until the whole block fits. After a re-shoot,
+  shrink it and look: `sips -Z 635 --out /tmp/05.png docs/launch/gallery/05-quick-start.png`.
 
 Each shot waits for the thing it's a picture of and fails with the reason when it isn't there,
 or when the canvas wouldn't fit (a headline too wide, a list too tall), so a change to the demo

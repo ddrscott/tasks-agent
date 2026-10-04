@@ -11,7 +11,7 @@
 // Chrome is headless and gets a throwaway profile in the temp folder (--user-data-dir), so it
 // never touches the Chrome you're signed in to.
 //
-// 01 to 04 and 06 are the signed-out demo board. 05 is the quick start on a new account's empty
+// 01 to 04 and 06 are the signed-out demo board. 05 is the quick start's command on a new account's
 // board: the script signs up with a made-up address and the code a dev server shows on screen,
 // so 05 only comes from a dev server (DEV_LOGIN_CODES=1), never from the live site.
 //
@@ -512,7 +512,7 @@ const shots = {
     });
   },
 
-  // The four steps on a new account's empty board, with the sample card added and the command made.
+  // The command the quick start copies, on a new account's board with the sample card added.
   async "05-quick-start"() {
     let vp = { width: 1180, height: 900 };
     await viewport(vp);
@@ -524,8 +524,8 @@ const shots = {
       const el = document.querySelector(s);
       return !!el && !!el.querySelector("h2") && el.querySelectorAll("ol > li").length === 4;
     }, sec);
-    // Drawn at 1.25x, the section fills the canvas's width when it's this wide on the page. The
-    // screen is sized to make it so, whatever else (the assistant's panel) shares the row.
+    // The steps are pressed at desktop width, four across, whatever else (the assistant's panel)
+    // shares the row. The window is narrowed for the picture further down.
     const want = Math.floor(TOP_W / 1.25 / 2) * 2;
     vp.width += want - (await boxAround([sec])).width;
     await viewport(vp);
@@ -553,35 +553,45 @@ const shots = {
     const whole = await inPage((s) => { const pre = document.querySelector(`${s} [role="status"] pre`); pre.scrollTop = 0; return pre.scrollHeight <= pre.clientHeight + 1 && /Bearer .{4}•/.test(pre.textContent); }, sec);
     if (!whole) die("the quick start's command is scrolled inside its box or still shows a token; the picture would be wrong.");
     await inPage(() => { scrollTo(0, 0); document.activeElement?.blur?.(); return true; });
-    // As big as it can be drawn with the command still above the canvas's bottom edge. The
-    // section is always as wide as the canvas, so a smaller zoom means a wider page, shorter
-    // steps, and more room. The cut goes in the gap under the last block of the section that
-    // fits. The steps say what a line under the headline would, so this canvas has none and the
-    // room goes to them.
-    let all, zoom, cut;
-    for (zoom of [1.25, 1.2, 1.15, 1.1, 1.05, 1]) {
-      vp.width += Math.floor(TOP_W / zoom / 2) * 2 - (await boxAround([sec])).width;
-      await viewport(vp);
-      await settle();
-      all = await boxAround([sec]);
-      cut = await inPage((s, room) => {
-        const el = document.querySelector(s), top = el.getBoundingClientRect().top;
-        // The steps sit in a wrapper that takes no box of its own (display: contents), so its children are the rows.
-        const rows = [...el.children].flatMap((c) => (getComputedStyle(c).display === "contents" ? [...c.children] : [c])).map((c) => c.getBoundingClientRect()).filter((r) => r.height);
-        let at = 0;
-        rows.forEach((r, i) => { const gap = rows[i + 1] ? (r.bottom + rows[i + 1].top) / 2 : el.getBoundingClientRect().bottom; if (gap - top <= room) at = gap; });
-        const cmd = el.querySelector('[role="status"]:has(pre)').getBoundingClientRect().bottom;
-        return { height: Math.floor(at - top), cmdShown: cmd < at, need: Math.ceil(cmd - top), room: Math.floor(room), width: Math.round(el.getBoundingClientRect().width) };
-      }, sec, (H - HEADLINE_ONLY) / zoom);
-      if (cut.cmdShown) break;
+    // The picture is the command, big enough to read at the 635px Product Hunt shows a gallery
+    // image at before it's clicked. The four steps' small print can't be, at any size that keeps
+    // the command in frame, so the canvas's own line says the steps and the crop is the block
+    // the copy leaves on the page: the command, its Copy button, and the line about the token.
+    // The block is as wide as the page lets it be, so a bigger picture of it means a narrower
+    // page: the window is narrowed until the block, drawn at `zoom`, is as wide as the canvas.
+    // Under 900px that's the app's own narrow layout, where the block scrolls inside the board,
+    // so the window is tall enough that nothing has to.
+    const cmd = `${sec} [role="status"]:has(pre)`;
+    vp = { width: vp.width, height: 2400 };
+    const room = H - TOP_BAND - 28;
+    let zoom, at;
+    for (zoom of [2, 1.9, 1.8, 1.75, 1.7, 1.6, 1.5, 1.4, 1.25]) {
+      const want = Math.floor((TOP_W - 2) / zoom / 2) * 2;
+      for (let i = 0; i < 5; i++) {
+        await viewport(vp);
+        await settle();
+        const w = await inPage((s) => Math.round(document.querySelector(s).getBoundingClientRect().width), cmd);
+        if (w === want) break;
+        vp.width += want - w;
+      }
+      at = await inPage((s) => {
+        const el = document.querySelector(s), pre = el.querySelector("pre");
+        el.scrollIntoView({ block: "center" });
+        pre.scrollTop = 0;
+        const r = el.getBoundingClientRect();
+        return { width: Math.round(r.width), height: Math.ceil(r.height), whole: pre.scrollHeight <= pre.clientHeight + 1 && r.top >= 0 && r.bottom <= innerHeight };
+      }, cmd);
+      if (at.width === want && at.whole && at.height * zoom <= room) break;
+      at.fits = false;
     }
-    if (!cut.cmdShown) die(`the quick start's command ends ${cut.need}px down a ${cut.width}px-wide section, and only ${cut.room}px fit above the canvas's bottom edge at ${zoom}x.`);
-    await isolate([sec]);
-    const c = await crop(even({ ...all, height: cut.height }), zoom, vp);
+    if (at.fits === false) die(`the quick start's command block is ${at.width}x${at.height}px on the page${at.whole ? "" : ", with the command scrolled inside its box"}, and even at ${zoom}x it doesn't fit the ${TOP_W}x${room}px the canvas has for it.`);
+    await isolate([cmd]);
+    const c = await crop(await boxAround([cmd]), zoom, vp);
     await send("Network.clearBrowserCookies");
     return composed("05", {
-      layout: "top", bleed: true,
+      layout: "top",
       kicker: "START_HERE", headline: "Four steps to a working agent.",
+      sub: "Sign in, add a sample card, copy this command, paste it in a terminal.",
       art: bareImg(c),
     });
   },

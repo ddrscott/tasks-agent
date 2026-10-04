@@ -106,8 +106,10 @@ they show what's live. It takes two commands, because `05` is a signed-in pictur
 - [ ] Open all seven PNGs (six images and the thumbnail) and look at them, and read each
       headline against what's live. If a run fails, it says which thing on the page it was
       waiting for. If the wording of the quick start changed, `05` still shoots (it goes by the
-      section's structure, and draws the steps a little smaller when they run longer, so the
-      command stays in the picture), but check the headline "Four steps to a working agent" is still true.
+      section's structure, and draws the command a little smaller when it runs longer), but
+      check that the headline "Four steps to a working agent" and the line under it, which
+      names the steps, are still true. Shrink `05` to 635px wide, the size Product Hunt shows
+      before a click, and check the command can still be read.
 - [ ] Commit the new images.
 
 ### 5a. Know this before the comments start
