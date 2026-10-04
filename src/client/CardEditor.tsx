@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
+import { DiscardBar, useDiscardGuard } from "./Discard";
 import { Markdown, toggleTask } from "./Markdown";
+import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
 import type { Vault } from "./vault";
@@ -17,6 +19,8 @@ type Props = {
   vault: Vault | null;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
   onMove(laneId: string): void;
+  /** A tap on a Move to button: move right away and say so, with Undo. */
+  onMoveNow(laneId: string): void;
   onDelete(): void;
   onRemoveAttachment(id: string): void;
   /** Move to the done lane, or back out of it. Missing when the board has one lane. */
@@ -27,10 +31,11 @@ type Props = {
 
 /**
  * Edit a card. Save (or Enter in the title or tags) keeps the changes. The X and Esc throw them
- * away, so opening a card to read it can't change it by accident. Files are the exception: they
- * upload and come off as you go, and Undo covers a removal.
+ * away, so opening a card to read it can't change it by accident; if something was edited they
+ * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
+ * and Undo covers a removal, so they don't count as edits.
  */
-export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -102,26 +107,48 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
     onClose();
   }
 
-  /** The X and Esc: close and keep nothing. */
-  const cancel = onClose;
+  // The Move to buttons, shown on touch screens, where dragging a card to another lane is the
+  // hard way. Unlike the Lane select, which waits for Save, a tap here is the whole action: it
+  // keeps the other edits, moves the card, and closes, the way Mark done does.
+  function moveNow(to: string) {
+    const { patch } = pending();
+    if (Object.keys(patch).length) onSave(patch);
+    onMoveNow(to);
+    onClose();
+  }
+
+  /** Whether Save would change anything. */
+  const edited = () => { const { patch, lane: to } = pending(); return Object.keys(patch).length > 0 || !!to; };
+  // The X and Esc: close and keep nothing, after asking if there's something to lose.
+  const guard = useDiscardGuard(edited, onClose);
 
   return (
     <dialog
       ref={ref} className="card-dialog" aria-label="Edit card" tabIndex={-1}
-      onCancel={(e) => { e.preventDefault(); cancel(); }}
+      {...guard.dialogProps}
       // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
-      onClick={(e) => {
-        if (e.target !== ref.current) return;
-        const { patch, lane: to } = pending();
-        if (!Object.keys(patch).length && !to) cancel();
-      }}
+      onClick={(e) => { if (e.target === ref.current && !edited()) onClose(); }}
     >
       <div className="dialog-body">
         <div className="dialog-top">
           <h2 className="h">CARD</h2>
-          <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={cancel}><IconClose /></button>
+          <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={guard.requestClose}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
+        <CardSession cardId={card.id} />
+        {lanes.length > 1 && (
+          <div className="move-row" role="group" aria-label="Move to lane">
+            <span className="move-label">Move to</span>
+            {lanes.map((l) => (
+              <button
+                key={l.id} type="button" className="btn move-to" disabled={l.id === card.laneId}
+                aria-current={l.id === card.laneId ? "true" : undefined}
+                title={l.id === card.laneId ? `In ${l.name} now` : `Move to ${l.name}`}
+                onClick={() => moveNow(l.id)}
+              >{l.id === card.laneId && <span className="move-mark" aria-hidden="true">$</span>}{l.name}</button>
+            ))}
+          </div>
+        )}
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={save} />
         {editing ? (
@@ -181,6 +208,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>
       </div>
+      {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">
         <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>
         <span className="spacer" />
@@ -191,6 +219,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
         )}
         <button className="btn primary" onClick={save}>Save</button>
       </div>
+      )}
     </dialog>
   );
 }

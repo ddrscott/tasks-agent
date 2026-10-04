@@ -83,7 +83,20 @@ export function CardPresence({ cardId }: { cardId: string }) {
   );
 }
 
-export const isStale = (s: Session, now: number) => now - s.seenAt > STALE_MS;
+/** In the card editor: the whole Sessions row for the session holding this card, resume command included. */
+export function CardSession({ cardId }: { cardId: string }) {
+  const { sessions, claims, now } = useContext(PresenceContext);
+  const claim = claims.find((c) => c.cardId === cardId);
+  const session = claim && sessions.find((s) => s.id === claim.sessionId);
+  if (!claim || !session) return null;
+  return (
+    <ul className="card-session" aria-label="The session working on this card">
+      <Row session={claim.agent && !session.agent ? { ...session, agent: claim.agent } : session} now={now} cards={[]} />
+    </ul>
+  );
+}
+
+export const isStale =(s: Session, now: number) => now - s.seenAt > STALE_MS;
 
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -116,7 +129,7 @@ function ResumeButton({ session }: { session: Session }) {
     <button
       className="sess-resume" title={`Copy: ${cmd}`}
       onClick={() => void navigator.clipboard.writeText(cmd).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}
-    >{done ? "copied" : "copy resume"}</button>
+    >{done ? "Copied" : "Copy resume command"}</button>
   );
 }
 

@@ -237,18 +237,17 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
         <div className="foot">
           <span className="engine" title={engineTitle(needle.status, model, last)}>
             <span className="prompt">$</span>{" "}
-            {vault ? (needle.status.state === "ready" ? "needle-rs in this tab · encrypted, cloud off" : needle.status.state === "loading" ? `loading the local model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}` : "encrypted · cloud off")
-              : needle.status.state === "ready" ? `needle-rs in this tab · ${model.split("/").pop()} behind it`
-              : needle.status.state === "loading" ? `loading the local model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}`
-              : model.split("/").pop()}
-            {last && <span className="path"> · last: {last.path === "local" ? "this tab" : "cloud"}</span>}
+            {/* Says where the assistant runs, in plain words. The model names are in the tooltip for anyone who wants them. */}
+            {vault ? (needle.status.state === "ready" ? "runs in your browser · encrypted, cloud off" : needle.status.state === "loading" ? `loading the browser model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"}` : "encrypted · cloud off")
+              : needle.status.state === "ready" ? "runs in your browser · cloud model as backup"
+              : needle.status.state === "loading" ? `loading the browser model${needle.status.progress != null ? ` ${Math.round(needle.status.progress * 100)}%` : "…"} · cloud model for now`
+              : "runs on a cloud model"}
+            {last && <span className="path"> · last: {last.path === "local" ? "your browser" : "cloud"}</span>}
           </span>
-          {usage ? (
+          {usage && (
             <span className={`meter${capped ? " full" : ""}`} title={`${usage.plan === "pro" ? "Pro" : "Free"} plan · ${model.split("/").pop()}`}>
               {usage.used}/{usage.limit} today{usage.plan === "pro" ? " · pro" : ""}
             </span>
-          ) : (
-            <span title="Cloudflare Workers AI model">{model.split("/").pop()}</span>
           )}
         </div>
       </div>

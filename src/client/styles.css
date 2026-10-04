@@ -457,7 +457,7 @@ kbd {
 }
 .lane-name:hover { border-color: var(--line); }
 input.lane-name { background: var(--bg); border-color: var(--accent); outline: none; width: 100%; }
-.lane-count { font: 12px var(--font-mono); color: var(--muted); }
+.lane-count { font: 12px var(--font-mono); color: var(--muted); flex: none; white-space: nowrap; }
 .lane-head .spacer { flex: 1; }
 .lane-head .btn { height: 28px; width: 28px; }
 
@@ -503,7 +503,11 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .ask-opt.rec .ask-n { color: var(--accent-text); }
 .ask-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); }
-.ask.compact .ask-rec { display: none; }
+.ask.compact .ask-rec { font-weight: 600; padding: 1px 4px; border: 1px solid var(--accent); border-radius: var(--radius-sm); }
+/* After the first tap on a touch screen: the option now asks to be tapped again (Ask.tsx). */
+.ask-opt.armed, .ask-opt.armed:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.ask-opt.armed .ask-n { color: var(--accent-ink); }
+.ask.compact .ask-opt.armed .ask-rec { color: var(--accent-ink); border-color: var(--accent-ink); }
 .ask-other { display: flex; gap: 6px; }
 .ask-other .field { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px; }
 .asks-btn { border-color: var(--accent); }
@@ -640,7 +644,7 @@ button.chip.tag:hover { border-color: var(--accent); }
   flex: 1; border: 0; background: transparent; outline: none; resize: none;
   padding: 7px 0; max-height: 140px; font-size: 14px; line-height: 1.45;
 }
-.composer .foot { display: flex; justify-content: space-between; margin-top: 6px; font: 11px var(--font-mono); color: var(--muted); }
+.composer .foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font: 11px var(--font-mono); color: var(--muted); }
 
 .cap-note {
   display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
@@ -649,7 +653,7 @@ button.chip.tag:hover { border-color: var(--accent); }
 }
 .cap-note p { margin: 0; }
 .cap-note b { color: var(--ink); }
-.meter { font-family: var(--font-mono); }
+.meter { font-family: var(--font-mono); flex: none; white-space: nowrap; }
 .meter.full { color: var(--accent-text); }
 .chat-fab { display: none; }
 
@@ -718,9 +722,20 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .tag-suggest::-webkit-scrollbar { display: none; }
 .tag-suggest .chip { flex: none; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; }
 @media (hover: none) { .tag-suggest .chip { height: 40px; padding: 0 12px; font-size: 13px; } }
+/* Move to: one button per lane, for touch screens, where dragging across lanes is the hard way.
+   Shown by the touch block at the end of this file. */
+.move-row { display: none; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; }
+.move-label { font: 12px var(--font-mono); color: var(--muted); margin-right: 2px; }
+.move-to { font: 600 12px var(--font-mono); max-width: 100%; overflow: hidden; }
+.move-to[aria-current] { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
+.move-mark { color: var(--accent); }
 .dialog-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-foot { flex: none; display: flex; gap: 8px; padding: 14px 20px; border-top: var(--border-w) solid var(--line); }
 .dialog-foot .spacer { flex: 1; }
+/* "Discard changes?", where the footer buttons were, after X or Esc on an edited card (Discard.tsx). */
+.discard-bar { align-items: center; }
+.discard-q { font: 600 12px var(--font-mono); color: var(--ink); }
+.discard-q::before { content: "$ "; color: var(--accent); }
 .dialog-meta { font: 11px var(--font-mono); color: var(--muted); }
 .dialog-error { font: 12px var(--font-mono); color: var(--danger); }
 
@@ -777,12 +792,14 @@ a.att-name:hover { color: var(--accent-text); }
 .sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .sess-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
 .sess-empty code { font: 12px var(--font-mono); color: var(--ink); }
-.sess-empty a, .sess-foot a { color: var(--accent); text-underline-offset: 3px; }
+.sess-empty a, .sess-foot a { color: var(--accent-text); text-underline-offset: 3px; }
 .sess-foot { margin: 0; padding-top: 10px; border-top: var(--border-w) solid var(--line); font: 12px var(--font-mono); color: var(--muted); }
 .sess-project { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .sess-project span { font-weight: 400; font-size: 11px; color: var(--muted); }
 .sess-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px/1.45 var(--font-mono); min-width: 0; }
 .sess-row.stale { opacity: .6; }
+/* The same row in the card editor, for the session that claimed the card. */
+.card-session { list-style: none; margin: 0; padding: 0; flex: none; }
 .sess-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .sess-state { flex: none; display: inline-flex; gap: 6px; font-weight: 600; color: var(--ink); }
 .sess-mark { color: var(--accent); }
@@ -798,11 +815,13 @@ a.att-name:hover { color: var(--accent-text); }
 .sess-links a:hover, .sess-resume:hover { color: var(--accent-text); }
 .sess-id { color: var(--muted); }
 
-.menu { min-width: 220px; padding: 6px; display: flex; flex-direction: column; }
+.menu { min-width: 220px; max-width: min(300px, calc(100vw - 32px)); padding: 6px; display: flex; flex-direction: column; }
 .menu .who { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }
 .menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
 .menu button:hover { background: var(--surface-2); }
 .menu button.danger { color: var(--danger); }
+/* After the first tap on Clear or Delete: the label now says what a second tap does. */
+.menu button.danger.armed, .menu button.danger.armed:hover { background: var(--danger); color: var(--bg); font-weight: 600; }
 .menu-group { display: flex; flex-direction: column; margin: 4px 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
@@ -832,7 +851,7 @@ a.att-name:hover { color: var(--accent-text); }
 .login-card .login-lede { font: 700 20px/1.25 var(--font-display); letter-spacing: -.01em; color: var(--ink); }
 .login-proofs { margin: 0; padding: 0; list-style: none; counter-reset: proof; display: flex; flex-direction: column; gap: 8px; }
 .login-proofs li { counter-increment: proof; display: grid; grid-template-columns: 22px 1fr; font-size: 13px; line-height: 1.5; color: var(--muted); }
-.login-proofs li::before { content: counter(proof, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent); }
+.login-proofs li::before { content: counter(proof, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent-text); }
 .login-card .btn { height: 42px; justify-content: center; font-size: 14px; }
 .code-input { font: 600 28px var(--font-mono); letter-spacing: .5em; text-align: center; padding: 12px 0 12px .5em; }
 .login-error { color: var(--danger); font-size: 13px; }
@@ -992,7 +1011,10 @@ a.att-name:hover { color: var(--accent-text); }
   }
   .composer .foot { display: none; }
   .main .site-footer { padding: 4px 120px 8px 16px; } /* clear the floating Ask button */
-  .toast { bottom: 80px; }
+  .toast { bottom: 80px; width: max-content; max-width: calc(100vw - 32px); }
+  /* An open quick add sits at the bottom of its lane, right where the toast lands, and Undo would
+     cover Add card. While one is open the toast goes to the top of the screen instead. */
+  .app:has(.quick-add textarea) .toast { bottom: auto; top: calc(8px + env(safe-area-inset-top)); }
 }
 
 @media (max-width: 560px) {
@@ -1065,6 +1087,8 @@ a.att-name:hover { color: var(--accent-text); }
   .quick-add .btn, .attachments-head .btn { height: 40px; }
   .menu button { padding: 11px 10px; font-size: 14px; }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
+  .move-row { display: flex; }
+  .card-session .sess-resume, .card-session .sess-links a { padding: 12px 0; margin: -6px 0; }
   .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }
   /* Shortcut hints are for keyboards. */
   .quick-add .hint, .add-lane-form .hint, .menu kbd, .search kbd { display: none; }

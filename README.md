@@ -66,7 +66,8 @@ run ahead of whatever serves the zone.
   screens.
 - **Adding a card.** The + in a lane's header opens the full `// NEW_CARD` dialog
   (`src/client/NewCard.tsx`): title, notes, lane, due date, tags, and files in one go.
-  Nothing is added until Add card, so Cancel or Esc leaves no empty card behind, and the
+  Nothing is added until Add card, so the X or Esc leaves no empty card behind (they ask
+  "Discard changes?" first if anything was typed or a file is waiting), and the
   card goes in as one change, so one Undo takes it back out. Files picked, dropped, or
   pasted wait in the dialog and upload once the card exists; if one fails, the card stays
   and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
@@ -74,8 +75,11 @@ run ahead of whatever serves the zone.
 - **Editing a card.** Nothing changes until Save (or Enter in the title or tags). The X in
   the top corner and Esc close the editor and throw the edits away, so opening a card to
   read it can't change it by accident; that covers the title, notes, due date, tags, and
-  the lane. A click outside closes an untouched card and does nothing once something has
-  been edited. Files are the exception: they upload and come off as you go.
+  the lane. An untouched card closes at once. If something was edited, the X or Esc shows
+  "Discard changes?" where the footer buttons were, with Keep editing and Discard; Esc again
+  means Keep editing, so mashing Esc never loses work (`src/client/Discard.tsx`). A click
+  outside closes an untouched card and does nothing once something has been edited. Files are the exception: they upload and come off as you go. Mark done, Reopen,
+  and the Move to buttons are actions of their own: each saves the edits and then moves the card.
 - **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
   shows the tags already on the board above the input, most used first (`tagsByUse` in
   `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first
@@ -105,6 +109,15 @@ run ahead of whatever serves the zone.
   a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
   `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
   it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
+- **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
+  under the title (touch screens only; the current lane is marked): that moves it right away,
+  keeps any other edits, and closes the card, so it's two taps from the board. Or long-press
+  and drag. Up to 900px wide the board shows one lane at a time, and holding the card at the
+  left or right edge brings in the next lane: one lane after 0.4 seconds, and one more only
+  after another 2.5 seconds of holding, so it can't run to Done on its own. The 44px edge
+  strips are for scrolling, so a card let go there lands in the lane that fills the screen,
+  not the sliver of the next one (`collision` and `stepBoard` in `src/client/Board.tsx`).
+  dnd-kit's own sideways auto-scroll is off at that width; wider boards still use it.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
@@ -112,11 +125,19 @@ run ahead of whatever serves the zone.
   the order (`sortedIds` in `src/shared.ts`) and the server only applies it (`orderLane`),
   so it works on an encrypted board, where the server can't read titles or due dates.
   `npm run check:sort` covers both.
+- **Clearing and deleting a lane.** Clear all cards and Delete lane, in a lane's menu, take two
+  taps on the same item. The first changes its label to say what the second will do ("Tap
+  again to clear 21 cards", "Tap again to delete Doing and its 3 cards") and changes nothing;
+  closing the menu starts over. Both are still one Undo. Toasts after something is removed (a
+  cleared or deleted lane, a deleted card, a removed file) say how many and stay 10 seconds
+  instead of 5. Up to 900px wide, the toast moves to the top of the screen while a quick add
+  is open, so Undo never covers Add card.
 - **Tags.** A card can carry up to 10 tags, like `#agent` for work an AI agent owns.
   Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
   Click a tag on a card to fade out every card without it; click again, or the chip in
-  the top bar, to clear. The filter belongs to the tab and isn't saved. On an
+  the top bar, to clear. While a filter is on, each lane's count reads matches / total
+  ("2 / 22"). The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
 - **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
   numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
@@ -160,7 +181,9 @@ run ahead of whatever serves the zone.
   clauses, and anything the small model is unsure of, goes to GLM exactly as before. A local
   turn runs the same board tools under one undo step and is written into the chat transcript
   by `TodoAgent.applyLocal`, so undo, the ✓ lines, and every open tab see it the same way.
-  The footer under the message box says which path handled the last message. Local turns are
+  The footer under the message box says where the assistant runs in plain words ("runs in your
+  browser · cloud model as backup") and which path handled the last message; the model names
+  are in its tooltip. Local turns are
   free and don't count against the daily cap. `bench/needle.mjs` measures the policy.
 - **Cost guard.** The assistant is capped per user per day: `FREE_DAILY_CHATS` (30)
   on the free plan and `PRO_DAILY_CHATS` (150) with a Stripe subscription. The chat
@@ -371,7 +394,11 @@ When an agent needs you to decide something, it asks on the card and you answer 
   holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
   notes. Asking again replaces the question.
 - **Answering.** The card face shows the question with a button per option, the recommended one
-  outlined. The card editor shows the same plus a box for a typed answer. While anything is
+  outlined and marked `REC` ("recommended" where there's room). On a touch screen the buttons
+  on the card face take two taps, since that's where a stray tap lands and an answer reaches
+  the agent at once: the first turns the option into "Send: …?", and a second tap on the same
+  one within 5 seconds sends it. A tap anywhere else, or on another option, starts over. With
+  a mouse it's one click, and in the questions list and the card editor it's one tap everywhere. The card editor shows the same plus a box for a typed answer. While anything is
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. When the bar is short on room, and always on a phone, the
   count is all that shows.
@@ -403,9 +430,10 @@ event arrives with an `answer`, act on that answer; without one, reread the card
 The Sessions button in the top bar lists every Claude Code session that's reporting in, on any
 machine: grouped by project, the ones waiting on you first. A row shows the state (working,
 needs input, idle), the agent and machine, one line about its last action, and how long ago it
-was heard from. After 5 quiet minutes a row is marked stale. "copy resume" copies
+was heard from. After 5 quiet minutes a row is marked stale. "Copy resume command" copies
 `cd <folder> && claude --resume <id>` for the machine it runs on. A card that a lead agent has
-claimed shows the same state line under its title.
+claimed shows the same state line under its title, and its editor shows the session's whole
+row, resume command included.
 
 **It's presence, not a log.** Each session overwrites one row. Nothing is appended, and no
 transcript, prompt, tool output, or Bash command is ever stored; Claude Code already keeps
