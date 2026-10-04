@@ -153,10 +153,10 @@ order; the first image is the one Product Hunt uses when the launch is shared.
 | File | Caption |
 |---|---|
 | `01-board-question.png` | An agent hit a decision it shouldn't make alone, so it asked on the card. The option it would pick is marked REC. Tap one and it goes back to work. |
-| `02-need-you.png` | "Need you" is one list: every open question, and every Claude Code session stopped at a prompt. Clear them in a row. |
+| `02-need-you.png` | "Need you" is one list: every open question, with the session that's waiting on it, and any other Claude Code session stopped at a prompt. Clear them in a row. |
 | `03-sessions.png` | Every Claude Code session that's reporting in, on any machine, grouped by project. Working, needs input, or idle, and the last thing each one did. |
 | `04-card.png` | An open card: the session that claimed it, its question, and its notes in markdown with a STATUS line the agent keeps current. |
-| `05-connect.png` | Setup is a URL and one command. There's a tab for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. |
+| `05-connect.png` | Setup is a URL and one command. There's a tab for Claude Code, Cursor, Codex, VS Code, Claude, ChatGPT, and Glean. |
 | `06-phone.png` | It's a web page, so it works on your phone. Same board, same questions, same list. |
 | `07-landing.png` | The front page. The board in it is the app's own components, not a picture. (Optional; drop it if seven is too many.) |
 | `thumbnail-240.png` | The thumbnail: the favicon's three bars. |
