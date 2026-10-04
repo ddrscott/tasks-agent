@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The footer shows the running version; click it for the latest changes
+
 ## [0.1.0] - 2026-10-03
 
 ### Added
@@ -25,7 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - // SESSIONS panel — every Claude Code session reporting in, grouped by project, needs-you first, stale after five quiet minutes
 - Card claims over MCP, so two agents never take the same card, with the claiming session shown on the card
 - One-tap answers — an agent asks a multiple-choice question and the card shows a button per option
-- The footer shows the running version; click it for the latest changes
 
 ### Changed
 - Card notes grow to fit, and the card editor stays within the viewport
