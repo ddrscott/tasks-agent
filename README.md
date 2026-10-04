@@ -128,6 +128,12 @@ run ahead of whatever serves the zone.
   page never flashes the wrong theme. Each sign-in email is its own account, so a
   new one keeps the theme this browser already uses until you pick one there
   (`themeChosen` on the board).
+- **Readable color.** Each theme's `--accent` is for fills, borders, the `//` slashes, and
+  the `$` marker. Accent-colored text under 18px uses `--accent-text` instead, the same hue
+  moved until it reads at 4.5:1 on the theme's `--bg` and `--surface` (Paper: `#B24800`
+  where Signal Orange `#E85D00` is 3.5:1). Small text on an accent fill, like the count
+  badges, uses `--badge-ink`, which is dark ink in the themes where white falls short.
+  `--muted` holds 4.5:1 on `--bg` and `--surface` too. A new theme sets all four.
 - **Two assistants, one transcript.** The first time the chat opens, the tab downloads
   Needle 3 (35 MB, once; Cache Storage after that) and runs it in a Web Worker. A message
   goes to it first: the board's lane names and a handful of verb tools (finished, started,
