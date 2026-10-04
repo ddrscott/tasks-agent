@@ -7,8 +7,13 @@ import { handleMcp, MCP_PATH } from "./mcp";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
 import { reportFrom } from "./presence";
+import { buildSetup } from "./setup";
 import { handleSso } from "./sso";
 import { handleTokens, tokenUser } from "./tokens";
+// The installer and the two scripts it puts on a machine, as text (// SESSIONS).
+import eventsScript from "../scripts/tasks-events.mjs?raw";
+import presenceScript from "../scripts/tasks-presence.mjs?raw";
+import setupScript from "../scripts/tasks-setup.mjs?raw";
 
 export { TodoAgent } from "./agent";
 export { TaskEvents } from "./events";
@@ -86,6 +91,13 @@ const app: ExportedHandler<Env> = {
       headers.delete("Cookie");
       headers.set("x-user", user.id);
       return env.Presence.get(env.Presence.idFromName(user.id)).fetch(new Request(req.url, { headers }));
+    }
+
+    // The one-command Sessions setup: `curl … /tasks/setup.mjs | TASKS_TOKEN=… node --input-type=module -`.
+    // Public and the same for everyone. The token travels in the caller's environment, never in this URL.
+    if (sub === "/setup.mjs") {
+      const body = buildSetup(setupScript, { "tasks-presence.mjs": presenceScript, "tasks-events.mjs": eventsScript }, new URL(req.url).origin);
+      return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
 
     return env.ASSETS.fetch(req);

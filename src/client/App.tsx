@@ -72,8 +72,9 @@ export function App() {
   // The demo board runs in the tab with nobody signed in (Demo.tsx).
   if (page === "demo") return <Demo signedIn={!!me} onHome={() => go("board")} onConnect={(hash) => go("connect", hash)} />;
   if (me === undefined) return <div className="splash">loading</div>;
+  // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
+  if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   if (me === null) return <Login onSignedIn={load} />;
-  if (page === "connect") return <Connect onBack={() => go("board")} />;
   return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 

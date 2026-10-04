@@ -345,12 +345,31 @@ for each client, connected apps, and tokens, then the session hooks (`#sessions`
 list (`#tools`). It's the first item in the user menu, the `// START_HERE` block on an empty
 board links to it, and so do the Sessions list and the "No agent connected yet" line, chip,
 and card note a board shows until its first agent connects (`// HOW_IT_WORKS`).
+can work the board. The page at **/tasks/connect** shows the server URL, setup steps
+for each client, the starter prompt (`#prompt`), connected apps and tokens (`#apps`), the
+one-command Sessions setup (`#sessions`), how the `#agent` tag, questions, claims, and the
+event feed fit together (`#working`), and the tool list (`#tools`). It's the first item in
+the user menu, the `// START_HERE` block on an empty board links to it, and so does the
+Sessions list.
 
+- **The page is public.** Someone deciding whether to sign up can read every step first.
+  Signed out, the two parts that read or change an account (connected apps, tokens) become a
+  "Sign in to create a token" link, which goes to `/tasks/?next=/tasks/connect#…` so sign-in
+  lands back on the same section. `App.tsx` routes `connect` ahead of the sign-in check and
+  passes `signedIn`; the page is a static asset, so the Worker never gated it.
+- **The starter prompt.** Step 03 is the text to paste into a freshly connected agent, with a
+  Copy button: list cards with `get_board` and `tag: "agent"`, claim before starting, move to
+  Doing, keep a `STATUS:` line at the top of the notes, `ask_ceo` and move on, then Done and
+  `release_card`, and never touch a card without the tag. A second tab, "Claude Code + event
+  feed", adds starting `tasks-events.mjs --require agent` under Monitor and what to do with
+  each event. Both live in `Connect.tsx` (`STARTER_PROMPT`, `feedPrompt`); when a tool's
+  behavior changes, check them against `src/tool-docs.ts` and `src/mcp.ts`.
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
-  never points at this file. It hands out `scripts/tasks-presence.mjs` and
-  `scripts/tasks-events.mjs` as downloads (bundled as text at build time) and tells people to
-  keep them in `~/.config/tasks/`, next to the token. Off the hosted origin, its commands set
-  `TASKS_PRESENCE_URL` and `TASKS_URL` to the server they were copied from.
+  never points at this file. Its one command installs `scripts/tasks-presence.mjs` and
+  `scripts/tasks-events.mjs` into `~/.config/tasks/`, next to the token (`// SESSIONS`), and
+  "Do it by hand" still offers both as downloads (bundled as text at build time). Off the
+  hosted origin, its commands set `TASKS_PRESENCE_URL` and `TASKS_URL` to the server they were
+  copied from.
 - **One list of tools.** `src/tool-docs.ts` holds every MCP tool once: the description an agent
   reads and the line a person reads on the Connect page. `src/tools.ts` and `src/mcp.ts` take
   their descriptions from it, and `mcp.ts` fails to compile if it lists a tool that isn't
@@ -407,7 +426,9 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 ```
 
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
-agent definition (`~/.claude/agents/lead.md`) does this itself.
+agent definition (`~/.claude/agents/lead.md`) does this itself, and so does the "Claude Code +
+event feed" starter prompt on the Connect page. The Sessions setup command (`// SESSIONS`)
+installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
   `#agent`, and run one lead per repo. `tasks-events --tag receptionist` passes on only that
@@ -534,9 +555,39 @@ call's description when it has one (never the command), or Claude's own notifica
 updated, when the session ends, and all at once when the board turns encryption on. At most 200
 are kept.
 
-**Install the hook** on each machine (this goes in `~/.claude/settings.json`; merge it with any
-hooks already there). It uses the same token file as `// AGENT_EVENTS`:
-`~/.config/tasks/token`, or `TASKS_TOKEN`.
+**Install the hook** on each machine with one command. The Connect page shows it with a fresh
+token filled in (`/tasks/connect#sessions`; "Create a token" is right there):
+
+```sh
+curl -fsSL https://askscottpierce.com/tasks/setup.mjs \
+  | TASKS_TOKEN='tasks_…' \
+    node --input-type=module -
+```
+
+- **What it changes.** It writes the token to `~/.config/tasks/token` (mode 600), puts
+  `tasks-presence.mjs` and `tasks-events.mjs` next to it, and adds the seven hooks below to
+  `~/.claude/settings.json`. Nothing else.
+- **What it keeps.** Every hook and setting already in `settings.json`, in order; its hooks go
+  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`.
+  A second run changes nothing and makes no second backup. An event that already has a hook
+  running `tasks-presence.mjs`, from any path, counts as done, so hand-added hooks pointing at
+  a checkout aren't doubled. A symlinked `settings.json` is edited where it really lives.
+- **What stops it, before anything is written.** A `settings.json` that isn't valid JSON, a
+  token that doesn't start with `tasks_`, or a token the server refuses. It checks the token
+  with one empty `POST /tasks/api/presence`, which stores nothing; with no network it says the
+  token is untested and carries on. `--dry-run` on the end prints the plan, writes nothing,
+  and sends nothing.
+- **How it's served.** `scripts/tasks-setup.mjs` is the installer. The Worker answers
+  `/tasks/setup.mjs` (`src/server.ts`, listed in `run_worker_first`) with that file plus the two
+  scripts and its own origin written into it (`buildSetup` in `src/setup.ts`), so one download
+  is everything that lands on the machine and it can be read before it's run. The token goes
+  in the environment, never in a URL. From a checkout, `TASKS_TOKEN=… node scripts/tasks-setup.mjs`
+  installs the copies next to it.
+- Run with no `TASKS_TOKEN`, it reuses the token already saved, which is how to pick up newer
+  scripts later. `npm run check:setup` runs all of this against a throwaway HOME.
+
+**Or by hand** (this goes in `~/.claude/settings.json`; merge it with any hooks already there).
+It uses the same token file as `// AGENT_EVENTS`: `~/.config/tasks/token`, or `TASKS_TOKEN`.
 
 ```json
 {
@@ -560,9 +611,9 @@ tool-use events at most once every 30 seconds per session. The two events that f
 which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
 `claude -p` run exits, so the row would be left saying "working".
 The machine name is the host's name, or `TASKS_MACHINE`. On a box without this repo, copy the one
-file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) has the
-same steps for that case: a download of the script, and this JSON with a Copy button, pointed at
-`~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
+file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) keeps the
+same steps under "Do it by hand": a download of each script, and this JSON with a Copy button,
+pointed at `~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
 hooks") and when it isn't ("Add another machine").
 
 **Or with no script, hooks of type `http`.** The same endpoint takes Claude Code's hook payload
@@ -812,6 +863,7 @@ npm run check:sort       # lane sorting: each order, and that only the sorted la
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
+npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,

@@ -1052,6 +1052,19 @@ a.att-name:hover { color: var(--accent-text); }
 .snippet-head .btn { height: 28px; }
 .snippet pre { margin: 0; padding: 12px; overflow-x: auto; font: 12.5px/1.55 var(--font-mono); }
 
+/* A command that's ready to run as it stands, token and all. */
+.snippet pre.live::before { content: "$ "; color: var(--accent); }
+/* Prose, like the starter prompt: wrapped and shown whole, so it can be read before it's pasted. */
+.snippet pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-token { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.setup-token .btn { flex: none; text-decoration: none; }
+.connect-body a.btn { text-decoration: none; }
+.by-hand { border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); }
+.by-hand summary { padding: 10px 12px; font: 600 12px var(--font-mono); letter-spacing: .04em; cursor: pointer; }
+.by-hand summary::marker { color: var(--accent); }
+.by-hand[open] summary { border-bottom: var(--border-w) solid var(--line); }
+.by-hand .client-panel { padding: 12px; }
+
 .client-panel li .snippet, .connect-notes li .snippet { margin-top: 8px; }
 .step-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 /* Linked to by #sessions, #working, and #tools; the sticky bar would cover the heading otherwise. */
@@ -1120,7 +1133,8 @@ a.att-name:hover { color: var(--accent-text); }
   .search:focus-within input { width: auto; }
   .connect-body { padding: 24px 16px 64px; }
   .connect-step { grid-template-columns: 1fr; gap: 8px; }
-  .token-form, .copy-row { flex-direction: column; }
+  .token-form, .copy-row, .setup-token { flex-direction: column; align-items: stretch; }
+  .setup-token .btn { min-height: 40px; justify-content: center; }
   .token-form .btn, .copy-row .btn { min-height: 40px; justify-content: center; }
   .connect-tools li { flex-wrap: wrap; gap: 4px 12px; }
   .token-table th:nth-child(2), .token-table td:nth-child(2), .token-table .hide-sm { display: none; }

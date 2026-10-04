@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A mistyped address like `/tasks/nope` shows a not-found page with links to the pages that exist, instead of the sign-in form
 - Until your first agent connects, the board says "No agent connected yet" above the lanes, and each `#agent` card says nothing will pick it up, with a link to Connect. It all goes away the moment an agent connects
 - A demo board at `/tasks/demo` you can try without signing up: drag cards, answer an agent's question, and watch a scripted agent pick it up. It lives in your browser tab and nothing is saved
+- The Connect page has a starter prompt to copy into a newly connected agent, so it works `#agent` cards the right way from the first message. A second version for Claude Code also listens for your changes
+- One command sets up Sessions on a machine: it saves your token, installs the two scripts, and adds the hooks to `~/.claude/settings.json` without touching what's already there. The Connect page shows it with a new token filled in
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
@@ -45,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Orange and gray text is darker in the light themes, and the count badges use dark ink, so small text is easier to read
 - Opening a card puts the cursor in the title. On a phone it leaves the keyboard down until you tap a field
 - The assistant's footer says where it runs instead of naming models
+- The Connect page opens without signing in, so you can read the setup steps before you make an account
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
 
 ### Fixed
