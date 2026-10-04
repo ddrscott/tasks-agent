@@ -3,12 +3,15 @@ import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
 import { Markdown, toggleTask } from "./Markdown";
+import { TagField } from "./TagField";
 import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
 type Props = {
   card: Card;
   lanes: Lane[];
+  /** Tags in use on the board, most used first. */
+  knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload and decrypted to view. */
   vault: Vault | null;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
@@ -22,12 +25,14 @@ type Props = {
 };
 
 /** Edit a card. Changes save when the dialog closes, however it closes. */
-export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
   const [due, setDue] = useState(card.due ?? "");
-  const [tags, setTags] = useState((card.tags ?? []).join(" "));
+  // A trailing space says the last tag is finished, so the field suggests more tags instead of
+  // treating that tag as half typed.
+  const [tags, setTags] = useState((card.tags ?? []).map((t) => `${t} `).join(""));
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
   const [editing, setEditing] = useState(!card.notes.trim());
   const latest = useRef({ title, notes, due, tags });
@@ -139,14 +144,7 @@ export function CardEditor({ card, lanes, vault, onSave, onMove, onDelete, onRem
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <label>
-          Tags
-          <input
-            className="field mono" value={tags} placeholder="agent client" spellCheck={false} autoCapitalize="off"
-            onChange={(e) => setTags(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") close(); }}
-          />
-        </label>
+        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={close} />
         <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}

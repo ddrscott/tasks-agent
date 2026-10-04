@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { cleanTag, type Lane } from "../shared";
 import { formatBytes, uploadFile } from "./Attachments";
 import { IconClip, IconClose, IconPlus } from "./icons";
+import { TagField } from "./TagField";
 import type { Vault } from "./vault";
 
 export type NewCardInput = { laneId: string; title: string; notes: string; due: string | null; tags: string[] };
@@ -15,6 +16,8 @@ type Props = {
   lanes: Lane[];
   /** The lane whose + was clicked. */
   laneId: string;
+  /** Tags in use on the board, most used first. */
+  knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload. */
   vault: Vault | null;
   /** Adds the card and resolves to its id. */
@@ -22,7 +25,7 @@ type Props = {
   onClose(): void;
 };
 
-export function NewCard({ lanes, laneId, vault, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -138,13 +141,7 @@ export function NewCard({ lanes, laneId, vault, onAdd, onClose }: Props) {
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <label>
-          Tags
-          <input
-            className="field mono" value={tags} placeholder="agent client" spellCheck={false} autoCapitalize="off"
-            onChange={(e) => setTags(e.target.value)} onKeyDown={submitOnEnter}
-          />
-        </label>
+        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} />
         {error && <div className="dialog-error" role="alert">{error}</div>}
         <div className={`attachments${over ? " over" : ""}`}>
           <div className="attachments-head">

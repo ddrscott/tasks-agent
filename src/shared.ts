@@ -118,6 +118,13 @@ const tidyNotes = (s: string) => (isSealed(s) ? s : s.slice(0, 4000));
 export const cleanTag = (s: string) =>
   s.trim().replace(/^#+/, "").toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 32);
 
+/** Every tag in use on the board, most used first, for suggesting in the Tags field. needs-ceo is set by ask_ceo, not by hand. */
+export function tagsByUse(b: Board): string[] {
+  const n = new Map<string, number>();
+  for (const c of b.cards) for (const t of c.tags ?? []) if (!isSealed(t) && t !== NEEDS_CEO_TAG) n.set(t, (n.get(t) ?? 0) + 1);
+  return [...n.keys()].sort((x, y) => n.get(y)! - n.get(x)! || x.localeCompare(y));
+}
+
 /** Tidy a tag list: clean each plain tag, drop blanks and repeats. Sealed tags pass through. */
 export function tidyTags(tags: string[]): string[] {
   const out: string[] = [];

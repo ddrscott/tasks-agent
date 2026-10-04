@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, tidyTags, type Board, type Card } from "../shared";
+import { clean, tagsByUse, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -277,6 +277,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     setToast({ text: label ? `Undid: ${label.toLowerCase()}` : "Nothing to undo", action: label ? "redo" : null, key: Date.now() });
   }, [agent, say]);
 
+  // For the Tags field in the card dialogs. On an encrypted board this is the decrypted view, so it works there too.
+  const knownTags = useMemo(() => (board ? tagsByUse(board) : []), [board]);
+
   const actions: Actions = useMemo(() => ({
     addCard: async (laneId, title, top) => agent.stub.addCard(laneId, await out(clean(title, 200)), top),
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index),
@@ -482,11 +485,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {newCardLane && (
-        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} vault={vault} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
       )}
       {editingCard && (
         <CardEditor
-          key={editingCard.id} card={editingCard} lanes={board.lanes} vault={board.sealed ? vault : null}
+          key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER)}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true)); }}

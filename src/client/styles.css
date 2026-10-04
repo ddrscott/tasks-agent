@@ -638,6 +638,13 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .md pre code { background: none; border: 0; padding: 0; white-space: pre; overflow-wrap: normal; }
 .md blockquote { padding: 2px 0 2px 12px; color: var(--muted); border-left: 2px solid var(--line); }
 .md hr { border: 0; border-top: var(--border-w) solid var(--line); margin: 14px 0; }
+/* Tags, with the board's tags offered above the input (TagField.tsx). */
+.tag-field { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
+.tag-field > label { font: 12px var(--font-mono); color: var(--muted); }
+.tag-suggest { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; margin: 0 -2px; padding: 0 2px; }
+.tag-suggest::-webkit-scrollbar { display: none; }
+.tag-suggest .chip { flex: none; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; }
+@media (hover: none) { .tag-suggest .chip { height: 40px; padding: 0 12px; font-size: 13px; } }
 .dialog-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-foot { flex: none; display: flex; gap: 8px; padding: 14px 20px; border-top: var(--border-w) solid var(--line); }
 .dialog-foot .spacer { flex: 1; }
