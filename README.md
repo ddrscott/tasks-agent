@@ -292,7 +292,10 @@ agent definition (`~/.claude/agents/lead.md`) does this itself.
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
   `#agent`, and run one lead per repo. `tasks-events --tag receptionist` passes on only that
   project's cards, so leads in different repos never hear each other's work. Filtering happens
-  in the script; the server sends every `#agent` change to every connection.
+  in the script; the server sends every `#agent` and `#gauntlet` change to every connection.
+- **Two kinds of agent card.** `#gauntlet` cards ride the same feed (`// GAUNTLET`). `--require`
+  keeps the two apart in one repo: `--tag receptionist --require agent` for the lead,
+  `--require gauntlet` for the gauntlet agent. A card has to carry every `--require` tag.
 
 - **Direction.** Your machine dials out to `wss://askscottpierce.com/tasks/events`, so nothing on
   it accepts connections: no tunnel, no open port.
@@ -300,7 +303,7 @@ agent definition (`~/.claude/agents/lead.md`) does this itself.
   that can't set headers, as a second subprotocol after `tasks-events`. Never in the URL. The
   Worker checks it and doesn't pass it on.
 - **Answers.** When the card had a question (`// QUESTIONS`), `answered` also carries `answer` and `question`.
-- **Events.** First a `hello` with every open `#agent` card, on each connect, so nothing is lost
+- **Events.** First a `hello` with every open `#agent` or `#gauntlet` card, on each connect, so nothing is lost
   while offline. Then one line per change: `added`, `tagged`, `answered` (`#needs-ceo` came
   off), `edited`, `moved`, `deleted`. Each carries the card's id, title, lane, and tags.
 - **Only your changes.** Edits from the app, its assistant, and Needle publish. Changes an agent
@@ -346,6 +349,43 @@ When you need Scott to decide something, call ask_ceo on the card with a one-lin
 in the notes under the status line. Leave the card in Doing and move on. When an `answered`
 event arrives with an `answer`, act on that answer; without one, reread the card.
 ```
+
+## // GAUNTLET
+
+Tag a card `#gauntlet` next to its project tag and an agent works it all night without asking:
+it builds, a separate critic with fresh context judges the real result against the bar on the
+card, the gaps become cards, and the next round starts. It's the Gauntlet Loop
+(https://somethingbig.ai/gauntlet-loop) started from the app instead of a prompt.
+
+```sh
+cd ~/code/receptionist && tasks-gauntlet     # once per repo; then everything is in the app
+```
+
+- **The card.** Say the goal, the bar to beat (reference sites, screenshots, a test suite, a
+  number), and a limit if you want one (`rounds: 6`, `until 07:00`). With no bar the agent
+  finds one and writes it on the card. With no limit it stops when a critic round comes back
+  clean, or when you move the card to Done or take the tag off.
+- **It decides instead of asking.** A choice it can undo, it makes, and lists under `DECISIONS:`
+  on the goal card for you to overrule. It asks one question per goal, at the end, with `ask_ceo`.
+- **What it won't do without you.** Deploy, merge or push to main, force-push, delete data,
+  send anything, spend money. Work stays on a branch, `gauntlet/<card id>`. Add `#ship-ok` to
+  the goal card to let it merge and deploy that one goal once the build, the checks, and a
+  critic round pass.
+- **Not a lead's card.** Its cards carry `#gauntlet` and never `#agent`, so a lead agent leaves
+  them alone and the two can run in one repo.
+- **`scripts/tasks-gauntlet`** (install it on PATH next to `tasks-events`) starts
+  `claude --agent gauntlet` in a tmux session named `gauntlet-<project>`, with permission
+  prompts off (`--permission-mode bypassPermissions`), `ANTHROPIC_API_KEY` unset so it bills the
+  subscription, and a loop that brings it back a minute after it exits. `attach`, `status`,
+  and `stop` do what they say. An agent file can't turn prompts off for its own main session,
+  which is why the launcher does it. Claude Code wants that mode accepted once per machine by
+  hand: `claude --dangerously-skip-permissions`.
+- **What's taken away.** With prompts off, the launcher denies the tools a night shift never
+  needs: Gmail, Drive, Calendar, Docs, the Cloudflare and Stripe servers, analytics, `sudo`,
+  force-push, and questions in the terminal. Denies hold in that mode. The rest of the list
+  above is the agent's instructions (`~/.claude/agents/gauntlet.md`), not a lock.
+- **A restart loses nothing.** Status lines, the round log, and claims are on the board, so a
+  session that died reads where it was. A claim lapses after 15 minutes either way.
 
 ## // SESSIONS
 
@@ -608,6 +648,7 @@ npm run dev:local    # no Cloudflare login needed; everything works except the a
 npm run typecheck
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
+npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,

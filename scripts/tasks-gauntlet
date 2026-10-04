@@ -1,0 +1,58 @@
+#!/bin/sh
+# Start the gauntlet agent (~/.claude/agents/gauntlet.md) for the repo you're in. It runs in
+# tmux with permission prompts off and comes back up if it exits, so cards you tag #gauntlet
+# in the Tasks app get worked with nobody at the terminal.
+#
+#   tasks-gauntlet            # start it for this folder, or say that it's already running
+#   tasks-gauntlet attach     # watch it (detach with ctrl-b d)
+#   tasks-gauntlet status     # exit 0 if it's running
+#   tasks-gauntlet stop       # stop it and its restart loop
+#
+# The project is the folder's name, the same tag the cards carry next to #gauntlet. One per
+# repo; each gets its own tmux session, gauntlet-<project>.
+#
+# Permission prompts are off (bypassPermissions), which Claude Code makes you accept once per
+# machine: run `claude --dangerously-skip-permissions` by hand first. What the agent may not
+# do without you (deploy, push to main, delete, send, spend) is in its instructions, and the
+# tools in DENY below are taken away outright.
+#
+# It bills your Claude subscription, never the API: ANTHROPIC_API_KEY is unset before claude
+# starts. Needs tmux, claude, and tasks-events on PATH, and a token in ~/.config/tasks/token.
+
+set -eu
+
+project=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-' | tr -cd '[:alnum:]_-')
+session="gauntlet-$project"
+
+# Whole MCP servers and commands an unattended session never needs. A deny still holds with
+# prompts off.
+DENY='AskUserQuestion mcp__claude_ai_Gmail mcp__claude_ai_Google_Drive mcp__claude_ai_Google_Calendar mcp__claude_ai_Claude_Docs mcp__claude_ai_Cloudflare_Developer_Platform mcp__plugin_stripe_stripe mcp__analytics-mcp Bash(git push --force*) Bash(git push -f*) Bash(sudo *)'
+
+running() { tmux has-session -t "=$session" 2>/dev/null; }
+
+case "${1:-start}" in
+  start)
+    for need in tmux claude tasks-events; do
+      command -v "$need" >/dev/null || { echo "tasks-gauntlet: $need isn't on PATH" >&2; exit 1; }
+    done
+    [ -f "$HOME/.claude/agents/gauntlet.md" ] || { echo "tasks-gauntlet: no ~/.claude/agents/gauntlet.md" >&2; exit 1; }
+    [ -n "${TASKS_TOKEN:-}" ] || [ -s "$HOME/.config/tasks/token" ] || { echo "tasks-gauntlet: no token in ~/.config/tasks/token" >&2; exit 1; }
+    if running; then echo "$session is already running; tasks-gauntlet attach"; exit 0; fi
+    # The loop runs inside tmux so it outlives this shell. A session that dies comes back in a
+    # minute and reads the board to see where it was; `tasks-gauntlet stop` ends the loop.
+    tmux new-session -d -s "$session" -c "$PWD" "
+      unset ANTHROPIC_API_KEY
+      while :; do
+        claude --agent gauntlet --permission-mode bypassPermissions --disallowedTools '$DENY' \\
+          -n '$session' 'Work the #gauntlet cards for #$project. Read the board first.'
+        echo \"tasks-gauntlet: claude exited (\$?), starting again in 60s; tasks-gauntlet stop to end\"
+        sleep 60
+      done"
+    echo "$session started in $PWD; tasks-gauntlet attach to watch"
+    ;;
+  attach) running || { echo "$session isn't running" >&2; exit 1; }; exec tmux attach -t "=$session" ;;
+  status) if running; then echo "$session is running"; else echo "$session isn't running"; exit 1; fi ;;
+  stop)   if running; then tmux kill-session -t "=$session"; echo "$session stopped"; else echo "$session isn't running"; fi ;;
+  -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2 ;;
+  *) echo "usage: tasks-gauntlet [start|attach|status|stop]" >&2; exit 2 ;;
+esac

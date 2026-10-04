@@ -1,4 +1,4 @@
-// A live feed of the changes you make to #agent cards, for an agent session on your own
+// A live feed of the changes you make to #agent and #gauntlet cards, for an agent session on your own
 // machine (scripts/tasks-events.mjs, watched by Claude Code's Monitor). The agent dials
 // out to /tasks/events with a personal access token, so nothing on your machine has to
 // accept connections.
@@ -14,6 +14,9 @@ import { getAgentByName } from "agents";
 import { hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
 
 export const AGENT_TAG = "agent";
+/** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */
+export const GAUNTLET_TAG = "gauntlet";
+const forAgent = (c: Card) => hasTag(c, AGENT_TAG) || hasTag(c, GAUNTLET_TAG);
 export { NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
@@ -30,7 +33,7 @@ const ref = (b: Board, c: Card): CardRef => ({
 });
 
 /**
- * What changed on #agent cards between two boards, one event per card. "answered" means
+ * What changed on #agent and #gauntlet cards between two boards, one event per card. "answered" means
  * #needs-ceo came off, which is how you tell the agent you've replied.
  */
 export function agentEvents(before: Board, after: Board): TaskEvent[] {
@@ -38,11 +41,11 @@ export function agentEvents(before: Board, after: Board): TaskEvent[] {
   const was = new Map(before.cards.map((c) => [c.id, c]));
   const out: TaskEvent[] = [];
   for (const c of after.cards) {
-    if (!hasTag(c, AGENT_TAG)) continue;
+    if (!forAgent(c)) continue;
     const p = was.get(c.id);
     let type: TaskEvent["type"] | null = null;
     if (!p) type = "added";
-    else if (!hasTag(p, AGENT_TAG)) type = "tagged";
+    else if (!forAgent(p)) type = "tagged";
     else if (hasTag(p, NEEDS_CEO_TAG) && !hasTag(c, NEEDS_CEO_TAG)) type = "answered";
     else if (p.laneId !== c.laneId) type = "moved";
     else if (p.title !== c.title || p.notes !== c.notes || p.due !== c.due || (p.tags ?? []).join() !== (c.tags ?? []).join()) type = "edited";
@@ -51,14 +54,14 @@ export function agentEvents(before: Board, after: Board): TaskEvent[] {
     } else if (type) out.push({ type, ...ref(after, c) } as TaskEvent);
   }
   const kept = new Set(after.cards.map((c) => c.id));
-  for (const p of before.cards) if (hasTag(p, AGENT_TAG) && !kept.has(p.id)) out.push({ type: "deleted", ...ref(before, p) });
+  for (const p of before.cards) if (forAgent(p) && !kept.has(p.id)) out.push({ type: "deleted", ...ref(before, p) });
   return out;
 }
 
-/** Every open #agent card (anything not in the done lane), sent first on each connect so nothing is missed while offline. */
+/** Every open #agent or #gauntlet card (anything not in the done lane), sent first on each connect so nothing is missed while offline. */
 export function agentQueue(b: Board): TaskEvent {
   const done = b.lanes[b.lanes.length - 1]?.id;
-  return { type: "hello", cards: b.cards.filter((c) => hasTag(c, AGENT_TAG) && (c.laneId !== done || b.lanes.length === 1)).map((c) => ref(b, c)) };
+  return { type: "hello", cards: b.cards.filter((c) => forAgent(c) && (c.laneId !== done || b.lanes.length === 1)).map((c) => ref(b, c)) };
 }
 
 export class TaskEvents extends DurableObject<Env> {
