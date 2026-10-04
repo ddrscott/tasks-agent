@@ -6,13 +6,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
 import type { Claim, Session } from "../presence-shared";
 import type { Card } from "../shared";
-import { AskBlock } from "./Ask";
 import { api, BASE } from "./base";
 import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
-import { PresenceContext, SessionRow } from "./Sessions";
+import { blockedSessions, isStale, PresenceContext, SessionRow } from "./Sessions";
 
 const DEMO = `${BASE}/demo`;
 
@@ -161,6 +160,10 @@ const CLAIMS: Claim[] = [
 ];
 
 const PRESENCE = { sessions: SESSIONS, claims: CLAIMS, now: NOW };
+// The top bar's two counts, by the app's own rules: "need you" is open questions plus sessions
+// stopped at a prompt, and Sessions is the ones that are live.
+const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length + blockedSessions(SESSIONS, NOW).length;
+const LIVE = SESSIONS.filter((s) => !isStale(s, NOW)).length;
 const titleOf = (id: string) => [...TODO, ...DOING].find((c) => c.id === id)?.title;
 
 function SampleLane({ name, index, cards }: { name: string; index: number; cards: Card[] }) {
@@ -193,8 +196,8 @@ function Shot() {
             <div className="topbar">
               <span className="wordmark">tasks<span>.</span></span>
               <span className="spacer" />
-              <span className="btn asks-btn"><span className="asks-count">?1</span><span className="label">needs you</span></span>
-              <span className="btn sess-btn waiting"><IconSessions /><span className="label">Sessions</span><span className="sess-count">1</span></span>
+              <span className="btn asks-btn"><span className="asks-count">?{NEED_YOU}</span><span className="label">need{NEED_YOU === 1 ? "s" : ""} you</span></span>
+              <span className="btn sess-btn"><IconSessions /><span className="label">Sessions</span><span className="sess-count">{LIVE}</span></span>
             </div>
             <div className="shot-body">
               <SampleLane name="To do" index={0} cards={TODO} />
