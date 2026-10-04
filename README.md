@@ -53,10 +53,18 @@ run ahead of whatever serves the zone.
   tools are defined once in `src/tools.ts` for both the assistant and MCP, with their
   descriptions in `src/tool-docs.ts`. The agent
   rejects state pushed directly from clients.
-- **First run.** The sign-in screen leads with what the board is for: agents work it over MCP,
-  they ask and you answer in one tap, and you see what each session is doing. `// SECURITY`
-  sits under that and says the trade-off plainly: an encrypted board is closed to outside
-  agents. A board with no cards shows `// START_HERE` above its lanes
+- **Signed out.** `/tasks/` is the landing page (`src/client/Landing.tsx`), with the sign-in
+  form (`src/client/Login.tsx`) in it. Above the fold at 1280x800: the headline, the form, a
+  "Try the demo board" link to `/tasks/demo`, and a picture of the product. The picture is not
+  an image. It's `CardFace`, `AskBlock`, and the Sessions `Row` fed sample data and marked
+  `inert`, so it follows the theme and changes when the real components do. Keep it showing a
+  question with a `REC` option, a claimed card, and a needs-input session. Below the fold:
+  `// WHATS_DIFFERENT` (which says the encryption trade-off plainly: an encrypted board is
+  closed to outside agents), the `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the
+  same one the Connect page shows), and `// PRICING` (see `// BILLING`). Nothing on the page
+  claims users, stars, or quotes we don't have. Arriving with `?next=` (an agent's OAuth
+  consent) shows only the form.
+- **First run.** A board with no cards shows `// START_HERE` above its lanes
   (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
   with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
   never shows it.
@@ -667,6 +675,14 @@ for card changes and cancellation.
   plan from D1 on each message.
 - Billing stays off until `STRIPE_PRICE_ID` (var) and the `STRIPE_SECRET_KEY` and
   `STRIPE_WEBHOOK_SECRET` secrets are all set.
+- **Pricing is public and never hard-coded.** `GET /tasks/api/plans` needs no session and
+  returns `{ free: { dailyChats }, pro: { dailyChats, price } | null }`. The caps are
+  `FREE_DAILY_CHATS` and `PRO_DAILY_CHATS`; `price` is `{ amount, currency, interval,
+  intervalCount }` read from Stripe for `STRIPE_PRICE_ID` (amount in the smallest unit) and
+  kept in memory for an hour. With billing off `pro` is `null`, and the landing page shows
+  Free only and says Pro isn't on sale yet. If Stripe can't be reached, or the price is tiered
+  or one-time, `price` is `null` and the page says the price is shown at checkout. The key
+  needs read access to Prices. Don't put a dollar amount in the client.
 
 Setup:
 1. In Stripe, create a product ("Tasks Pro") with a recurring price, and put its `price_…` id in
@@ -677,7 +693,7 @@ Setup:
    with events `checkout.session.completed` and `customer.subscription.created`,
    `.updated`, `.deleted`, `.paused`, `.resumed`. Copy its signing secret.
 4. `npx wrangler secret put STRIPE_SECRET_KEY` (a restricted key needs write access to
-   Checkout Sessions and Customer Portal, and read access to Subscriptions), then
+   Checkout Sessions and Customer Portal, and read access to Subscriptions and Prices), then
    `STRIPE_WEBHOOK_SECRET`.
 
 Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` prints a

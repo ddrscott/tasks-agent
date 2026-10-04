@@ -133,7 +133,8 @@ function ResumeButton({ session }: { session: Session }) {
   );
 }
 
-function Row({ session, now, cards }: { session: Session; now: number; cards: string[] }) {
+/** One row of the Sessions list. Exported for the sample list on the signed-out landing page. */
+export function Row({ session, now, cards }: { session: Session; now: number; cards: string[] }) {
   return (
     <li className={`sess-row${isStale(session, now) ? " stale" : ""}`}>
       <div className="sess-line">

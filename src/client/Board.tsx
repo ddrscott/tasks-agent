@@ -408,7 +408,8 @@ function SortableCard(p: {
   );
 }
 
-function CardFace(p: {
+/** Exported so the signed-out landing page can draw sample cards with the real markup. */
+export function CardFace(p: {
   card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null;
   onToggle?(c: Card): void; onTag?(tag: string): void;
 }) {
