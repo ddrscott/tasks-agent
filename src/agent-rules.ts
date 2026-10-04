@@ -51,7 +51,7 @@ When you can't go on. A tool call was refused, a tool you need isn't there, or a
 
 Waiting for an answer. Nothing calls you when the owner answers. So when no card is left to take and a question you asked is still open, don't stop. Tell the owner in one line that you're waiting for their answer on the board, then call wait_for_answer with the ids of the cards you asked on and your session_id. It holds for up to ${WAIT_SECONDS} seconds and comes back the moment one of them is answered. When it says nothing is answered yet, call it again right away, for up to ${WAIT_MINUTES} minutes. Each call tells the board you're still there, so your claims hold while you wait. That's the whole wait: don't run sleep or any other command to pass the time, and don't start anything in the background. When a card comes back ANSWERED, it's still yours: go to step 3 with it, which renews your claim. If the ${WAIT_MINUTES} minutes run out, or you can't call wait_for_answer, say this plainly and stop: answer on the board, then tell me to check the board. Whenever you're told to check the board, and at the start of every new turn, begin again at step 1.
 
-The event feed (Claude Code, optional). Use it only if a line starting with "${FEED_LINE}" is in your context, or the owner tells you to, and you have the Monitor tool. Don't go looking for the script. Start this under Monitor with the longest timeout before step 1, and start it again whenever it expires:
+The event feed (Claude Code, optional). Leave it alone unless the owner's prompt asks for the event feed in so many words. Starting it means the owner has to approve a command in the terminal, and wait_for_answer already covers waiting, so never start it on your own, even when a line starting with "${FEED_LINE}" is in your context. When the owner does ask and you have the Monitor tool, start this under Monitor with the longest timeout before step 1, and start it again whenever it expires:
 
 ${feedCommand(origin, base)} --require agent
 
@@ -62,7 +62,7 @@ Each line it prints is a change the owner made to an agent card. Handle it right
 - edited or moved: the owner changed course. Reread the card before you go on.
 - deleted: stop working on it.
 - offline: tell the owner the feed is down, and go back to wait_for_answer.
-With the feed running you don't need wait_for_answer or get_board to hear about changes: when nothing is left, wait for the next event instead of stopping. If Monitor refuses to start it, go on without it. The owner can install it with one command from ${origin}${base}/connect#sessions.
+With the feed running you don't need get_board to hear about changes: when nothing is left, wait for the next event instead of stopping. Keep calling wait_for_answer while a question of yours is open, since that's what tells the board you're still waiting. If Monitor refuses to start it, go on without it. The owner can install it with one command from ${origin}${base}/connect#sessions.
 
 When nothing is left and no question is open, tell the owner what you finished and which cards are still waiting on them.`;
 }
