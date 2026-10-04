@@ -240,8 +240,15 @@ run ahead of whatever serves the zone.
   `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
   popover moves focus into it, Esc or a click outside gives focus back to its button, and in
   a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
-  `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
-  it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
+  `src/client/Board.tsx`). The card editor, New card, and Encryption are modal: native
+  `<dialog>` elements opened with `showModal()`, each with `role="dialog"`, `aria-modal="true"`,
+  and a name (the editor's is "Edit card: " plus the card's title). The browser keeps Tab
+  inside an open one. Closing it gives focus back to what opened it: the card for the editor
+  (found again by id when a move redrew it in another lane), the lane's + for New card
+  (`useModal` in `src/client/modal.ts`; React takes these dialogs off the page instead of
+  closing them, and the browser only hands focus back on a close). The card editor and New card
+  open with focus on the title. On a touch screen the editor focuses the dialog instead, so the
+  keyboard doesn't cover a card you only meant to read.
 - **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
   under the title (touch screens only; the current lane is marked): that moves it right away,
   keeps any other edits, and closes the card, so it's two taps from the board. Or long-press

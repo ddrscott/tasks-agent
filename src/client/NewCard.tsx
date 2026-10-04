@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
+import { MODAL, useModal } from "./modal";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
@@ -44,9 +45,8 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   const [addedId, setAddedId] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
+  // showModal() would put focus on the X. The title is where typing starts.
+  useModal(ref, { focus: (dialog) => dialog.querySelector<HTMLTextAreaElement>(".title-input")?.focus() });
 
   // Dropping files on the dialog or pasting a screenshot queues them, the same as in the card editor.
   useEffect(() => {
@@ -132,7 +132,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
 
   return (
     <dialog
-      ref={ref} className="card-dialog" aria-label="New card"
+      ref={ref} className="card-dialog" {...MODAL} aria-label="New card"
       {...guard.dialogProps}
       // A stray click outside shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}

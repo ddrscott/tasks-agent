@@ -4,6 +4,7 @@ import type { Board } from "../shared";
 import { plainWholeBoard, sealWholeBoard } from "./migrate";
 import { Footer } from "./Footer";
 import { IconClose } from "./icons";
+import { MODAL, useModal } from "./modal";
 import { forgetKey, recallKey, rememberKey, Vault } from "./vault";
 
 // End-to-end encryption screens: the unlock screen an encrypted board opens to, and the
@@ -118,9 +119,9 @@ type DialogProps = {
 
 export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabling, onDisabled, onClose, say }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
+  useModal(ref);
   return (
-    <dialog ref={ref} aria-label="Encryption" className="enc-dialog" onCancel={(e) => { e.preventDefault(); onClose(); }}>
+    <dialog ref={ref} {...MODAL} aria-label="End-to-end encryption" className="enc-dialog" onCancel={(e) => { e.preventDefault(); onClose(); }}>
       <div className="dialog-body">
         <h2 className="h">END_TO_END_ENCRYPTION</h2>
         {view.sealed && vault

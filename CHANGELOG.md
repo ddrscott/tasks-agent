@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A card an agent session is working on shows that session in the card: its state, machine, last action, and a Copy resume command button
 - With a tag filter on, each lane's count shows matches out of the total, like `2 / 22`
 - Menus and popovers work from the keyboard: opening one puts you inside it, Esc puts you back on its button, and the arrow keys move through the account and lane menus
+- Closing a card puts keyboard focus back on that card, and closing New card puts it back on the lane's +. Screen readers hear both as dialogs, and the card's by its title
 - Tag a card `#gauntlet` to have an agent build and critique it round after round overnight without asking; `tasks-gauntlet` starts one per repo
 - `tasks-events --require <tag>` — hear only cards that carry that tag too, so a lead and a gauntlet agent can share a repo
 - A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board. Each page previews as itself: a link to `/tasks/demo` says it's a live demo board with no sign-up, and Connect, Pricing, Privacy, and Terms show their own titles and descriptions
