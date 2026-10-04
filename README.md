@@ -50,8 +50,16 @@ run ahead of whatever serves the zone.
   no id to guess. The cookie is scoped to `Path=/tasks`.
 - **One code path for every change.** Drag and drop, buttons, the assistant's
   tools, and MCP calls all end in the pure functions in `src/shared.ts`. The board
-  tools are defined once in `src/tools.ts` for both the assistant and MCP. The agent
+  tools are defined once in `src/tools.ts` for both the assistant and MCP, with their
+  descriptions in `src/tool-docs.ts`. The agent
   rejects state pushed directly from clients.
+- **First run.** The sign-in screen leads with what the board is for: agents work it over MCP,
+  they ask and you answer in one tap, and you see what each session is doing. `// SECURITY`
+  sits under that and says the trade-off plainly: an encrypted board is closed to outside
+  agents. A board with no cards shows `// START_HERE` above its lanes
+  (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
+  with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
+  never shows it.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
@@ -239,8 +247,21 @@ they came from anywhere else, including sibling subdomains that `SameSite=Lax` l
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
-can work the board. The in-app page at **/tasks/connect** (user menu → Connect an
-agent) shows the server URL, setup steps for each client, connected apps, and tokens.
+can work the board. The in-app page at **/tasks/connect** shows the server URL, setup steps
+for each client, connected apps, and tokens, then the session hooks (`#sessions`), how the
+`#agent` tag, questions, claims, and the event feed fit together (`#working`), and the tool
+list (`#tools`). It's the first item in the user menu, the `// START_HERE` block on an empty
+board links to it, and so does the Sessions list.
+
+- **The page stands on its own.** Someone using the hosted app has no checkout, so the page
+  never points at this file. It hands out `scripts/tasks-presence.mjs` and
+  `scripts/tasks-events.mjs` as downloads (bundled as text at build time) and tells people to
+  keep them in `~/.config/tasks/`, next to the token. Off the hosted origin, its commands set
+  `TASKS_PRESENCE_URL` and `TASKS_URL` to the server they were copied from.
+- **One list of tools.** `src/tool-docs.ts` holds every MCP tool once: the description an agent
+  reads and the line a person reads on the Connect page. `src/tools.ts` and `src/mcp.ts` take
+  their descriptions from it, and `mcp.ts` fails to compile if it lists a tool that isn't
+  registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
@@ -400,7 +421,10 @@ tool-use events at most once every 30 seconds per session. The two events that f
 which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
 `claude -p` run exits, so the row would be left saying "working".
 The machine name is the host's name, or `TASKS_MACHINE`. On a box without this repo, copy the one
-file; it has no dependencies beyond Node 22.
+file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) has the
+same steps for that case: a download of the script, and this JSON with a Copy button, pointed at
+`~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
+hooks") and when it isn't ("Add another machine").
 
 **Or with no script, hooks of type `http`.** The same endpoint takes Claude Code's hook payload
 directly:

@@ -140,9 +140,20 @@ function Row({ session, now, cards }: { session: Session; now: number; cards: st
   );
 }
 
-type Props = { presence: Presence; cardTitle(id: string): string | null; open: boolean; setOpen(o: boolean): void };
+type Props = {
+  presence: Presence; cardTitle(id: string): string | null; open: boolean; setOpen(o: boolean): void;
+  /** Open the Connect page, at one of its sections when given a hash like "#sessions". */
+  onConnect(hash?: string): void;
+};
 
-export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
+export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }: Props) {
+  // Real links, so they can be opened in a new tab; a plain click stays in the app.
+  const connectLink = (hash: string, label: string) => (
+    <a
+      href={`${BASE}/connect${hash}`}
+      onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); setOpen(false); onConnect(hash); }}
+    >{label}</a>
+  );
   const { sessions, claims, now } = presence;
   const live = sessions.filter((s) => !isStale(s, now));
   const waiting = live.filter((s) => s.state === "needs-input").length;
@@ -168,8 +179,9 @@ export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
             <h2 className="h">SESSIONS</h2>
             {groups.length === 0 && (
               <p className="sess-empty">
-                No Claude Code sessions are reporting in. Add the hooks from the README (// SESSIONS) to
-                <code> ~/.claude/settings.json</code> and they show up here within seconds.
+                No Claude Code sessions are reporting in. A session reports through hooks you add once
+                on each machine. {connectLink("#sessions", "Set up the hooks")} and sessions show up here
+                within seconds.
               </p>
             )}
             {groups.map(([project, list]) => (
@@ -185,6 +197,11 @@ export function SessionsButton({ presence, cardTitle, open, setOpen }: Props) {
                 </ul>
               </section>
             ))}
+            {/* The way to the Connect page from here, so setup isn't only in the account menu. */}
+            <p className="sess-foot">
+              {connectLink("", "Connect an agent")}
+              {groups.length > 0 && <> · {connectLink("#sessions", "Add another machine")}</>}
+            </p>
           </div>
         </Popover>
       )}

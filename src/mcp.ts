@@ -13,9 +13,20 @@ import { getAgentByName } from "agents";
 import { createMcpHandler } from "agents/mcp/server";
 import type { User } from "./auth";
 import { describeSession } from "./presence";
-import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolOutcome } from "./tools";
+import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
+import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 
 export const MCP_PATH = "/tasks/mcp";
+
+// The Connect page lists the tools in tool-docs.ts, so that list has to be exactly what's
+// registered below: the board tools from tools.ts, search, and the ones written out here by
+// hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
+// hand-written tool gets its description through doc(), which only takes names from this list.
+const BY_HAND = ["get_board", "get_card", "ask_ceo", "claim_card", "release_card"] as const;
+type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
+const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
+void covered;
+const doc = (name: (typeof BY_HAND)[number]) => TOOL_DOCS[name].description;
 
 const INSTRUCTIONS = `This is the user's personal task board, laid out as kanban lanes. Call get_board to see
 lanes, cards, and card ids, or search_cards to find specific cards on a big board, then use the other
@@ -63,7 +74,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("get_board", {
       title: "Get board",
-      description: "Show every lane and card on the board, with ids, due dates, tags, the start of each card's notes, and the names of its files. Pass tag to list only the cards carrying it. Call get_card for a card's full notes and attachments.",
+      description: doc("get_board"),
       inputSchema: z.object({ tag: z.string().optional().describe("Only cards with this tag, like agent") }),
       annotations: { readOnlyHint: true },
     }, async (input: { tag?: string }) => {
@@ -83,10 +94,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("get_card", {
       title: "Get card",
-      description:
-        "Show one card in full: the whole of its notes (get_board cuts them short), lane, tags, due date, any question " +
-        "asked of the owner and their answer, and its attachments. Attached images come back as images you can look at, " +
-        "and small text files as text. Call this before you act on a card whose notes or files you haven't read in full.",
+      description: doc("get_card"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         files: z.boolean().optional().describe("false to list attachments without their contents. Default true"),
@@ -126,11 +134,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("ask_ceo", {
       title: "Ask the owner",
-      description:
-        "Ask the board's owner to decide something, as a multiple-choice question on a card. The card gets #needs-ceo and " +
-        "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
-        "the notes. The answer comes back in the `answered` event and shows in get_board as ANSWERED. Keep the question to " +
-        "one line, make the options complete actions, and put the reasoning in the card's notes. Don't wait on it: move on to other work.",
+      description: doc("ask_ceo"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         question: z.string().min(1).max(240).describe("One line, ending in a question mark"),
@@ -147,10 +151,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("claim_card", {
       title: "Claim card",
-      description:
-        "Claim a card for your session before you work on it, so two agents never take the same one. " +
-        "Refused while another live session holds the card; that answer names the holder. " +
-        "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours.",
+      description: doc("claim_card"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id. In Claude Code: the CLAUDE_CODE_SESSION_ID environment variable"),
@@ -171,7 +172,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("release_card", {
       title: "Release card",
-      description: "Give up your claim on a card, when you finish it or stop working on it. Only the session holding the claim can release it.",
+      description: doc("release_card"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         session_id: z.string().min(6).max(80).describe("The session id you claimed it with"),

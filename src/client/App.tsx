@@ -14,6 +14,7 @@ import { Connect } from "./Connect";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
+import { FirstRun } from "./FirstRun";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
@@ -37,8 +38,9 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [page, setPage] = useState<Page>(pageFromPath);
 
-  const go = useCallback((p: Page) => {
-    history.pushState(null, "", p === "board" ? `${BASE}/` : `${BASE}/${p}`);
+  // `hash` names a section of the page, like "#sessions" on Connect, which scrolls to it once it's drawn.
+  const go = useCallback((p: Page, hash = "") => {
+    history.pushState(null, "", (p === "board" ? `${BASE}/` : `${BASE}/${p}`) + hash);
     setPage(p);
     scrollTo(0, 0);
   }, []);
@@ -64,10 +66,10 @@ export function App() {
   if (me === undefined) return <div className="splash">loading</div>;
   if (me === null) return <Login onSignedIn={load} />;
   if (page === "connect") return <Connect onBack={() => go("board")} />;
-  return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={() => go("connect")} />;
+  return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 
-function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(): void }) {
+function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
   async function signOut() {
     await fetch(api("/api/auth/logout"), { method: "POST" });
     onSignOut();
@@ -427,7 +429,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             {!board.sealed && (
               <SessionsButton
-                presence={presence} open={sessionsOpen} setOpen={setSessionsOpen}
+                presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
                 cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
               />
             )}
@@ -441,11 +443,12 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <Popover onClose={() => setMenuOpen(false)}>
                   <div className="menu">
                     <div className="who">{me.email}</div>
+                    {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
+                    <button onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
                     <button onClick={() => { setMenuOpen(false); setQuickAddLane(board.lanes[0]?.id ?? null); }}>New card <kbd>n</kbd></button>
                     <button onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
                     <button onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
                     <button onClick={() => { setMenuOpen(false); setEncOpen(true); }}>{board.sealed ? "Encryption" : "Encrypt with a passphrase…"}</button>
-                    <button onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
                     {usage?.billing && usage.plan === "free" && (
                       <button onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
                     )}
@@ -460,6 +463,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
+        {board.cards.length === 0 && !board.sealed && <FirstRun onConnect={onConnect} />}
         <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}

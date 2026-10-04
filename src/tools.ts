@@ -6,6 +6,7 @@
 import { z } from "zod";
 import * as ops from "./shared";
 import type { Board } from "./shared";
+import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 
 /** `ids` are the cards a tool created, for callers that need to refer to them next (MCP agents). */
 type Result = { board: Board; summary: string; ids?: string[] };
@@ -20,13 +21,17 @@ type BoardTool<S extends z.ZodType> = {
   destructive?: boolean;
 };
 
-const define = <S extends z.ZodType>(t: BoardTool<S>) => t;
+// What a tool is for, and whether it destroys anything, comes from tool-docs.ts, the same
+// entries the Connect page lists. A board tool with no entry there doesn't compile.
+const define = <S extends z.ZodType>(name: McpToolName, t: Omit<BoardTool<S>, "description" | "destructive">): BoardTool<S> => {
+  const doc: { description: string; destructive?: boolean } = TOOL_DOCS[name];
+  return { ...t, description: doc.description, destructive: doc.destructive };
+};
 
 const TAGS_HINT = "Short labels like agent or client, lower case, no #. Only when the user or your own instructions call for one.";
 
 export const BOARD_TOOLS = {
-  add_cards: define({
-    description: "Create one or more cards. Use this for every new task the user mentions.",
+  add_cards: define("add_cards", {
     label: "Agent added cards",
     inputSchema: z.object({
       cards: z.array(z.object({
@@ -47,8 +52,7 @@ export const BOARD_TOOLS = {
       return { board, summary: `Added ${quoteList(cards.map((c) => c.title))}`, ids };
     },
   }),
-  move_cards: define({
-    description: "Move cards to a lane, for example to Done when the user finished something.",
+  move_cards: define("move_cards", {
     label: "Agent moved cards",
     inputSchema: z.object({
       ids: z.array(z.string()).min(1).describe("Card ids like c1a2b"),
@@ -59,8 +63,7 @@ export const BOARD_TOOLS = {
       summary: `Moved ${quoteList(titlesOf(b, ids))} → ${ops.findLane(b, lane)?.name ?? lane}`,
     }),
   }),
-  update_card: define({
-    description: "Change a card's title, notes, due date, or tags. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
+  update_card: define("update_card", {
     label: "Agent edited a card",
     inputSchema: z.object({
       id: z.string(),
@@ -74,29 +77,23 @@ export const BOARD_TOOLS = {
       summary: `Updated ${quoteList(titlesOf(b, [id]))}`,
     }),
   }),
-  delete_cards: define({
-    description: "Permanently delete cards. Prefer moving to Done unless the user asked to delete or remove.",
+  delete_cards: define("delete_cards", {
     label: "Agent deleted cards",
-    destructive: true,
     inputSchema: z.object({ ids: z.array(z.string()).min(1) }),
     apply: (b, { ids }) => ({ board: ops.deleteCards(b, ids), summary: `Deleted ${quoteList(titlesOf(b, ids))}` }),
   }),
-  add_lane: define({
-    description: "Add a new lane (column) to the right of the others.",
+  add_lane: define("add_lane", {
     label: "Agent added a lane",
     inputSchema: z.object({ name: z.string() }),
     apply: (b, { name }) => ({ board: ops.addLane(b, name).board, summary: `Added lane "${name}"` }),
   }),
-  rename_lane: define({
-    description: "Rename a lane.",
+  rename_lane: define("rename_lane", {
     label: "Agent renamed a lane",
     inputSchema: z.object({ lane: z.string().describe("Current lane name or id"), name: z.string() }),
     apply: (b, { lane, name }) => ({ board: ops.renameLane(b, lane, name), summary: `Renamed lane to "${name}"` }),
   }),
-  delete_lane: define({
-    description: "Delete a lane AND every card in it. Only when the user explicitly asks.",
+  delete_lane: define("delete_lane", {
     label: "Agent deleted a lane",
-    destructive: true,
     inputSchema: z.object({ lane: z.string() }),
     apply: (b, { lane }) => ({ board: ops.deleteLane(b, lane), summary: `Deleted lane "${lane}"` }),
   }),
@@ -107,10 +104,8 @@ export const TOOL_NAMES = Object.keys(BOARD_TOOLS) as ToolName[];
 
 /** Read-only search, shared by the in-app assistant and MCP. Runs TodoAgent.search. */
 export const SEARCH_TOOL = {
-  name: "search_cards",
-  description:
-    "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
-    "lanes, due dates, and a snippet. Use it to find the card a user means when the board is large or the wording differs.",
+  name: "search_cards" satisfies McpToolName,
+  description: TOOL_DOCS.search_cards.description,
   inputSchema: z.object({
     query: z.string().min(1).describe("What to look for, in plain words"),
     mode: z.enum(["hybrid", "keyword", "semantic"]).optional()
