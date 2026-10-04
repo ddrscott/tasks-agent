@@ -12,6 +12,7 @@
     "check:markdown": "node scripts/check-markdown.mjs",
     "check:sort": "node scripts/check-sort.mjs",
     "check:events": "node scripts/check-events.mjs",
+    "check:setup": "node scripts/check-setup.mjs",
     "db:migrate:local": "wrangler d1 migrations apply todo-agent-auth --local",
     "db:migrate:remote": "wrangler d1 migrations apply todo-agent-auth --remote",
     "dev:local": "LOCAL_ONLY=1 vite dev",
