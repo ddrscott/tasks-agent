@@ -12,8 +12,12 @@ import { ByFace, type Mode } from "./member";
 import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 
+/** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
+export type AddResult = { added: number; left: string[]; why: string | null };
+
 export type Actions = {
-  addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
+  /** Quick add: one card per line, as one change. Lines that can't be added come back in `left`. */
+  addCards(laneId: string, lines: string[]): Promise<AddResult>;
   moveCard(id: string, laneId: string, index: number): Promise<unknown>;
   addLane(name: string): Promise<unknown>;
   renameLane(id: string, name: string): Promise<unknown>;
@@ -438,7 +442,7 @@ function LaneView(props: Props & {
         </div>
       </SortableContext>
 
-      {canCards && <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(t) => actions.addCard(lane.id, t)} />}
+      {canCards && <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(lines) => actions.addCards(lane.id, lines)} tagHint={owns ? "#agent" : "a #tag"} />}
     </section>
   );
 }
@@ -540,17 +544,35 @@ function DueChip({ due, done }: { due: string; done: boolean }) {
   return <span className={`chip${cls}`}><IconCalendar />{label}</span>;
 }
 
-function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(t: string): Promise<unknown> }) {
+/** One card per line. A pasted list often comes with bullets, numbers, or checkboxes in front; those come off. */
+export const quickAddLines = (text: string) =>
+  text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "").trim()).filter(Boolean);
+
+function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(lines: string[]): Promise<AddResult>; tagHint: string }) {
   const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  // What happened to the lines still in the box: "41 added, 19 left. …"
+  const [note, setNote] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (open) ref.current?.focus(); }, [open]);
 
   async function submit() {
-    // Pasting a list adds one card per line.
-    const lines = text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "").trim()).filter(Boolean);
-    setText("");
-    for (const l of lines) await add(l);
-    ref.current?.focus();
+    // Pasting a list adds one card per line, all in one change.
+    const lines = quickAddLines(text);
+    if (!lines.length || busy) return;
+    setBusy(true);
+    setNote("");
+    // The box keeps what was typed until the server has answered, and afterwards it keeps
+    // every line that didn't become a card, so nothing has to be pasted twice.
+    let r: AddResult;
+    try { r = await add(lines); } catch (e) { r = { added: 0, left: lines, why: e instanceof Error ? e.message : null }; }
+    setBusy(false);
+    setText(r.left.join("\n"));
+    if (r.left.length) {
+      const why = r.why ?? "That didn't go through. Try again.";
+      setNote(lines.length === 1 ? `Not added. ${why}` : `${r.added} added, ${r.left.length} left. ${why}`);
+    }
+    setTimeout(() => ref.current?.focus(), 0);
   }
 
   if (!open) {
@@ -563,17 +585,19 @@ function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; set
   return (
     <div className="quick-add">
       <textarea
-        ref={ref} className="field" rows={2} placeholder="What needs doing? End with #agent to tag it, or paste a list." value={text} aria-label={`New card in ${lane.name}`}
-        onChange={(e) => setText(e.target.value)}
+        ref={ref} className="field" rows={2} placeholder={`What needs doing? End with ${tagHint} to tag it, or paste a list.`} value={text} aria-label={`New card in ${lane.name}`}
+        readOnly={busy} aria-busy={busy} aria-describedby={note ? `quick-add-note-${lane.id}` : undefined}
+        onChange={(e) => { setText(e.target.value); if (note) setNote(""); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-          if (e.key === "Escape") { setText(""); setOpen(false); }
+          if (e.key === "Escape") { setText(""); setNote(""); setOpen(false); }
         }}
-        onBlur={() => { if (!text.trim()) setOpen(false); }}
+        onBlur={() => { if (!text.trim() && !busy) setOpen(false); }}
       />
+      {note && <p className="quick-add-note" id={`quick-add-note-${lane.id}`} role="alert">{note}</p>}
       <div className="row">
-        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim()}>Add card</button>
-        <button className="btn ghost" onClick={() => { setText(""); setOpen(false); }}>Cancel</button>
+        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy}>{busy ? "Adding…" : quickAddLines(text).length > 1 ? `Add ${quickAddLines(text).length} cards` : "Add card"}</button>
+        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setOpen(false); }}>Cancel</button>
         <span className="hint"><kbd>↵</kbd> add · <kbd>esc</kbd> close</span>
       </div>
     </div>

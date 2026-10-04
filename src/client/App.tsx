@@ -35,10 +35,12 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
-import { plainError } from "../member-rules";
+import { ADD_CARDS_MAX, plainError } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string };
+/** The most one `addCards` frame carries, in characters. A member's frame may be 32 KB (MEMBER_FRAME_MAX in agent.ts); this leaves room. */
+const ADD_CARDS_FRAME = 24 * 1024;
 // The pages are listed once, in src/routes.ts, for this and for the Worker's 404s.
 const pageFromPath = (): Page => pageAt(location.pathname, BASE) ?? "board";
 
@@ -546,10 +548,44 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
   const knownTags = useMemo(() => (board ? tagsByUse(board) : []), [board]);
 
   const actions: Actions = useMemo(() => ({
-    // Quick add: "Write a haiku #agent" is the title plus a tag. It's split here, in the tab, before anything is sealed.
-    addCard: async (laneId, typed, top) => {
-      const { title, tags } = splitTitleTags(typed);
-      return agent.stub.addCard(laneId, await out(clean(title, 200)), top, tags.length ? { tags: await Promise.all(tags.map(out)) } : undefined).catch(refused);
+    // Quick add, one card per line, as one change (`addCards`). "Write a haiku #agent" is the
+    // title plus a tag: it's split here, in the tab, before anything is sealed. A long paste
+    // goes up in pieces small enough for one frame. The first piece that doesn't fully land
+    // stops it, and every line that isn't a card yet comes back to stay in the box.
+    addCards: async (laneId, lines) => {
+      let added = 0;
+      let pieces = 0;
+      let why: string | null = null;
+      const left: string[] = [];
+      for (let i = 0; i < lines.length && !left.length;) {
+        const piece: { title: string; tags?: string[] }[] = [];
+        let size = 0;
+        while (i + piece.length < lines.length && piece.length < ADD_CARDS_MAX) {
+          const { title, tags } = splitTitleTags(lines[i + piece.length]);
+          const item = { title: await out(clean(title, 200)), ...(tags.length ? { tags: await Promise.all(tags.map(out)) } : {}) };
+          const n = JSON.stringify(item).length + 1;
+          if (piece.length && size + n > ADD_CARDS_FRAME) break;
+          piece.push(item);
+          size += n;
+        }
+        try {
+          const r = await agent.stub.addCards(laneId, piece);
+          added += r.ids.length;
+          pieces += 1;
+          if (r.left.length) {
+            why = plainError(r.left[0].error);
+            const not = new Set(r.left.map((x) => x.index));
+            left.push(...lines.slice(i, i + piece.length).filter((_, n) => not.has(n)), ...lines.slice(i + piece.length));
+          }
+        } catch (e) {
+          why = e instanceof Error && e.message ? plainError(e.message) : null;
+          left.push(...lines.slice(i));
+        }
+        i += piece.length;
+      }
+      // One piece is one undo step, so the toast can offer it. More than one isn't, so it doesn't.
+      if (added > 1) say(`Added ${added} cards`, pieces === 1);
+      return { added, left, why };
     },
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index).catch(refused),
     addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },
@@ -560,7 +596,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     setLaneManual: (id, ids) => agent.stub.setLaneManual(id, ids),
     setLaneSort: (id, by) => agent.stub.setLaneSort(id, by),
     setLaneRole: (id, role) => agent.stub.setLaneRole(id, role),
-  }), [agent, out, laneClash, refused]);
+  }), [agent, out, laneClash, refused, say]);
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
     const p: typeof patch = {};

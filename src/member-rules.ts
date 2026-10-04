@@ -49,6 +49,7 @@ export function decide(input: { isOwner: boolean; membership: MemberRole | null;
 export const MEMBER_CALLS: Readonly<Record<string, MemberRole>> = Object.freeze({
   search: "viewer",
   addCard: "writer",
+  addCards: "writer",
   updateCard: "writer",
   moveCard: "writer",
   deleteCard: "writer",
@@ -117,6 +118,37 @@ export const MEMBER_LIMITS = {
   deletesPerDay: 200,
 } as const;
 
+/** The most cards one `addCards` call takes: a pasted list. A longer paste goes in as several calls. */
+export const ADD_CARDS_MAX = 200;
+
+const BOARD_FULL_CARDS = `[board_full] This board has ${MEMBER_LIMITS.cards.toLocaleString("en-US")} cards, the most a member can add to. Delete some, or ask the owner.`;
+const BOARD_FULL_BYTES = "[board_full] This board is as big as a member can make it (1 MB of cards). Delete some cards or shorten some notes, or ask the owner.";
+
+/** What's left under a member's ceilings: how many more cards, and how many more characters of board. */
+export type Room = { cards: number; bytes: number };
+export function memberRoom(b: Board): Room {
+  return { cards: Math.max(0, MEMBER_LIMITS.cards - b.cards.length), bytes: MEMBER_LIMITS.boardBytes - JSON.stringify(b).length };
+}
+/** Room kept for the "who added it" mark the board stamps on a card after this is asked (stampBy). */
+const BY_ROOM = 320;
+
+/**
+ * Why a member can't add this one new card, or null when there's room, in which case the room
+ * it takes is taken. A pasted list (`addCards`) asks this card by card, so the lines that fit
+ * land and each line that doesn't is handed back with its reason. The write guard still judges
+ * the whole change afterwards; this only says the same thing earlier and one card at a time.
+ */
+export function takeRoom(room: Room, c: Card): string | null {
+  const big = cardTooBig(c);
+  if (big) return big;
+  if (room.cards < 1) return BOARD_FULL_CARDS;
+  const size = JSON.stringify(c).length + 1 + BY_ROOM;
+  if (size > room.bytes) return BOARD_FULL_BYTES;
+  room.cards -= 1;
+  room.bytes -= size;
+  return null;
+}
+
 function cardTooBig(c: Card): string | null {
   const L = MEMBER_LIMITS;
   if (typeof c.title !== "string" || !c.title || c.title.length > L.title) return `[too_big] A card's title can be up to ${L.title} characters.`;
@@ -159,11 +191,11 @@ export function memberChangeError(before: Board, after: Board): string | null {
     if (p.ask && !now.has(p.id)) return "That card has a question waiting on the board's owner.";
   }
   if (after.cards.length > before.cards.length && after.cards.length > MEMBER_LIMITS.cards) {
-    return `[board_full] This board has ${MEMBER_LIMITS.cards.toLocaleString("en-US")} cards, the most a member can add to. Delete some, or ask the owner.`;
+    return BOARD_FULL_CARDS;
   }
   const size = JSON.stringify(after).length;
   if (size > MEMBER_LIMITS.boardBytes && size > JSON.stringify(before).length) {
-    return "[board_full] This board is as big as a member can make it (1 MB of cards). Delete some cards or shorten some notes, or ask the owner.";
+    return BOARD_FULL_BYTES;
   }
   return null;
 }

@@ -13,8 +13,8 @@ import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
-  assertMayChange, CLOSE_FLOOD, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  MEMBER_LIMITS, plainError, SLOW_DOWN, spendToken, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  ADD_CARDS_MAX, assertMayChange, CLOSE_FLOOD, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  MEMBER_LIMITS, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -560,9 +560,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you"): Board {
     const before = this.state;
     const changed = fn(before);
-    // Before anything is written: a member's change has to be one a writer may make.
+    // Before anything is written: a member's change has to be one a writer may make. It's
+    // judged twice, as made and as it will be stored (with who made it marked on each card).
     this.guard(before, changed);
     const after = ops.stampBy(before, changed, this.by(actor));
+    this.guard(before, after);
     ops.assertSealedBoard(after);
     // On a shared board a deleted card is written down. A member's deletions are counted first.
     const gone = this.goneCards(before, after);
@@ -747,6 +749,38 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       return r.board;
     });
     return id;
+  }
+
+  /**
+   * A pasted list: one card per item, in order, as one change and one undo step. Each item is
+   * judged on its own. The owner's all land. A member's land while they fit under what a member
+   * may add (takeRoom in member-rules.ts), and every one that doesn't is handed back in `left`
+   * with its place in the list and the reason, so the app can leave those lines in the box.
+   * Nothing is dropped without a word. One frame, however long the list, up to ADD_CARDS_MAX.
+   */
+  @callable()
+  addCards(laneId: string, items: { title: string; tags?: string[] }[]): { ids: string[]; left: { index: number; error: string }[] } {
+    if (!Array.isArray(items) || !items.length) throw new Error("Nothing to add.");
+    if (items.length > ADD_CARDS_MAX) throw new Error(`[too_many] A list can add up to ${ADD_CARDS_MAX} cards at a time.`);
+    const before = this.state;
+    if (typeof laneId !== "string" || !ops.findLane(before, laneId)) throw new Error("That lane is gone. Pick another one.");
+    const room = callers.getStore()?.kind === "member" ? memberRoom(before) : null;
+    const ids: string[] = [];
+    const left: { index: number; error: string }[] = [];
+    let next = before;
+    items.forEach((item, index) => {
+      try {
+        const r = ops.addCard(next, { title: String(item?.title ?? ""), laneId, tags: Array.isArray(item?.tags) ? item.tags.map(String) : undefined });
+        const why = room ? takeRoom(room, r.card) : null;
+        if (why) { left.push({ index, error: why }); return; }
+        next = r.board;
+        ids.push(r.card.id);
+      } catch (e) {
+        left.push({ index, error: e instanceof Error ? e.message : "That line couldn't be added." });
+      }
+    });
+    if (ids.length) this.mutate(ids.length === 1 ? "Add card" : `Add ${ids.length} cards`, () => next);
+    return { ids, left };
   }
 
   @callable()

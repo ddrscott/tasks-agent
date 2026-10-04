@@ -596,6 +596,8 @@ button.chip.tag:hover { border-color: var(--accent); }
 .quick-add .row .btn { width: auto; flex: none; }
 .quick-add .row .btn.primary, .quick-add .row .btn.primary:hover { color: var(--accent-ink); }
 .quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; }
+/* What happened to the lines still in the box: "41 added, 19 left. …" */
+.quick-add-note { margin: 6px 0 0; padding: 6px 8px; font: 12px/1.5 var(--font-mono); color: var(--ink); border: 1px solid var(--danger); overflow-wrap: anywhere; }
 
 .add-lane { flex: 0 0 auto; }
 .add-lane > .btn { border-style: dashed; background: transparent; color: var(--muted); }

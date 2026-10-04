@@ -1351,7 +1351,7 @@ come on connect; `tasks_activity` comes when a card is deleted (**Who deleted it
 | Method | Least role |
 |---|---|
 | `search` | viewer |
-| `addCard`, `updateCard`, `moveCard`, `deleteCard`, `removeAttachment`, `applyLocal` | writer |
+| `addCard`, `addCards`, `updateCard`, `moveCard`, `deleteCard`, `removeAttachment`, `applyLocal` | writer |
 
 Everything else answers `{"type":"rpc","id":"…","success":false,"error":"…","done":true}`: `Only the board's owner can do that.`
 for a method that isn't on the list, `You can view this board, not change it.` for a viewer,
@@ -1360,6 +1360,23 @@ the owner's until it's added to the list. A `cf_agent_use_chat_request` gets an 
 `cf_agent_use_chat_response` saying the cloud assistant is the owner's. State pushes, chat
 messages, tool results, and anything else are dropped. A member's `applyLocal` changes the board
 and writes nothing into the owner's chat transcript.
+
+**A pasted list is one call.** Quick add ("Add a card") makes one card per line, and it sends
+the whole list as `addCards(laneId, [{ title, tags? }, …])`: one frame, one board change, one
+undo step, for the owner and for a writer. It used to send a frame per line, so a writer's
+60-line paste ran their bucket dry at 41 and lost the rest. The board judges each line on its
+own. The owner's all land. A member's land while they fit (`takeRoom` in `src/member-rules.ts`:
+the same card limits and board ceilings as the write guard, asked one card at a time), and the
+answer is `{ ids, left: [{ index, error }] }`: `left` is every line that didn't become a card,
+by its place in the list, with the reason. The app leaves exactly those lines in the box under
+one sentence ("10 added, 20 left. This board has 1,000 cards, the most a member can add to. …")
+and doesn't empty the box until the server has answered, so nothing is dropped and nothing has
+to be pasted twice. One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
+member's frame under 24 KB, so a longer paste goes up in pieces: each piece is one change, the
+first one that doesn't fully land stops it, and the rest stays in the box. The other things a
+writer does are one or two frames each (a drag, Save, a tick, the in-browser assistant's turn,
+which is one `applyLocal` however many steps it holds), so none of them can outrun the bucket
+by hand.
 
 **What a member can cost you.** A writer is someone else's script as far as the board knows, so
 everything a member sends is metered and everything they can grow is capped. The numbers are

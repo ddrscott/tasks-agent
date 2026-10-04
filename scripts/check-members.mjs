@@ -81,7 +81,7 @@ section("access rules (pure)");
 
   const { memberCallNeeds } = rules;
   ok("search is the one thing a viewer may call", Object.entries(rules.MEMBER_CALLS).filter(([, r]) => r === "viewer").map(([k]) => k).join() === "search");
-  ok("writers get card actions only", Object.keys(rules.MEMBER_CALLS).sort().join() === "addCard,applyLocal,deleteCard,moveCard,removeAttachment,search,updateCard");
+  ok("writers get card actions only", Object.keys(rules.MEMBER_CALLS).sort().join() === "addCard,addCards,applyLocal,deleteCard,moveCard,removeAttachment,search,updateCard");
   ok("an unlisted method is the owner's", memberCallNeeds("addLane") === null && memberCallNeeds("undo") === null && memberCallNeeds("answerAsk") === null && memberCallNeeds("setTheme") === null);
   ok("prototype names aren't methods", memberCallNeeds("constructor") === null && memberCallNeeds("__proto__") === null && memberCallNeeds("toString") === null && memberCallNeeds("hasOwnProperty") === null && memberCallNeeds(7) === null);
 
@@ -145,6 +145,15 @@ section("access rules (pure)");
   ok("a member can't grow a board past 1 MB", JSON.stringify(heavy).length > L.boardBytes && code(memberChangeError(heavy, shared.addCard(heavy, { title: "more" }).board)) === "board_full" && code(memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "n".repeat(3700) }))) === "board_full");
   ok("and can still shrink one that's over", memberChangeError(heavy, shared.deleteCards(heavy, ["c1"])) === null && memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "short" })) === null);
   ok("the owner isn't held to a member's limits", !throws(() => assertMayChange("owner", null, full, shared.addCard(full, { title: "one more" }).board)));
+  // A pasted list is judged one card at a time (takeRoom), so what fits lands and the rest is handed back.
+  const { memberRoom, takeRoom } = rules;
+  const nearly = many(L.cards - 2);
+  const room = memberRoom(nearly);
+  const fresh = (title) => ({ ...card, id: `n${title}`, title });
+  ok("a pasted list fills the room that's left, card by card, and then says the board is full", room.cards === 2 && takeRoom(room, fresh("a")) === null && takeRoom(room, fresh("b")) === null && code(takeRoom(room, fresh("c"))) === "board_full" && room.cards === 0);
+  ok("and the same by size", memberRoom(heavy).bytes < 0 && code(takeRoom(memberRoom(heavy), fresh("no room"))) === "board_full" && takeRoom({ cards: 5, bytes: 5000 }, fresh("fits")) === null && code(takeRoom({ cards: 5, bytes: 500 }, { ...fresh("too much"), notes: "n".repeat(3000) })) === "board_full");
+  ok("a card that's too big is refused on its own, and takes no room", (() => { const r = memberRoom(b); const before = { ...r }; return code(takeRoom(r, fresh("t".repeat(L.title + 1)))) === "too_big" && r.cards === before.cards && r.bytes === before.bytes; })());
+  ok("what takeRoom lets in, the write guard lets in", (() => { const r = memberRoom(nearly); let acc = nearly; for (const t of ["a", "b"]) { const next = shared.addCard(acc, { title: t }); if (takeRoom(r, next.card) === null) acc = next.board; } return acc.cards.length === L.cards && memberChangeError(nearly, shared.stampBy(nearly, acc, { email: "w@example.com", via: "assistant" })) === null; })());
 
   // The token bucket every member frame is charged to.
   const { spendToken, MEMBER_RATE: R } = rules;
@@ -651,7 +660,7 @@ section("a viewer changes nothing");
   const before = boardNow();
   const stamp = ownerSock.frames.length;
   for (const [method, args] of [
-    ["addCard", [lanes[0].id, "Viewer card"]], ["updateCard", [seed, { title: "Viewer edit" }]], ["moveCard", [seed, lanes[1].id, 0]], ["deleteCard", [seed]],
+    ["addCard", [lanes[0].id, "Viewer card"]], ["addCards", [lanes[0].id, [{ title: "Viewer list card" }]]], ["updateCard", [seed, { title: "Viewer edit" }]], ["moveCard", [seed, lanes[1].id, 0]], ["deleteCard", [seed]],
     ["removeAttachment", [seed, "a0000000000000000"]],
     ["applyLocal", [{ text: "add x", calls: [{ name: "add_cards", input: { cards: [{ title: "Viewer via Needle" }] } }], engine: "needle-rs", confidence: 1 }]],
   ]) {
@@ -715,6 +724,24 @@ let writerCard;
     const r = await writerSock.rpc("applyLocal", [{ text: "do it", calls: [{ name, input }], engine: "needle-rs", confidence: 1 }]);
     ok(`a writer's assistant can't ${name}`, r.success === true && r.result.outcomes[0].ok === false, r.result?.outcomes);
   }
+  // A pasted list: 60 lines in quick add are one call, one frame, one change.
+  const list = Array.from({ length: 60 }, (_, i) => ({ title: `Pasted line ${i + 1}`, ...(i === 0 ? { tags: ["team"] } : {}) }));
+  const stateMark = ownerSock.frames.length;
+  const pasted = await writerSock.rpc("addCards", [lanes[0].id, list]);
+  ok("a writer's 60-line paste lands all 60 cards, from one frame", pasted.success === true && pasted.result.ids.length === 60 && pasted.result.left.length === 0, pasted.result?.left?.slice(0, 2) ?? pasted);
+  await ownerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.title === "Pasted line 60"), 5000, stateMark);
+  const landed = ownerSock.state().cards.filter((c) => /^Pasted line \d+$/.test(c.title));
+  ok("in the order pasted, each marked as the writer's", landed.length === 60 && landed.every((c, i) => c.title === `Pasted line ${i + 1}` && c.by?.email === writer.email) && landed[0].tags?.join() === "team", landed.slice(0, 2));
+  ok("as one change: the owner's board was sent once for it", ownerSock.frames.slice(stateMark).filter((f) => f.type === "cf_agent_state").length === 1);
+  ok("and one undo step for the owner", (await ownerSock.rpc("undoRedo")).result?.undo === "Add 60 cards");
+  const unpasted = await ownerSock.rpc("undo");
+  await ownerSock.wait((f) => f.type === "cf_agent_state" && !f.state.cards.some((c) => /^Pasted line/.test(c.title)), 5000, stateMark);
+  ok("one Undo takes all 60 back out", unpasted.result === "Add 60 cards" && !ownerSock.state().cards.some((c) => /^Pasted line/.test(c.title)));
+  const blank = await writerSock.rpc("addCards", [lanes[0].id, [{ title: "List line that works" }, { title: "   " }, { title: "x".repeat(10), tags: Array.from({ length: 11 }, (_, i) => `t${i}`) }]]);
+  ok("a line that can't be a card is handed back with its place and the reason, and the rest land", blank.success === true && blank.result.ids.length === 1 && blank.result.left.map((x) => x.index).join() === "1,2" && blank.result.left.every((x) => typeof x.error === "string" && x.error.length > 5), blank.result);
+  const tooMany = await writerSock.rpc("addCards", [lanes[0].id, Array.from({ length: rules.ADD_CARDS_MAX + 1 }, (_, i) => ({ title: `Too many ${i}` }))]);
+  ok(`a list of more than ${rules.ADD_CARDS_MAX} is refused whole, and says so`, tooMany.success === false && rules.errorCode(tooMany.error) === "too_many" && !ownerSock.state().cards.some((c) => /^Too many/.test(c.title)), tooMany.error);
+  ok("a list for a lane that isn't there adds nothing", (await writerSock.rpc("addCards", ["lnope", [{ title: "Nowhere" }]])).success === false && (await writerSock.rpc("addCards", [lanes[0].id, "not a list"])).success === false);
   const themeBefore = ownerSock.state().theme;
   for (const [method, args] of OWNER_ONLY_CALLS) {
     const r = await writerSock.rpc(method, args);
@@ -1120,6 +1147,19 @@ section("a member who floods");
   ok("a member can still delete on a full board", (await calm.rpc("deleteCard", [victim])).success === true);
   ok("and then add one", (await calm.rpc("addCard", [lane, "Fits again"])).success === true && (await calm.rpc("addCard", [lane, "Doesn't"])).success === false);
   ok("the owner can go past it", (await fo.rpc("addCard", [lane, "Owner's own"])).success === true);
+  await fo.rpc("clearLane", [lane]);
+  // A pasted list that only partly fits: what fits lands, and every other line is handed back.
+  const short = await fo.rpc("applyLocal", [{ text: "fill the board", calls: [batch(0, 250), batch(250, 250), batch(500, 250), batch(750, 240)], engine: "needle-rs", confidence: 1 }], 30_000);
+  await fo.wait((f) => f.type === "cf_agent_state" && f.state.cards.length === max - 10, 10_000);
+  const pasteMark = fo.frames.length;
+  const partly = await calm.rpc("addCards", [lane, Array.from({ length: 30 }, (_, i) => ({ title: `Paste ${i}` }))]);
+  await fo.wait((f) => f.type === "cf_agent_state" && f.state.cards.length === max, 10_000, pasteMark);
+  const pasteTitles = fo.state().cards.filter((c) => /^Paste \d+$/.test(c.title)).map((c) => c.title);
+  ok(`a 30-line paste with room for 10: 10 land, in order, and the board stops at ${max}`, short.success === true && partly.success === true && partly.result.ids.length === 10 && fo.state().cards.length === max && pasteTitles.join() === Array.from({ length: 10 }, (_, i) => `Paste ${i}`).join(), [partly.result?.ids?.length, fo.state().cards.length]);
+  ok("the other 20 are handed back by place, each with the reason", partly.result.left.length === 20 && partly.result.left.map((x) => x.index).join() === Array.from({ length: 20 }, (_, i) => i + 10).join() && partly.result.left.every((x) => rules.errorCode(x.error) === "board_full" && /1,000 cards/.test(x.error)), partly.result.left.slice(0, 2));
+  const none = await calm.rpc("addCards", [lane, [{ title: "No room 1" }, { title: "No room 2" }]]);
+  ok("pasting again onto the full board adds nothing and hands every line back", none.success === true && none.result.ids.length === 0 && none.result.left.length === 2 && fo.state().cards.length === max, none.result);
+  ok("the owner's own paste isn't held to the ceiling", (await fo.rpc("addCards", [lane, [{ title: "Owner paste 1" }, { title: "Owner paste 2" }]])).result?.ids?.length === 2);
   await fo.rpc("clearLane", [lane]);
 
   // A member's deletions are counted: each is a row in a log nothing prunes.
