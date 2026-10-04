@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { agentConnected, needsAgent, waitsForAgent, type Board, type Card } from "../shared";
 import { BASE } from "./base";
+import { quickStartOpen } from "./FirstRun";
 import { IconClose } from "./icons";
 
 // What the board says while no agent has ever connected to it. `// START_HERE` (FirstRun.tsx)
-// covers the empty board and goes away with the first card; from then on this is the only thing
-// that says nothing will pick up an #agent card. There's a quiet line above the lanes, a chip on
+// covers the empty board and the sample card it adds; on any other board this is the only thing
+// that says nothing will pick up an #agent card, and the line above the lanes stays out of the
+// way while `// START_HERE` is up. There's a quiet line above the lanes, a chip on
 // each card that's waiting for an agent, and a line in that card's editor, each with a link to
 // the Connect page. All of it goes away, in every open tab, the moment an agent makes its first
 // MCP call (`agentSeenAt` on the board), and it never shows on an encrypted board.
@@ -57,15 +59,17 @@ export function AgentNudge({ board, say }: { board: Board; say(text: string): vo
     was.current = connected;
   }, [connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!ctx || off) return null;
+  if (!ctx || off || quickStartOpen(board)) return null;
   const waiting = board.cards.filter((c) => waitsForAgent(board, c)).length;
   return (
     <aside className="agent-nudge" aria-label="No agent connected">
       <span className="agent-nudge-mark" aria-hidden="true">//</span>
       <span className="agent-nudge-text">
         <b>No agent connected yet.</b>{" "}
-        {waiting ? `Nothing will pick up your ${waiting === 1 ? "#agent card" : `${waiting} #agent cards`}.` : "Until one is, nothing works the cards you tag #agent."}{" "}
-        <ConnectLink onConnect={ctx.onConnect}>Connect an agent</ConnectLink>
+        {waiting
+          ? `Nothing will pick up your ${waiting === 1 ? "#agent card" : `${waiting} #agent cards`}.`
+          : "To hand a card to an agent, add #agent to its title or use the Tags field. Nothing picks it up until an agent is connected."}{" "}
+        <ConnectLink onConnect={ctx.onConnect}>Connect Claude Code in one command</ConnectLink>
       </span>
       <button
         type="button" className="btn ghost icon agent-nudge-x" title="Hide for now. It comes back until an agent connects." aria-label="Hide for now"
