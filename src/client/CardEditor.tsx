@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
 import { NoAgentLine } from "./AgentNudge";
-import { Attachments } from "./Attachments";
+import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { Markdown, toggleTask } from "./Markdown";
 import { CardSession } from "./Sessions";
@@ -18,6 +18,8 @@ type Props = {
   knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload and decrypted to view. */
   vault: Vault | null;
+  /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
+  filesNote?: string;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
   onMove(laneId: string): void;
   /** A tap on a Move to button: move right away and say so, with Undo. */
@@ -36,7 +38,7 @@ type Props = {
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -206,7 +208,9 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
           </label>
         </div>
         <TagField value={tags} onChange={setTags} known={knownTags} onEnter={save} />
-        <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+        {filesNote ? <NoFiles note={filesNote} /> : (
+          <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+        )}
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>

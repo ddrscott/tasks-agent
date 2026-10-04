@@ -11,6 +11,7 @@ import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
+import { Demo } from "./Demo";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
@@ -30,8 +31,8 @@ import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 
 type Me = { email: string; id: string; model: string };
-type Page = "board" | "connect" | "privacy" | "terms";
-const PAGES: Page[] = ["connect", "privacy", "terms"];
+type Page = "board" | "connect" | "privacy" | "terms" | "demo";
+const PAGES: Page[] = ["connect", "privacy", "terms", "demo"];
 
 const pageFromPath = (): Page => {
   const sub = location.pathname.replace(/\/+$/, "").slice(BASE.length + 1) as Page;
@@ -68,6 +69,8 @@ export function App() {
   if (isUnknownPath()) return <NotFound />;
   // The privacy policy and terms are public; everything else needs a session.
   if (page === "privacy" || page === "terms") return <Legal page={page} onBack={() => go("board")} />;
+  // The demo board runs in the tab with nobody signed in (Demo.tsx).
+  if (page === "demo") return <Demo signedIn={!!me} onHome={() => go("board")} onConnect={(hash) => go("connect", hash)} />;
   if (me === undefined) return <div className="splash">loading</div>;
   if (me === null) return <Login onSignedIn={load} />;
   if (page === "connect") return <Connect onBack={() => go("board")} />;
