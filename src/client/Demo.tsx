@@ -127,6 +127,11 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const redos = useRef<Entry[]>([]);
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
 
+  // Each card the agent has changed, with the time on the change. A card dialog that's open when
+  // the agent changes its card is redrawn from the new card: it holds its own copy of the notes,
+  // tags, and lane, and saving a stale copy would put the agent's card back where it was.
+  const byAgent = useRef(new Set<string>());
+
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -184,6 +189,8 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     undos.current = undos.current.map(also);
     redos.current = redos.current.map(also);
     saved.current = after;
+    const stamp = after.board.cards.find((c) => c.id === id)?.updatedAt;
+    if (stamp) byAgent.current.add(`${id}:${stamp}`);
     show(after.board, before.board);
     // The agent's changes light the card up, the same as on a real board.
     const was = new Map(before.board.cards.map((c) => [c.id, c]));
@@ -432,7 +439,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       )}
       {editingCard && (
         <CardEditor
-          key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={null} filesNote={FILES_NOTE}
+          key={byAgent.current.has(`${editingCard.id}:${editingCard.updatedAt}`) ? `${editingCard.id}:${editingCard.updatedAt}` : editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={null} filesNote={FILES_NOTE}
           onSave={(patch) => void act("Edit card", (b) => ops.updateCard(b, editingCard.id, patch)).catch((e: Error) => say(e.message))}
           onMove={(laneId) => void move(editingCard.id, laneId)}
           onMoveNow={(laneId) => {
