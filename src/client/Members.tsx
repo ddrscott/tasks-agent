@@ -164,7 +164,7 @@ const ROLES: { role: MemberRole; label: string; can: string }[] = [
   { role: "writer", label: "Writer", can: "Everything a viewer can, plus adding, editing, moving, and deleting cards and their files. Lanes, undo, agents' questions, the cloud assistant, and every setting stay yours." },
 ];
 
-type Failure = { status: number; code?: string; error?: string };
+type Failure = { status: number; code?: string; error?: string; also?: string[] };
 
 /** Every refusal the members API gives, in words for the person looking at the screen. */
 function explain(f: Failure, board: BoardInfo | null, email = ""): string {
@@ -175,7 +175,8 @@ function explain(f: Failure, board: BoardInfo | null, email = ""): string {
     case "self": return "That's you. You already own this board.";
     case "pro_required": return "Sharing is part of Pro, and this account isn't on Pro right now. Nothing was sent.";
     case "board_encrypted": return "This board is end-to-end encrypted, so it can't be shared. Turn encryption off first.";
-    case "member_limit": return `This board is full: ${board ? `${board.maxMembers} of ${board.maxMembers}` : "every one of its"} people, pending invites included. Remove someone or revoke an invite first.`;
+    case "member_limit": return `This board is full: ${board ? `${board.maxMembers} of ${board.maxMembers}` : "every one of its"} people, pending invites included. Remove someone or revoke an invite first.`
+      + (f.also?.includes("invite_limit") ? ` Today's ${board ? `${board.maxInvitesPerDay} ` : ""}invite emails are used up too, so a new invite also has to wait until midnight UTC.` : "");
     case "invite_limit": return `You've sent today's ${board ? board.maxInvitesPerDay : ""} invite emails. The count starts over at midnight UTC.`.replace("  ", " ");
     case "already_member": return `${who} already accepted, so there's no invite to resend.`;
     case "email_failed": return `The invite for ${who} is saved, but the email didn't go out. Hit Resend in a minute.`;
@@ -190,8 +191,8 @@ function explain(f: Failure, board: BoardInfo | null, email = ""): string {
 async function post<T>(path: string, body: unknown): Promise<{ ok: true; status: number; data: T } | ({ ok: false } & Failure)> {
   try {
     const r = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
-    const data = (await r.json().catch(() => null)) as (T & { error?: string; code?: string }) | null;
-    if (!r.ok || !data) return { ok: false, status: r.status, code: data?.code, error: data?.error };
+    const data = (await r.json().catch(() => null)) as (T & { error?: string; code?: string; also?: string[] }) | null;
+    if (!r.ok || !data) return { ok: false, status: r.status, code: data?.code, error: data?.error, also: Array.isArray(data?.also) ? data.also : undefined };
     return { ok: true, status: r.status, data };
   } catch {
     return { ok: false, status: 0 };
@@ -330,7 +331,10 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
   const full = board.used >= board.maxMembers;
   const invitesLeft = Math.max(0, board.maxInvitesPerDay - board.invitesToday);
   const canInvite = board.sharing === "on";
-  const blocked = canInvite && full ? "full" : canInvite && invitesLeft === 0 ? "spent" : null;
+  // Two different caps, and both can be hit at once. Each gets its own line, the full board
+  // first: it's the one that can be fixed now, and the other says fixing it won't be enough today.
+  const spent = invitesLeft === 0;
+  const blocked = canInvite && (full || spent);
 
   /** Say what happened where a screen reader hears it, and put focus there when the row that had it is gone. */
   const tell = (n: Note, focus = false) => {
@@ -553,8 +557,8 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
                 </p>
               </div>
             )}
-            {blocked === "full" && <p className="mem-error" role="status">This board is full: {board.maxMembers} of {board.maxMembers} people, pending invites included. Remove someone or revoke an invite to make room.</p>}
-            {blocked === "spent" && <p className="mem-error" role="status">You've sent today's {board.maxInvitesPerDay} invite emails, resends included. The count starts over at midnight UTC.</p>}
+            {canInvite && full && <p className="mem-error" role="status">This board is full: {board.maxMembers} of {board.maxMembers} people, pending invites included. Remove someone or revoke an invite to make room.</p>}
+            {canInvite && spent && <p className="mem-error" role="status">{full ? "And you've" : "You've"} sent today's {board.maxInvitesPerDay} invite emails, resends included{full ? ", so making room won't be enough today" : ""}. The count starts over at midnight UTC.</p>}
           </form>
         </section>
       )}

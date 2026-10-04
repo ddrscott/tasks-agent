@@ -353,7 +353,19 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
 
   const max = maxMembers(env);
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM board_members WHERE owner_id = ?").bind(owner.id).first<{ n: number }>();
-  if ((count?.n ?? 0) >= max) return fail(409, "member_limit", `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`);
+  if ((count?.n ?? 0) >= max) {
+    // Both caps can be hit at once. The full board leads, because it's the one the owner can
+    // do something about right now, and the answer says the day's emails are gone as well, so
+    // they don't make room only to be turned away again.
+    const sent = await env.DB.prepare("SELECT sent FROM invite_sends WHERE owner_id = ? AND day = ?")
+      .bind(owner.id, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
+    const spent = (sent?.sent ?? 0) >= maxDailyInvites(env);
+    return json({
+      error: `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`
+        + (spent ? ` Today's ${maxDailyInvites(env)} invite emails are used up too, so a new invite also has to wait until tomorrow (UTC).` : ""),
+      code: "member_limit", ...(spent ? { also: ["invite_limit"] } : {}),
+    }, 409);
+  }
   if (!(await spendInviteEmail(env, owner.id))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
 
   const token = randomToken();

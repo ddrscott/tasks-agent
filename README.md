@@ -1173,7 +1173,10 @@ each card.
   roles and removals still work, with Upgrade to Pro and Manage subscription. An encrypted
   board (`encrypted`) shows only that sharing is off and why, with a button to the
   Encryption dialog. A full board and a spent day of invite emails disable Invite (and
-  Resend) and say the number.
+  Resend) and say the number. They're two caps and can both be hit: then the form shows both
+  lines, the full board first, since that's the one to fix now, and the second line says
+  making room won't be enough today. The API does the same: `409 member_limit` with
+  `also: ["invite_limit"]` and both sentences in `error`.
 - **Typing an address that's already there** doesn't call the API. The API would change a
   member's role or reissue a pending invite, and neither is what Invite looks like it does,
   so the form points at the row instead.
@@ -1465,7 +1468,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | Call | Body | Answer |
 |---|---|---|
 | `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday }, members: Member[] }` |
-| `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit`, `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
+| `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit` (with `also: ["invite_limit"]` when the day's emails are spent too), `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
 | `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above, plus `409 already_member` when they accepted in the meantime (inviting a pending address again can answer this too) |
 | `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
@@ -1866,7 +1869,18 @@ npm run check:launch     # the launch copy against its limits, and the gallery's
 It only runs against localhost with `DEV_LOGIN_CODES=1`: it signs up throwaway
 `tb-…@example.com` accounts, edits the local D1 through `wrangler d1 execute --local` (to make
 an owner Pro, age an invite, and confirm only a token hash is stored), and waits for the
-board's own recheck in the plan-lapse rows, so it takes a minute or two. Under the dev server
+board's own recheck in the plan-lapse rows and for a flooder's bucket to refill, so it takes
+about four minutes.
+
+**The local D1 belongs to a checkout.** It's a file under `<checkout>/.wrangler/state`, the
+folder the dev server was started in, and `wrangler d1 execute --local` reads the one under
+the folder it's run from. Run it from a different checkout (the main one, while the server
+runs from a git worktree) and it reads a different database without complaint: rows the
+server just wrote aren't there, and nothing you write reaches the server. The check names the
+folder every time (`--persist-to <this checkout>/.wrangler/state`; `TASKS_STATE_DIR` points it
+at another), and its first rows prove the command line and the server see each other's
+writes before anything depends on it. By hand, run the command from the server's checkout or
+pass the same `--persist-to`. Under the dev server
 a refused WebSocket upgrade arrives as a dropped connection with no status; the check accepts
 that and checks the status when one comes through.
 

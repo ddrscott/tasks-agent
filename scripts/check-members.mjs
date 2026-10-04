@@ -180,8 +180,16 @@ section("access rules (pure)");
 
 // ---------- talking to the server ----------
 
+// The local D1 lives in a folder next to whichever checkout the dev server was started from
+// (<checkout>/.wrangler/state), and `wrangler d1 execute --local` reads the one under the folder
+// it's run from. Run from anywhere else (the main checkout while the server runs from a
+// worktree, say) it quietly reads a different database: rows the server just wrote aren't
+// there, and what you write the server never sees. So this always names the folder. It's this
+// checkout's unless TASKS_STATE_DIR says where the server's is; the setup section proves the
+// two are the same database, in both directions, before anything depends on it.
+const STATE_DIR = process.env.TASKS_STATE_DIR ?? join(root, ".wrangler", "state");
 function d1(sql) {
-  const out = execFileSync("npx", ["wrangler", "d1", "execute", "todo-agent-auth", "--local", "--json", "--command", sql],
+  const out = execFileSync("npx", ["wrangler", "d1", "execute", "todo-agent-auth", "--local", "--persist-to", STATE_DIR, "--json", "--command", sql],
     { cwd: root, timeout: 90_000, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   return JSON.parse(out.slice(out.indexOf("[")))[0].results;
 }
@@ -344,6 +352,22 @@ const flooder = await account("flooder");
 const watcher = await account("watcher");
 ok("thirteen accounts signed in", [owner, writer, viewer, stranger, removed, leaver, revoked, late, decliner, encOwner, floodOwner, flooder, watcher].every((u) => /^[0-9a-f]{32}$/.test(u.id)));
 
+// The command line and the server have to be looking at the same database, or every row below
+// that ages an invite or makes an owner Pro is checking nothing. Proved both ways.
+{
+  const seen = d1(`SELECT COUNT(*) AS n FROM sessions WHERE email = ${q(owner.email)}`)[0]?.n;
+  ok("the command line reads what the server wrote (the same local D1, not another checkout's)", seen === 1, { seen, STATE_DIR });
+  if (seen !== 1) {
+    console.error(`\ncheck:members reads the local D1 under ${STATE_DIR}, and the server at ${BASE} isn't writing there.\nStart the dev server from this checkout, or set TASKS_STATE_DIR to <the server's checkout>/.wrangler/state.`);
+    process.exit(1);
+  }
+  const probe = await account("probe");
+  const before = (await call(probe, "GET", "/api/me")).data?.id;
+  d1(`DELETE FROM sessions WHERE email = ${q(probe.email)}`);
+  const after = (await call(probe, "GET", "/api/me")).data;
+  ok("and the server reads what the command line wrote", before === probe.id && after === null, { before, after });
+}
+
 // ---------- a WebSocket upgrade anywhere but the three socket addresses ----------
 
 section("stray WebSocket upgrades");
@@ -454,14 +478,36 @@ section("invites");
   ok("a revoked invite doesn't work", (await call(revoked, "POST", "/api/invites/accept", { token: tokenOf(rv) })).status === 404);
   ok("a revoked invitee can't connect", refused(await open(revoked, { board: owner.id }), 404));
 
+  // Expiry, end to end against the running server. The row is aged straight in its database:
+  // one second short of seven days it still works, one second past it never does again.
   const lt = await invite(owner, late.email, "writer");
-  d1(`UPDATE board_members SET expires_at = ${Date.now() - 1000} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
+  const lateRow = () => d1(`SELECT status, token_hash, expires_at FROM board_members WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`)[0];
+  ok("the server's invite row is there for the command line to age", lateRow()?.status === "pending" && lateRow().token_hash === sha256(`invite:${tokenOf(lt)}`) && lateRow().expires_at === lt.data.member.expiresAt, lateRow());
+  const almost = Date.now() + 5000;
+  d1(`UPDATE board_members SET expires_at = ${almost} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
+  const nearly = await call(late, "POST", "/api/invites/lookup", { token: tokenOf(lt) });
+  ok("an invite with seconds left still opens, and the server reports the aged expiry", nearly.status === 200 && nearly.data.invite.expiresAt === almost, nearly);
+  const aged = Date.now() - 1000;
+  d1(`UPDATE board_members SET expires_at = ${aged} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
   const ltAcc = await call(late, "POST", "/api/invites/accept", { token: tokenOf(lt) });
   ok("an invite past 7 days doesn't work", ltAcc.status === 404 && ltAcc.data?.code === "invite_invalid", ltAcc);
+  ok("its refusal is word for word the one a made-up link gets", ltAcc.text === (await call(late, "POST", "/api/invites/accept", { token: randomBytes(32).toString("base64url") })).text);
   ok("an expired invite can't be looked up", (await call(late, "POST", "/api/invites/lookup", { token: tokenOf(lt) })).status === 404);
+  ok("or declined", (await call(late, "POST", "/api/invites/decline", { token: tokenOf(lt) })).status === 404);
   ok("an expired invitee can't connect", refused(await open(late, { board: owner.id }), 404));
+  ok("the dead link's hash is gone from the row, and the row is still a pending invite", lateRow().token_hash === null && lateRow().status === "pending" && lateRow().expires_at === aged, lateRow());
   const listed = (await call(owner, "GET", "/api/board/members")).data;
   ok("the owner sees the expired invite as expired", listed.members.find((m) => m.email === late.email)?.expired === true && listed.members.find((m) => m.email === late.email)?.status === "pending", listed.members);
+  ok("an expired invite puts nothing on the invitee's board list and opens no access", (await call(late, "GET", "/api/boards")).data.shared.length === 0 && (await call(late, "GET", `/api/board/access?board=${owner.id}`)).status === 404);
+  d1(`UPDATE board_members SET expires_at = ${Date.now() + 86400_000} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
+  ok("pushing the date forward again doesn't bring the dead link back", (await call(late, "POST", "/api/invites/accept", { token: tokenOf(lt) })).status === 404);
+  d1(`UPDATE board_members SET expires_at = ${aged} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
+  const fresh = await call(owner, "POST", "/api/board/invites/resend", { email: late.email });
+  const freshSeen = await call(late, "POST", "/api/invites/lookup", { token: tokenOf(fresh) });
+  ok("Resend gives an expired invite a new link that works, good for 7 days", fresh.status === 200 && freshSeen.status === 200 && Math.abs(freshSeen.data.invite.expiresAt - Date.now() - 7 * 86400_000) < 60_000, [fresh.status, freshSeen.status]);
+  ok("and the old one stays dead", (await call(late, "POST", "/api/invites/accept", { token: tokenOf(lt) })).status === 404);
+  // Left pending, and expired again, for the rows further down.
+  d1(`UPDATE board_members SET expires_at = ${aged} WHERE owner_id = ${q(owner.id)} AND member_email = ${q(late.email)}`);
 
   const d1st = await invite(owner, decliner.email, "viewer");
   const d2nd = await call(owner, "POST", "/api/board/invites/resend", { email: decliner.email });
@@ -480,13 +526,20 @@ section("invites");
   for (let i = before.used; i < before.maxMembers; i++) { const e = `tb-fill${i}-${run}@example.com`; fillers.push(e); await invite(owner, e, "viewer"); }
   const over = await invite(owner, `tb-over-${run}@example.com`, "viewer");
   ok(`the member cap holds at ${before.maxMembers}, pending included`, over.status === 409 && over.data?.code === "member_limit", over);
-  for (const e of fillers) await call(owner, "POST", "/api/board/invites/revoke", { email: e });
+  ok("a full board on its own says nothing about the daily cap", !("also" in over.data) && !/invite emails/.test(over.data.error), over.data);
   const day = new Date().toISOString().slice(0, 10);
   const sentRow = d1(`SELECT sent FROM invite_sends WHERE owner_id = ${q(owner.id)} AND day = ${q(day)}`)[0];
+  // Both caps at once: the board is full and the day's emails are gone.
   d1(`UPDATE invite_sends SET sent = ${before.maxInvitesPerDay} WHERE owner_id = ${q(owner.id)} AND day = ${q(day)}`);
+  const both = await invite(owner, `tb-both-${run}@example.com`, "viewer");
+  ok("with both caps hit, the full board leads and the answer names the daily cap too", both.status === 409 && both.data?.code === "member_limit" && both.data.also?.join() === "invite_limit" && /Remove someone or revoke/.test(both.data.error) && /invite emails are used up too/.test(both.data.error), both.data);
+  const bothList = (await call(owner, "GET", "/api/board/members")).data.board;
+  ok("and the members list reports both, so the form can say both", bothList.used >= bothList.maxMembers && bothList.invitesToday >= bothList.maxInvitesPerDay, bothList);
+  for (const e of fillers) await call(owner, "POST", "/api/board/invites/revoke", { email: e });
   const capped = await invite(owner, `tb-capped-${run}@example.com`, "viewer");
   const cappedResend = await call(owner, "POST", "/api/board/invites/resend", { email: late.email });
   ok("the daily invite-email cap refuses a new invite", capped.status === 429 && capped.data?.code === "invite_limit", capped);
+  ok("the daily cap on its own says nothing about a full board", !("also" in capped.data) && !/full|Remove someone/.test(capped.data.error), capped.data);
   ok("the daily cap counts resends too", cappedResend.status === 429 && cappedResend.data?.code === "invite_limit", cappedResend);
   d1(`UPDATE invite_sends SET sent = ${sentRow.sent} WHERE owner_id = ${q(owner.id)} AND day = ${q(day)}`);
 
