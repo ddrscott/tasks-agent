@@ -12,7 +12,7 @@
 // "Add card" takes the card back out and leaves what the agent did since. How far the agent has
 // got with each card (`World.at`) is saved with each remembered board, so the two can't disagree.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import * as ops from "../shared";
 import type { Board, Card } from "../shared";
@@ -258,6 +258,17 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     }, STEP_MS[step]);
     return () => clearTimeout(timer);
   }, [spotKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A phone shows one lane at a time, and the real board opens on the first. Here the story is
+  // the open question, so the demo opens on the lane that holds it.
+  useLayoutEffect(() => {
+    const asked = saved.current.board.cards.find((c) => c.ask);
+    const boardEl = document.querySelector<HTMLElement>(".board");
+    const lane = asked && boardEl?.querySelector<HTMLElement>(`:scope > [data-lane-id="${asked.laneId}"]`);
+    if (!boardEl || !lane || !matchMedia("(max-width: 900px)").matches) return;
+    const pad = parseFloat(getComputedStyle(boardEl).scrollPaddingLeft) || 0;
+    boardEl.scrollLeft += lane.getBoundingClientRect().left - boardEl.getBoundingClientRect().left - pad;
+  }, []);
 
   // Sessions: time moves along so "4s ago" stays true, and the lead session follows the script.
   const [, tick] = useState(0);
