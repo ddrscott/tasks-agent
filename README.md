@@ -1190,8 +1190,14 @@ each card.
   at least one member or pending invite ("Invited N" until someone accepts). It opens
   Members. When the top bar runs out of room it's the last button to give way: the count moves onto
   the account button as a small badge, and the menu's Members item says "shared with N".
-  It looks again when the tab gets focus, and the dialog rereads the list every 20 seconds
-  while it's open, so an invite accepted elsewhere shows up without a reload.
+  **It stays current without a reload.** Every change to the members list (an invite sent,
+  accepted, declined, or revoked, a role change, a removal, someone leaving) and every plan
+  change the board notices ends in `TodoAgent.membersChanged`, which sends
+  `{ "type": "tasks_members" }` to the owner's own sockets, and only those. The app answers by
+  reading the list again (`membersChanged` in `Members.tsx`), so the dialog, the count in the
+  top bar, and an open audit log follow within a second; `check:members` fails past 2. The
+  button also looks again when the tab gets focus, and the open dialog rereads once a minute,
+  as a backstop for a frame that came while the socket was down.
 - **A lapsed plan shows on the board, not only in Members.** With `board.sharing` at
   `suspended` the top-bar button reads "Sharing paused" (on a phone or a tight bar, where the
   label gives way, the chip reads `paused · 2`, and the badge on the account button reads
@@ -1330,6 +1336,8 @@ come on connect; `tasks_activity` comes when a card is deleted (**Who deleted it
 - Never sent to a member: the chat transcript, chat stream frames, the undo stack or its
   labels, usage, tokens, billing, the MCP server list, Sessions, claims.
 - The owner's own socket gets no `tasks_access` frame. The owner's state is the board they own.
+  It gets `tasks_members` when the members list or the plan changes (a member's never does),
+  and `tasks_activity` with an `undo` step.
 
 **What a member's socket may send.** One thing: an RPC call, `{"type":"rpc","id":"…","method":"…","args":[…]}`
 (what `agent.stub.x()` sends), to a method on the list in `MEMBER_CALLS` (`src/member-rules.ts`):
@@ -1383,8 +1391,8 @@ the assistant's lane tools fail for a writer the same way the lane callables do.
 
 **Live effect.** A removal or a downgrade holds from the member's very next frame.
 
-- Removing a member, a role change, and leaving call `TodoAgent.membersChanged` before the
-  request answers; the Stripe webhook does the same when the owner's plan changes. Every member
+- Every change to membership calls `TodoAgent.membersChanged` before the request answers
+  (`signal` in `src/members.ts`); the Stripe webhook does the same when the owner's plan changes. Every member
   socket is rechecked then: closed, or sent a new `tasks_access`.
 - Each socket remembers its last access check for 2 seconds (`ACCESS_CACHE_MS`), so a member
   sending many frames costs two D1 reads every 2 seconds instead of two per frame. The memory

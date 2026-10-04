@@ -432,6 +432,19 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.epoch += 1;
     this.markShared();
     await this.recheck(this.ctx.getWebSockets(MEMBER_TAG), false);
+    this.tellOwner();
+  }
+
+  /**
+   * Tell the owner's open tabs that the members list or the plan behind it just changed, so
+   * Members and "Shared with N" read it again now instead of at their next poll. Owner sockets
+   * only: a member's socket never gets this frame, and it carries nothing but the fact.
+   */
+  private tellOwner() {
+    const frame = JSON.stringify({ type: "tasks_members", at: Date.now() });
+    for (const ws of this.ctx.getWebSockets()) {
+      if (!memberMeta(ws) && !this.ctx.getTags(ws).includes(MEMBER_TAG)) sendTo(ws, frame);
+    }
   }
 
   /**
@@ -444,8 +457,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async sweepMembers() {
     const sockets = this.ctx.getWebSockets(MEMBER_TAG);
     if (!sockets.length) return;
-    await syncSharing(this.env, this.name).catch((e: Error) => console.warn("sharing state check failed", e.message));
+    const sharing = await syncSharing(this.env, this.name).catch((e: Error) => { console.warn("sharing state check failed", e.message); return null; });
     await this.recheck(sockets, false);
+    // A lapse or a return nobody announced: the owner's tabs hear about it here.
+    if (sharing?.flipped) this.tellOwner();
     // Buckets of members who are gone or have been quiet don't need keeping.
     const here = new Set(this.ctx.getWebSockets(MEMBER_TAG).map((ws) => memberMeta(ws)?.id));
     for (const id of this.buckets.keys()) if (!here.has(id)) this.buckets.delete(id);

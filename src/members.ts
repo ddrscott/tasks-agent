@@ -150,15 +150,6 @@ export async function logCards(env: Env, ownerId: string, actor: string, action:
   for (let i = 0; i < rows.length; i += 50) await env.DB.batch(rows.slice(i, i + 50));
 }
 
-/** Tell the board it has been shared, so it starts keeping the entries above (TodoAgent.markShared). */
-async function markShared(env: Env, ownerId: string): Promise<void> {
-  try {
-    await (await getAgentByName(env.TodoAgent, ownerId)).markShared();
-  } catch (e) {
-    console.warn("telling the board it's shared failed", (e as Error).message);
-  }
-}
-
 /** A spreadsheet runs a cell that starts with = + - or @ as a formula. Emails can start with those. */
 function csvCell(v: string | number | null): string {
   let s = v === null ? "" : String(v);
@@ -170,9 +161,11 @@ function csvCell(v: string | number | null): string {
 
 /**
  * Tell the board's Durable Object that its membership or its owner's plan just changed, so
- * sockets that are already open are closed or downgraded now (TodoAgent.membersChanged). The
- * object also rechecks on its own every MEMBER_RECHECK_SECONDS, so a failure here is late,
- * never lost.
+ * sockets that are already open are closed or downgraded now, and the owner's open tabs read
+ * the members list again (TodoAgent.membersChanged). Every change to `board_members` calls
+ * it, the ones that change nobody's access too (an invite sent, declined, or revoked): the
+ * owner's Members dialog is waiting on those. The object also rechecks on its own every
+ * MEMBER_RECHECK_SECONDS, so a failure here is late, never lost.
  */
 async function signal(env: Env, ownerId: string): Promise<void> {
   try {
@@ -314,7 +307,7 @@ async function setRole(env: Env, owner: User, row: MemberRow, role: MemberRole):
       env.DB.prepare("UPDATE board_members SET role = ?, updated_at = ? WHERE owner_id = ? AND member_email = ?").bind(role, Date.now(), owner.id, row.member_email),
       auditRow(env, owner.id, owner.email, "role_changed", row.member_email, row.role, role),
     ]);
-    if (row.status === "accepted") await signal(env, owner.id);
+    await signal(env, owner.id);
   }
   return json({ member: toMember({ ...row, role }), changed: row.role !== role });
 }
@@ -331,6 +324,7 @@ async function reissue(req: Request, env: Env, owner: User, row: MemberRow, role
   // Accepted in the meantime: there's nothing to resend.
   if (changed.meta.changes !== 1) return fail(409, "already_member", "They already accepted.");
   await audit(env, owner.id, owner.email, "invite_resent", row.member_email, row.role !== role ? row.role : null, role);
+  await signal(env, owner.id);
   const sent = await sendInvite(req, env, owner, row.member_email, role, token, expiresAt);
   const member = toMember({ ...row, role, expires_at: expiresAt });
   if ("error" in sent) return json({ error: sent.error, code: "email_failed", member }, 502);
@@ -371,8 +365,9 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
     auditRow(env, owner.id, owner.email, "invite_sent", email, null, role),
     env.DB.prepare("INSERT OR IGNORE INTO board_sharing (owner_id, suspended, updated_at) VALUES (?, 0, ?)").bind(owner.id, now),
   ]);
-  // From the first invite on, the board writes down who deletes a card.
-  await markShared(env, owner.id);
+  // From the first invite on, the board writes down who deletes a card (membersChanged marks it
+  // shared), and the owner's other tabs hear there's someone new on the list.
+  await signal(env, owner.id);
   const sent = await sendInvite(req, env, owner, email, role, token, expiresAt);
   const member: Member = { email, role, status: "pending", invitedAt: now, acceptedAt: null, expiresAt, expired: false };
   if ("error" in sent) return json({ error: sent.error, code: "email_failed", member }, 502);
@@ -396,7 +391,7 @@ async function drop(env: Env, owner: User, body: Record<string, unknown>, status
   if (!gone) return fail(404, "not_found", status === "pending" ? "There's no pending invite for that address." : "Nobody with that address is on this board.");
   await audit(env, owner.id, owner.email, status === "pending" ? "invite_revoked" : "member_removed", email, gone.role, null);
   // Their open tabs lose the board before this request answers.
-  if (status === "accepted") await signal(env, owner.id);
+  await signal(env, owner.id);
   return json({ ok: true });
 }
 
@@ -505,6 +500,7 @@ async function accept(req: Request, env: Env, user: User, body: Record<string, u
   ).bind(now, row.token_hash, user.email, user.id).run();
   if (used.meta.changes !== 1) return inviteInvalid();
   await audit(env, row.owner_id, user.email, "invite_accepted", user.email, null, row.role);
+  await signal(env, row.owner_id);
   return json({ ok: true, board: { id: row.owner_id, ownerEmail: row.owner_email, role: row.role } });
 }
 
@@ -516,6 +512,7 @@ async function decline(req: Request, env: Env, user: User, body: Record<string, 
     .bind(row.token_hash, user.email).run();
   if (gone.meta.changes !== 1) return inviteInvalid();
   await audit(env, row.owner_id, user.email, "invite_declined", user.email, row.role, null);
+  await signal(env, row.owner_id);
   return json({ ok: true });
 }
 

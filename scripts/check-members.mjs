@@ -882,8 +882,24 @@ section("an encrypted board can't be shared");
 
 section("open sockets follow membership");
 {
+  // The owner's open tabs are told too, so Members and "Shared with N" don't wait for a poll.
+  const toldOwner = async (what, act) => {
+    const from = ownerSock.frames.length;
+    const t0 = Date.now();
+    const r = await act();
+    const f = await ownerSock.wait((x) => x.type === "tasks_members", 3000, from);
+    const ms = f ? f._at - t0 : null;
+    ok(`the owner's open board hears about ${what} within 2 seconds`, ms !== null && ms < 2000, ms);
+    return r;
+  };
+  const inv = await toldOwner("an invite sent from another tab", () => invite(owner, revoked.email, "viewer"));
+  await toldOwner("an invite being accepted", () => call(revoked, "POST", "/api/invites/accept", { token: tokenOf(inv) }));
+  await toldOwner("a member removed from another tab", () => call(owner, "POST", "/api/board/members/remove", { email: revoked.email }));
+  const inv2 = await toldOwner("another invite", () => invite(owner, decliner.email, "viewer"));
+  await toldOwner("an invite being declined", () => call(decliner, "POST", "/api/invites/decline", { token: tokenOf(inv2) }));
+
   let mark = viewerSock.frames.length;
-  const up = await call(owner, "POST", "/api/board/members/role", { email: viewer.email, role: "writer" });
+  const up = await toldOwner("a role change", () => call(owner, "POST", "/api/board/members/role", { email: viewer.email, role: "writer" }));
   const told = await viewerSock.wait((f) => f.type === "tasks_access" && f.effective === "writer", 3000, mark);
   ok("a role change reaches the open socket", up.status === 200 && told?.role === "writer", told);
   const promoted = await viewerSock.rpc("addCard", [lanes[0].id, "Promoted viewer card"]);
@@ -924,7 +940,11 @@ section("open sockets follow membership");
 
   mark = leaverSock.frames.length;
   const tLeft = Date.now();
+  const ownerMark = ownerSock.frames.length;
   const left = await call(leaver, "POST", "/api/boards/leave", { board: owner.id });
+  const heard = await ownerSock.wait((x) => x.type === "tasks_members", 3000, ownerMark);
+  console.log(`     … the owner's board heard a member left in ${heard ? heard._at - tLeft : "?"} ms`);
+  ok("the owner's open board hears a member left within 2 seconds", !!heard && heard._at - tLeft < 2000);
   ok("a member leaves on their own", left.status === 200, left);
   // This socket never sent a frame either.
   const leftFrame = await leaverSock.wait((f) => f.type === "tasks_access" && f.effective === "none", 3000, mark);
@@ -1084,7 +1104,10 @@ section("open sockets follow the owner's plan");
   let mark = writerSock.frames.length;
   d1(`UPDATE subscriptions SET status = 'canceled', updated_at = ${Date.now()} WHERE user_id = ${q(owner.id)}`);
   console.log(`     … waiting up to ${RECHECK_S + 15}s for the board's own recheck to notice the lapsed plan`);
+  const ownerMark = ownerSock.frames.length;
   const lapsed = await writerSock.wait((f) => f.type === "tasks_access" && f.reason === "plan_lapsed", wait, mark);
+  const ownerHeard = await ownerSock.wait((f) => f.type === "tasks_members", 3000, ownerMark);
+  ok("the owner's open board hears about the lapse in the same moment", !!lapsed && !!ownerHeard && Math.abs(ownerHeard._at - lapsed._at) < 2000, [lapsed?._at, ownerHeard?._at]);
   ok("a lapsed plan reaches the open socket with no signal at all", lapsed?.effective === "viewer" && lapsed?.role === "writer" && lapsed?.plan === "free", lapsed);
   ok("the writer is view only", (await writerSock.rpc("addCard", [lanes[0].id, "During the lapse"])).success === false);
   ok("the writer can still read", (await writerSock.rpc("search", [{ query: "seed", limit: 3 }])).success === true && writerSock.ws.readyState === WebSocket.OPEN);
@@ -1148,6 +1171,10 @@ section("the audit log");
   ok("the log can't be edited or deleted, even straight in the database", blocked === 2 && (await audit(owner)).length === entries.length);
   ok("a member still can't read it", !(await call(writer, "GET", "/api/board/audit")).text.includes(owner.email) && !(await call(writer, "GET", "/api/board/audit.json")).text.includes(removed.email));
 }
+
+section("what only the owner hears");
+ok("no member's socket was ever told about the members list", [writerSock, viewerSock, removedSock, removedQuiet, leaverSock].every((s) => !s.frames.some((f) => f.type === "tasks_members")));
+ok("a member's socket only ever got identity, access, the board, card deletions, and replies", [...new Set([writerSock, viewerSock, removedSock, removedQuiet, leaverSock].flatMap((s) => s.frames.map((f) => f.type)))].sort().join() === "cf_agent_identity,cf_agent_state,cf_agent_use_chat_response,rpc,tasks_access,tasks_activity");
 
 for (const s of [ownerSock, writerSock, viewerSock, removedSock, removedQuiet, leaverSock]) s.close();
 rmSync(dir, { recursive: true, force: true });

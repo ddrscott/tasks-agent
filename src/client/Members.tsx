@@ -54,6 +54,19 @@ export async function refreshMembers(userId: string): Promise<void> {
   publish(next);
 }
 
+// The board's object tells the owner's socket the moment membership or the plan changes (a
+// `tasks_members` frame, App.tsx). That's what keeps this list, "Shared with N", and an open
+// audit log current; the timers below are only a backstop for a frame that never came.
+let changes = 0;
+const changeListeners = new Set<() => void>();
+const subscribeChanges = (fn: () => void) => { changeListeners.add(fn); return () => { changeListeners.delete(fn); }; };
+/** Membership or the plan just changed on the signed-in user's own board: read it all again. */
+export function membersChanged(userId: string): void {
+  changes += 1;
+  for (const fn of changeListeners) fn();
+  void refreshMembers(userId);
+}
+
 /** The signed-in user's own board: who's on it and what its owner may do right now. */
 export function useBoardMembers(userId: string): Snapshot {
   const s = useSyncExternalStore(subscribe, () => snap);
@@ -222,11 +235,12 @@ export function MembersDialog({ me, onClose, onEncryption }: Props) {
   const [tab, setTab] = useState<"people" | "audit">("people");
   const ids = useId();
 
-  // Always the current list when the dialog opens, and again while it stays open, so an
-  // invite someone just accepted shows up without a reload.
+  // Always the current list when the dialog opens. While it stays open, the board says when
+  // something changed (membersChanged, above), and that's what refreshes it; this once-a-minute
+  // look is for the case where the socket was down when it happened.
   useEffect(() => {
     void refreshMembers(me.id);
-    const t = setInterval(() => { if (document.visibilityState === "visible") void refreshMembers(me.id); }, 20_000);
+    const t = setInterval(() => { if (document.visibilityState === "visible") void refreshMembers(me.id); }, 60_000);
     return () => clearInterval(t);
   }, [me.id]);
 
@@ -678,6 +692,11 @@ function AuditLog({ me }: { me: Props["me"] }) {
     }
   }, []);
   useEffect(() => { void load(null); }, [load]);
+  // Something just changed on the board: show it, unless older pages are open, where
+  // reloading would throw away the reader's place. Refresh is right there for that.
+  const changed = useSyncExternalStore(subscribeChanges, () => changes);
+  const paged = useRef(false);
+  useEffect(() => { if (changed > 0 && !paged.current) void load(null); }, [changed, load]);
 
   // A resend only records a `from` when the role changed with it (reissue in src/members.ts).
   const role = (e: AuditEntry) => (e.action === "invite_resent" && !e.from && e.to ? `${e.to} (unchanged)` : e.from || e.to ? `${e.from ?? "none"} → ${e.to ?? "none"}` : "");
@@ -692,7 +711,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
       <div className="mem-actions audit-actions">
         <a className="btn" href={api("/api/board/audit.csv")} download>Download CSV</a>
         <a className="btn" href={api("/api/board/audit.json")} download>Download JSON</a>
-        <button type="button" className="btn ghost" disabled={busy} onClick={() => void load(null)}>Refresh</button>
+        <button type="button" className="btn ghost" disabled={busy} onClick={() => { paged.current = false; void load(null); }}>Refresh</button>
         <span className="mem-foot">Downloads hold the whole log, oldest first, with times in UTC.</span>
       </div>
       {error && <p className="mem-error" role="alert">{error}</p>}
@@ -729,7 +748,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
       {entries && entries.length > 0 && (
         <div className="mem-actions">
           {next
-            ? <button type="button" className="btn" disabled={busy} onClick={() => void load(next)}>{busy ? "Loading…" : "Show older entries"}</button>
+            ? <button type="button" className="btn" disabled={busy} onClick={() => { paged.current = true; void load(next); }}>{busy ? "Loading…" : "Show older entries"}</button>
             : <span className="mem-foot">That's the whole log: {entries.length} {entries.length === 1 ? "entry" : "entries"}.</span>}
           {next && <span className="mem-foot">Showing the newest {entries.length}.</span>}
         </div>

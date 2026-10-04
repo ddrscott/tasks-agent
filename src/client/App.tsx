@@ -23,7 +23,7 @@ import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
-import { MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote } from "./Members";
+import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote } from "./Members";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
@@ -395,6 +395,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
         const f = JSON.parse(m.data) as { type?: string };
         if (f.type === "tasks_access" && sharedBoard) onAccess(f);
         else if (f.type === "tasks_activity") onActivity(f);
+        // Your own board's members or plan changed: Members and "Shared with N" read it again now.
+        else if (f.type === "tasks_members" && !sharedBoard) membersChanged(me.id);
       } catch { /* not ours */ }
     },
     ...(sharedBoard ? {
