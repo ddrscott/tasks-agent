@@ -444,7 +444,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <IconRedo />
               </button>
             </div>
-            <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
+            <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             {!board.sealed && (
               <SessionsButton
                 presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}

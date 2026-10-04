@@ -2,10 +2,12 @@
 // option on the card itself, the same in the card editor with a box for anything else, and a
 // count in the top bar that opens them all so they can be cleared in a row. On a touch screen
 // the buttons on the card itself take two taps, because the board is where stray taps land.
+// That count is everything waiting on you: it also takes in the sessions stopped at a prompt.
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Card } from "../shared";
 import { Popover } from "./Board";
+import { blockedSessions, SessionRow, type Presence } from "./Sessions";
 
 export type AnswerFn = (cardId: string, input: { choice?: number; text?: string }) => void;
 
@@ -97,29 +99,50 @@ export function AskBlock({ card, compact, before }: BlockProps) {
   );
 }
 
-type ButtonProps = { cards: Card[]; open: boolean; setOpen(o: boolean): void; onOpenCard(id: string): void };
+type ButtonProps = { cards: Card[]; presence: Presence; open: boolean; setOpen(o: boolean): void; onOpenCard(id: string): void };
 
-/** "2 need you" in the top bar. It's only there while a question is open. */
-export function AsksButton({ cards, open, setOpen, onOpenCard }: ButtonProps) {
+const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/**
+ * "3 need you" in the top bar: the one count of what's waiting on you, and the one list. Open
+ * questions come first because they're answered right here; then the sessions stopped at a prompt,
+ * which have to be answered in their own terminal. It's only there while something is waiting.
+ */
+export function AsksButton({ cards, presence, open, setOpen, onOpenCard }: ButtonProps) {
   const asking = cards.filter((c) => c.ask).sort((a, b) => a.ask!.askedAt.localeCompare(b.ask!.askedAt));
-  if (!asking.length) return null;
+  const blocked = blockedSessions(presence.sessions, presence.now);
+  const total = asking.length + blocked.length;
+  if (!total) return null;
+  const summary = [asking.length && count(asking.length, "question"), blocked.length && count(blocked.length, "blocked session")].filter(Boolean).join(", ");
   return (
     <div className="anchor">
       <button
         className="btn asks-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
-        title="Questions waiting on you" aria-label={`${asking.length} question${asking.length === 1 ? "" : "s"} waiting on you`}
+        // The label can be down to a bare count when the bar is tight, so the name is spelled out.
+        title={`Waiting on you: ${summary}`} aria-label={`${total} waiting on you: ${summary}`}
       >
-        <span className="asks-count">?{asking.length}</span>
-        <span className="hide-sm label">need{asking.length === 1 ? "s" : ""} you</span>
+        <span className="asks-count">?{total}</span>
+        <span className="hide-sm label">need{total === 1 ? "s" : ""} you</span>
       </button>
       {open && (
-        <Popover label="Questions waiting on you" onClose={() => setOpen(false)}>
+        <Popover label="Waiting on you" onClose={() => setOpen(false)}>
           <div className="asks">
             <h2 className="h">NEEDS_YOU</h2>
             {asking.map((c) => (
               <section key={c.id}>
                 <button className="asks-card" onClick={() => { setOpen(false); onOpenCard(c.id); }} title="Open the card">{c.title}</button>
                 <AskBlock card={c} />
+              </section>
+            ))}
+            {blocked.map((s) => (
+              <section key={s.id}>
+                <h3 className="asks-project">{s.project}</h3>
+                <ul className="card-session">
+                  <SessionRow
+                    session={s} now={presence.now}
+                    cards={presence.claims.filter((c) => c.sessionId === s.id).map((c) => cards.find((k) => k.id === c.cardId)?.title).filter((t): t is string => !!t)}
+                  />
+                </ul>
               </section>
             ))}
           </div>

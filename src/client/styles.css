@@ -421,7 +421,9 @@ kbd {
   display: flex; gap: 16px; align-items: flex-start;
   padding: 20px 24px 24px;
   overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x proximity;
+  /* Lanes snap to their left edge. Without the padding counted in, a board wider than its space
+     (four lanes with the assistant open) snaps the first lane flush against the edge. */
+  scroll-snap-type: x proximity; scroll-padding: 0 24px;
 }
 /* // START_HERE: the three steps an empty board shows above its lanes. Numbered like the Connect
    page, with a full outline rather than a colored edge. */
@@ -462,6 +464,9 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .lane-head .btn { height: 28px; width: 28px; }
 
 .cards { flex: 1; min-height: 60px; overflow-y: auto; padding: 4px 10px 6px; display: flex; flex-direction: column; gap: 8px; }
+/* An empty lane with quick add open has nothing in the list, not even the hint, so the list gives up
+   the room it holds for a drop and the input sits right under the lane's name. */
+.cards:empty { min-height: 0; padding-top: 0; padding-bottom: 0; }
 .lane-empty {
   border: 1px dashed var(--line); border-radius: var(--radius-sm);
   color: var(--muted); font-size: 13px; text-align: center; padding: 18px 12px;
@@ -517,6 +522,8 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .asks section + section { padding-top: 14px; border-top: var(--border-w) solid var(--line); }
 .asks-card { align-self: flex-start; max-width: 100%; background: none; border: 0; padding: 0; text-align: left; font: 12px var(--font-mono); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .asks-card:hover { color: var(--accent-text); }
+/* A session stopped at a prompt, in the same list: its project where a question has its card. */
+.asks-project { margin: 0; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
@@ -591,7 +598,9 @@ button.chip.tag:hover { border-color: var(--accent); }
 /* ============================================================ chat */
 
 .chat {
-  width: 360px; height: 100%;
+  /* A grid item is at least as tall as its content unless told otherwise, and a long transcript
+     would push the message box off the bottom of the screen instead of scrolling the log. */
+  width: 360px; height: 100%; min-height: 0;
   display: flex; flex-direction: column;
   background: var(--surface); border-left: var(--border-w) solid var(--line);
 }
@@ -785,8 +794,6 @@ a.att-name:hover { color: var(--accent-text); }
    orange $ on the rows that are live. */
 .sess-btn { position: relative; }
 .sess-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
-.sess-btn.waiting { border-color: var(--accent); }
-.sess-btn.waiting .sess-count { background: var(--accent); border-color: var(--accent); color: var(--badge-ink); }
 .sessions { width: 400px; max-width: calc(100vw - 32px); max-height: min(70dvh, 620px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 .sessions section { display: flex; flex-direction: column; gap: 6px; }
 .sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

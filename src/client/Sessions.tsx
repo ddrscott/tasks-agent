@@ -1,5 +1,6 @@
 // The // SESSIONS panel: every Claude Code session reporting in (src/presence.ts), grouped by
-// project, the ones waiting on you first. The list arrives over its own WebSocket, apart from
+// project, the ones waiting on you first. Its button counts live sessions and nothing else: the
+// sessions stopped at a prompt are counted on "need you" (Ask.tsx), with the open questions. The list arrives over its own WebSocket, apart from
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -91,7 +92,7 @@ export function CardSession({ cardId }: { cardId: string }) {
   if (!claim || !session) return null;
   return (
     <ul className="card-session" aria-label="The session working on this card">
-      <Row session={claim.agent && !session.agent ? { ...session, agent: claim.agent } : session} now={now} cards={[]} />
+      <SessionRow session={claim.agent && !session.agent ? { ...session, agent: claim.agent } : session} now={now} cards={[]} />
     </ul>
   );
 }
@@ -110,6 +111,15 @@ const RANK: Record<Session["state"], number> = { "needs-input": 0, working: 1, i
 /** Waiting on you first, then working, then idle; stale ones sink; newest first within each. */
 const order = (now: number) => (a: Session, b: Session) =>
   Number(isStale(a, now)) - Number(isStale(b, now)) || RANK[a.state] - RANK[b.state] || b.seenAt - a.seenAt;
+
+/**
+ * The sessions that are stopped until you do something, longest wait first. They count in the top
+ * bar's "need you" with the open questions (Ask.tsx). Stale ones are left out: a session that's
+ * been quiet for 5 minutes is as likely closed as waiting, and Claude Code's "waiting for your
+ * input" notice puts every finished session in this state after a minute.
+ */
+export const blockedSessions = (sessions: Session[], now: number): Session[] =>
+  sessions.filter((s) => s.state === "needs-input" && !isStale(s, now)).sort((a, b) => a.seenAt - b.seenAt);
 
 /** One session's state, as the orange $ and a word. Shared with the line on a claimed card. */
 export function StateMark({ session, now }: { session: Session; now: number }) {
@@ -133,8 +143,8 @@ function ResumeButton({ session }: { session: Session }) {
   );
 }
 
-/** One row of the Sessions list. Exported for the sample list on the signed-out landing page. */
-export function Row({ session, now, cards }: { session: Session; now: number; cards: string[] }) {
+/** One session as a list row. The Sessions list, the card editor, and the "need you" list all draw it. */
+export function SessionRow({ session, now, cards }: { session: Session; now: number; cards: string[] }) {
   return (
     <li className={`sess-row${isStale(session, now) ? " stale" : ""}`}>
       <div className="sess-line">
@@ -170,8 +180,8 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
   );
   const { sessions, claims, now } = presence;
   const live = sessions.filter((s) => !isStale(s, now));
-  const waiting = live.filter((s) => s.state === "needs-input").length;
-  const summary = waiting ? `${waiting} session${waiting === 1 ? "" : "s"} waiting on you` : `${live.length} live session${live.length === 1 ? "" : "s"}`;
+  // What's waiting on you is counted once, on "need you" next door. This button only says how many are live.
+  const summary = `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {
     const by = new Map<string, Session[]>();
     for (const s of [...sessions].sort(order(now))) by.set(s.project, [...(by.get(s.project) ?? []), s]);
@@ -182,12 +192,12 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
   return (
     <div className="anchor">
       <button
-        className={`btn sess-btn${waiting ? " waiting" : ""}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
+        className="btn sess-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
         // The label can be down to a bare count when the bar is tight, so the name is spelled out.
         title={summary} aria-label={`Sessions: ${summary}`}
       >
         <IconSessions /><span className="hide-sm label">Sessions</span>
-        {sessions.length > 0 && <span className="sess-count">{waiting || live.length}</span>}
+        {sessions.length > 0 && <span className="sess-count">{live.length}</span>}
       </button>
       {open && (
         <Popover label="Sessions" onClose={() => setOpen(false)}>
@@ -205,7 +215,7 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
                 <h3 className="sess-project">{project}<span>{list.length}</span></h3>
                 <ul>
                   {list.map((s) => (
-                    <Row
+                    <SessionRow
                       key={s.id} session={s} now={now}
                       cards={claims.filter((c) => c.sessionId === s.id).map((c) => cardTitle(c.cardId)).filter((t): t is string => !!t)}
                     />

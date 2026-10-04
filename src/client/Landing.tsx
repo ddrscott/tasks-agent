@@ -12,7 +12,7 @@ import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
-import { PresenceContext, Row } from "./Sessions";
+import { PresenceContext, SessionRow } from "./Sessions";
 
 const DEMO = `${BASE}/demo`;
 
@@ -208,7 +208,7 @@ function Shot() {
                       <h3 className="sess-project">{project}<span>{list.length}</span></h3>
                       <ul>
                         {list.map((s) => (
-                          <Row
+                          <SessionRow
                             key={s.id} session={s} now={NOW}
                             cards={CLAIMS.filter((c) => c.sessionId === s.id).map((c) => titleOf(c.cardId)).filter((t): t is string => !!t)}
                           />

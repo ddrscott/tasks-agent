@@ -293,7 +293,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
                 <IconRedo />
               </button>
             </div>
-            <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
+            <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             <SessionsButton
               presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
               cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
