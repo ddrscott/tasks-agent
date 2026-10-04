@@ -898,7 +898,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         <PresenceContext.Provider value={presence}>
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
-          mode={mode} board={sharedBoard ?? undefined}
+          mode={mode} board={sharedBoard ?? undefined} lapsed={access?.reason === "plan_lapsed"}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).catch(refused)}
           onMoveNow={(laneId) => {

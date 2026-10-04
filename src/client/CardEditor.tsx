@@ -38,6 +38,8 @@ type Props = {
   mode?: Mode;
   /** The owner's id, on a board someone shared with you: files go to and come from that board. */
   board?: string;
+  /** On a shared board: it's view only because its owner's Pro plan lapsed, not because of your role. */
+  lapsed?: boolean;
 };
 
 /**
@@ -51,7 +53,7 @@ export function CardEditor(props: Props) {
 }
 
 /** A card to read: the notes rendered with their checkboxes fixed, the files to open or download, and one button, Close. */
-function CardView({ card, lanes, vault, board, onClose, mode }: Props) {
+function CardView({ card, lanes, vault, board, onClose, mode, lapsed }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const owner = useContext(AskOwnerContext);
   // A writer lands here only on an agent's work order; a viewer lands here on every card.
@@ -95,7 +97,7 @@ function CardView({ card, lanes, vault, board, onClose, mode }: Props) {
         </div>
       </div>
       <div className="dialog-foot">
-        <span className="view-note">{held ? `Read only: ${owner ?? "the owner"}'s agent card.` : owner ? `View only on ${owner}'s board.` : "View only."}</span>
+        <span className="view-note">{held ? `Read only: ${owner ?? "the owner"}'s agent card.` : owner ? `View only on ${owner}'s board${lapsed ? " until their Pro plan is back" : ""}.` : "View only."}</span>
         <span className="spacer" />
         <button className="btn primary" onClick={onClose}>Close</button>
       </div>

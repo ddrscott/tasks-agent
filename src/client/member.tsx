@@ -61,6 +61,10 @@ export function bannerText(a: MemberAccess): { lead: string; rest: string } {
   if (a.effective === "writer") {
     return { lead: `You're a writer on ${o}'s board.`, rest: "You can change cards. Lanes, undo, questions, agent cards, and board settings are the owner's." };
   }
+  // A viewer while the owner's plan is lapsed: being made a writer wouldn't help, so don't send them to ask for it.
+  if (a.reason === "plan_lapsed") {
+    return { lead: `You're viewing ${o}'s board. View only.`, rest: "Their Pro plan lapsed, so nobody but them can change cards until it's back. Nothing was deleted." };
+  }
   return { lead: `You're viewing ${o}'s board. View only.`, rest: `To change cards, ask ${o} to make you a writer.` };
 }
 

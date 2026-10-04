@@ -1894,7 +1894,10 @@ address or a guess, and nothing on screen offers a change the server would refus
 - **The line under the top bar** (`.member-line`) stays for as long as a shared board is open:
   a role chip, whose board it is, what you can do, and what would change that. A viewer:
   "View only. To change cards, ask the owner to make you a writer." A writer during a lapse:
-  the owner's Pro plan lapsed, nothing was deleted, and writing comes back with the plan.
+  the owner's Pro plan lapsed, nothing was deleted, and writing comes back with the plan. A
+  viewer during a lapse is told the plan lapsed and that nobody but the owner can change
+  cards until it's back, instead of being sent to ask for a role that wouldn't help; the
+  open card's footer says "until their Pro plan is back" too.
 - **A viewer's board** has no way to change anything: cards don't lift (no drag handlers are
   attached, by mouse, touch, or keyboard), there's no check button, no add card or quick add,
   lane names are plain text with no menu, and `n`, `x`, `/`, and `⌘Z` do nothing. A card opens
