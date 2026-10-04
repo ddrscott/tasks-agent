@@ -287,6 +287,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
   // Sessions: the clock runs every second, so a working session's "4s ago" counts up and starts
   // over when it does the next thing (demoData.ts), and the lead session follows the script.
+  const overAt = useRef<number | null>(null);
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
@@ -294,17 +295,19 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   }, []);
   // The lead session says needs input exactly while its card has a question open: the answer
   // that closes the question is the same change that puts the session back to working.
-  const scene: Scene = !spot ? { at: "idle" }
+  // Out of cards, the lead's row is idle from the moment the script ran out, and ages from there.
+  if (spot) overAt.current = null;
+  else overAt.current ??= Date.now();
+  const scene: Scene = !spot ? { at: "idle", since: overAt.current ?? Date.now() }
     : spot.step === "pickup" ? { at: "between" }
     : { at: spot.card.ask ? "waiting" : spot.step === "ack" ? "heard" : spot.step === "finish" ? "working" : "reading", beat: spot.beat, card: spot.card };
   // The script ran out. `looped` is whether the visitor saw it through: a question answered and the card finished.
   const over = !spot;
   const looped = Object.values(saved.current.at).includes("done");
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
-  const seeded = demoPresence(scene, Date.now(), startedAt);
-  // A card that's finished or gone isn't being worked on. The lead's claim follows the script, which already knows.
+  // A card that's finished or gone isn't being worked on, so nothing holds it, the lead's card included.
   const live = new Set(board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1).map((c) => c.id));
-  const presence = { ...seeded, claims: seeded.claims.filter((c) => c.cardId === spot?.card.id || live.has(c.cardId)) };
+  const presence = demoPresence(scene, Date.now(), startedAt, (id) => live.has(id));
 
   // Keyboard: n new card, t theme, / assistant, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
   useEffect(() => {

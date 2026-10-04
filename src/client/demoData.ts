@@ -188,7 +188,7 @@ function shopWebNow(now: number, startedAt: number): Pick<Session, "last" | "see
 
 /** Which point of the script the lead session is at, worked out from the board (Demo.tsx). */
 export type Scene =
-  | { at: "idle" } // nothing left in the script
+  | { at: "idle"; since: number } // nothing left in the script; `since` is when it ran out
   | { at: "between" } // about to take the next card
   // On a card: reading before it asks, waiting on the answer, heard it a moment ago, or working on it.
   | { at: "reading" | "waiting" | "heard" | "working"; beat: Beat; card: Card };
@@ -205,11 +205,14 @@ const POLL_MS = 30_000;
  * has a question open it holds its claim and polls wait_for_answer, the claim carries the
  * question, and the app's own rule (withAsks) makes the row say needs input and "asked: …".
  * Answering takes the question off the claim, and the row is back to working in the same moment.
+ * Out of cards, it's idle from the moment it finished and gets older from there, like the other.
+ *
+ * `open` says whether a card can still be worked on. One in Done or deleted can't, and a claim
+ * on it is over (endedCards in presence-shared.ts), so its session isn't waiting on it either.
  */
-export function demoPresence(scene: Scene, now: number, startedAt: number): Presence {
-  const recent = (t: number) => Math.max(t, now - 4 * MIN); // nothing here ever goes stale
+export function demoPresence(scene: Scene, now: number, startedAt: number, open: (cardId: string) => boolean = () => true): Presence {
   const leadNow = (): Pick<Session, "state" | "last" | "seenAt"> => {
-    if (scene.at === "idle") return { state: "idle", last: "finished its turn", seenAt: recent(startedAt) };
+    if (scene.at === "idle") return { state: "idle", last: "finished its turn", seenAt: scene.since };
     if (scene.at === "between") return { state: "working", last: "mcp__tasks__get_board", seenAt: now - 2000 };
     if (scene.at === "waiting") {
       // Heard from every time a wait_for_answer call comes back, so it never goes stale while it waits.
@@ -230,13 +233,14 @@ export function demoPresence(scene: Scene, now: number, startedAt: number): Pres
       state: "idle", last: "finished its turn", startedAt: startedAt - 140 * MIN, seenAt: startedAt - MIN,
     },
   ];
-  const claims: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];
+  const held: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];
   if (scene.at !== "idle" && scene.at !== "between") {
     const ask = scene.at === "waiting" ? scene.card.ask : undefined;
-    claims.push({
+    held.push({
       cardId: scene.card.id, sessionId: LEAD, agent: "lead", claimedAt: startedAt,
       ...(ask ? { asked: ask.question, askedAt: Date.parse(ask.askedAt) } : {}),
     });
   }
+  const claims = held.filter((c) => open(c.cardId));
   return { sessions: withAsks(sessions, claims), claims, now };
 }
