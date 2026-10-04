@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The working rules tell agents to put the card's id and the reason for a change in the git commit, so the repo explains itself if the card is later edited or deleted
 - A list pasted into Add a card goes in as one change, so one Undo takes it back out. If some lines can't be added (a shared board that's full, say), those lines stay in the box and it says how many were added, how many are left, and why
 - A malformed request to a shared board is refused with a plain sentence and stores nothing. Tags sent as one piece of text used to be saved a letter at a time
+- On a shared board a member can't drag one of your `#agent` or `#gauntlet` cards up or down inside its lane. Moving it to another lane was already refused
 
 ## [0.2.0] - 2026-10-04
 

@@ -1301,7 +1301,7 @@ each card.
 | Drag a card inside a sorted lane (`setLaneManual` changes the lane's sort) | yes | no | no |
 | Answer or take back a question (`ask_ceo`); delete or finish a card with an open question | yes | no | no |
 | Add or remove `#agent`, `#gauntlet`, `#needs-ceo`, `#ship-ok` on any card | yes | no | no |
-| Edit, move, reorder, delete, tick a box on, or attach to a card tagged `#agent` or `#gauntlet` | yes | no (read only) | no |
+| Edit, move (to another lane or within its own), reorder, delete, tick a box on, or attach to a card tagged `#agent` or `#gauntlet` | yes | no (read only) | no |
 | Undo, redo, and the undo labels | yes | no | no |
 | Cloud assistant chat, its transcript, the daily usage meter | yes | no | no |
 | Theme, encryption, tokens, connected apps, billing, Sessions, event feed, MCP | yes | no | no |
@@ -1536,7 +1536,12 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   notes, due date, tags, or checkboxes, no move, no delete, no file added or removed
   (`[agent_card] That card is a work order for the owner's agents …`). The order of those
   cards among themselves can't change either, since "the top card" is what an agent takes
-  next; a member can still move any other card around them. An upload to such a card is
+  next. A member's call that names one as the card to move is refused whatever the
+  destination, its own lane included (`memberMoveError`, asked by `moveCard` and by the
+  assistant's `move_cards`); it used to go through when the card stayed in its lane and didn't
+  pass another work order. A member can still move any other card around them, which is the
+  one way a work order's place among the plain cards changes: the guard compares boards, and
+  "it moved up one" and "the card above it moved down one" are the same board. An upload to such a card is
   `403 agent_card` before the file is read.
 - **Where it's enforced.** In the write guard (`memberChangeError`), which compares the board
   before and after, so no path around it exists that isn't a path around the guard. A pasted

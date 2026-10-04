@@ -261,6 +261,18 @@ function memberCardError(p: Card | undefined, c: Card): string | null {
   return cardTooBig(p, c);
 }
 
+/**
+ * Why a member can't move these cards, or null. Comparing the board before and after can't
+ * tell "the work order moved up one" from "the card above it moved down one": they're the same
+ * board. So a move is also judged by which card the call names: a work order is never the one
+ * a member moves, to another lane or inside its own. The write guard still holds the rest
+ * (its lane, and its place among the other work orders) whatever was called.
+ */
+export function memberMoveError(b: Board, ids: unknown): string | null {
+  const moving = new Set(Array.isArray(ids) ? ids : [ids]);
+  return b.cards.some((c) => moving.has(c.id) && isAgentCard(c)) ? AGENT_CARD : null;
+}
+
 /** The most cards one `addCards` call takes: a pasted list. A longer paste goes in as several calls. */
 export const ADD_CARDS_MAX = 200;
 

@@ -14,7 +14,7 @@ import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  frameCost, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  frameCost, memberMoveError, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -195,6 +195,13 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private guard(before: Board, after: Board) {
     const c = callers.getStore();
     if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after);
+  }
+
+  /** A member never moves a work order, wherever it's going (memberMoveError). The two ways to move a card both ask. */
+  private memberMayMove(ids: string[]) {
+    if (callers.getStore()?.kind !== "member") return;
+    const no = memberMoveError(this.state, ids);
+    if (no) throw new Error(no);
   }
 
   override setState(next: Board) {
@@ -903,6 +910,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   @callable()
   moveCard(id: string, laneId: string, index: number) {
+    this.memberMayMove([id]);
     this.mutate("Move card", (b) => ops.moveCard(b, id, laneId, index));
   }
 
@@ -1060,6 +1068,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const parsed = t.inputSchema.safeParse(input);
       if (!parsed.success) return { ok: false, summary: `That step's details weren't the right shape. ${shapeError(parsed.error)}` };
       const args = parsed.data;
+      if (name === "move_cards") this.memberMayMove((args as { ids: string[] }).ids);
       let summary = "";
       let ids: string[] | undefined;
       const board = this.mutate(t.label, (b) => {
