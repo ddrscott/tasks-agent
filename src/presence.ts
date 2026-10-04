@@ -281,8 +281,10 @@ export class Presence extends DurableObject<Env> {
     const now = Date.now();
     const cardId = clean(input.cardId, 40);
     const sessionId = clean(input.sessionId, 80);
-    const agent = clean(input.agent, 40) || "agent";
     this.expire(now);
+    // One name per session: what it says now, else what its row already holds. A claim that
+    // leaves agent off doesn't turn "cursor" into "agent" on the card.
+    const agent = clean(input.agent, 40) || this.agentOf(sessionId) || "agent";
     const held = this.sql.exec("SELECT * FROM claims WHERE card_id = ?", cardId).toArray()[0] as
       { card_id: string; session_id: string; agent: string; claimed_at: number } | undefined;
     // expire() already dropped claims of quiet sessions, so a holder that's left is live.

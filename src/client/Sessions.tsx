@@ -80,11 +80,12 @@ export function CardPresence({ cardId }: { cardId: string }) {
 
 /**
  * A session in one line. Under a claimed card's title, and under a question its session is
- * waiting on. Under a question (`askedAt`) the line also names the
+ * waiting on. The name is the session's own, the same one its Sessions row shows; the claim's is
+ * only for a session that never said. Under a question (`askedAt`) the line also names the
  * project and says how long the question has been open, in place of when it was last heard from.
  */
 export function PresenceLine({ session, agent, now, askedAt }: { session: Session; agent?: string; now: number; askedAt?: string }) {
-  const who = whoWhere(session, agent || session.agent);
+  const who = whoWhere(session, session.agent || agent);
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
