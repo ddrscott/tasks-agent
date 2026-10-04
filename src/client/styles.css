@@ -1090,7 +1090,7 @@ a.att-name:hover { color: var(--accent-text); }
 .mono-box.live::before { content: "$ "; color: var(--accent); }
 
 .subhead { font-size: 14px; font-weight: 600; margin: 12px 0 0; }
-.legal section { display: flex; flex-direction: column; gap: 8px; }
+.legal section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 72px; }
 .legal section p, .legal ul { color: var(--muted); max-width: 68ch; }
 .legal ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .legal li::marker { color: var(--accent); }
@@ -1458,6 +1458,7 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .mem-empty, .mem-foot { font-size: 13px; line-height: 1.5; color: var(--muted); }
 .mem-foot { font-size: 12px; }
 .mem-foot .linkish { font-size: inherit; }
+.mem-foot a { color: var(--accent-text); text-underline-offset: 3px; }
 
 /* // HOW_SHARING_WORKS: the same questions and answers in Members and under the pricing plans. */
 .mem-facts, .plan-facts dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px 24px; }
