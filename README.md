@@ -1257,10 +1257,10 @@ each card.
   its owner's user id (32 hex characters). It isn't a secret and opens nothing: every request
   that names a board goes through one function, `access` in `src/members.ts`, and every way
   that can fail gets the same answer, so nothing says whether a board exists.
-- **Membership is in D1** (migrations `0005_team_boards.sql` and up): `board_members` (one row
+- **Membership is in D1** (migrations `0006_team_boards.sql` and up): `board_members` (one row
   per person, pending or accepted; owner id, owner email, member email, member id, role, status,
   token hash, the hash of the link they joined with, expiry, invited/accepted times), `board_audit` (append-only; triggers refuse
-  UPDATE and DELETE; `0006_board_activity.sql` adds `detail` for card entries), `invite_sends` (the daily email count), `board_sharing` (whether the
+  UPDATE and DELETE; `0007_board_activity.sql` adds `detail` for card entries), `invite_sends` (the daily email count), `board_sharing` (whether the
   board is currently view-only because Pro lapsed). Declining, revoking, removing, and
   leaving delete the member row; the audit log keeps what happened.
 - **Emails** are lower-cased and trimmed exactly as sign-in does it, because the account id is
@@ -1717,7 +1717,7 @@ wrong account, a used, expired, revoked, declined, or made-up token. Accepting c
 in the same statement, so a link works once. One case gets a kinder answer, and only from
 `lookup`: the member who used a link, opening it again while they're still on the board, is
 told `{ member: { board, ownerEmail, role } }` ("You're already on dana's board", with an Open
-button). Accepting moves the hash to `used_token_hash` (migration `0007_used_invites.sql`),
+button). Accepting moves the hash to `used_token_hash` (migration `0008_used_invites.sql`),
 and `lookup` reads that column only together with the signed-in account's own id and email on
 an accepted row. So it's no oracle: a stranger holding the link, the owner, another account,
 and the same person after leaving or being removed all get `invite_invalid`, word for word
@@ -2256,10 +2256,20 @@ npm run db:migrate:remote    # FIRST, whenever migrations/ changed
 npm run deploy               # vite build && wrangler deploy
 ```
 
-**Migrate before you deploy.** `0005_team_boards.sql` adds the team-board tables, and the new
-Worker reads them on every sign-in under `ALLOWED_EMAILS`, every Stripe webhook, and every
-`/api/board*` call. Deployed without the migration, those fail. The migration only adds
-tables, so the old Worker runs fine on top of it: migrate, then deploy.
+**Migrate before you deploy.** Four migrations go out with team boards and the admin page, in
+this order: `0005_users.sql` (the admin page's `users` table), then `0006_team_boards.sql`,
+`0007_board_activity.sql`, and `0008_used_invites.sql` (the team-board tables, the audit log's
+card entries, and used invite links). The new Worker reads the team-board tables on every
+sign-in under `ALLOWED_EMAILS`, every Stripe webhook, every Pro switch on the admin page, and
+every `/api/board*` call. Deployed without them, those fail. Without `0005_users.sql` it fails
+safe (`// ADMIN`), but nobody has a Pro grant. The migrations only add tables and columns, so
+the old Worker runs fine on top of them: migrate, then deploy.
+
+The team-board migrations were numbered 0005 to 0007 on their branch and moved up one when the
+admin page's `0005_users.sql` landed on `main` first. They had never been applied to
+production, so nothing there needs fixing. A local database that applied them under the old
+names is the exception: wrangler tracks migrations by filename and would run them again, so
+delete `.wrangler/state` and run `npm run db:migrate:local` from scratch.
 
 Secrets (`npx wrangler secret put <NAME>`): `TURNSTILE_SECRET`, `STRIPE_SECRET_KEY`,
 `STRIPE_WEBHOOK_SECRET`, `GOOGLE_CLIENT_SECRET`, and optionally `MICROSOFT_CLIENT_ID` and

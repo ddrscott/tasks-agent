@@ -4,5 +4,5 @@
 --   {"card":"c1a2b","title":"Ship the invoice","lane":"To do","via":"assistant"}
 -- `via` is there when it wasn't done by hand: "assistant", "agent" (the owner's, over MCP),
 -- "undo", or "redo". NULL on membership rows. Adding a column isn't an UPDATE, so the
--- append-only triggers from 0005 still refuse every change to a row that's there.
+-- append-only triggers from 0006 still refuse every change to a row that's there.
 ALTER TABLE board_audit ADD COLUMN detail TEXT;
