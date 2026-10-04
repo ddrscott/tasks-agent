@@ -119,12 +119,18 @@ run ahead of whatever serves the zone.
   not the sliver of the next one (`collision` and `stepBoard` in `src/client/Board.tsx`).
   dnd-kit's own sideways auto-scroll is off at that width; wider boards still use it.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
-  first, oldest first, and recently updated. It reorders that lane's cards once, the same
-  as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
-  Cards with no due date go last, and ties keep the order they had. The browser works out
-  the order (`sortedIds` in `src/shared.ts`) and the server only applies it (`orderLane`),
-  so it works on an encrypted board, where the server can't read titles or due dates.
-  `npm run check:sort` covers both.
+  first, oldest first, recently updated, and Manual order. The choice is a setting on the
+  lane (`Lane.sort`), saved with the board, so it holds across reloads and follows the
+  account to any browser. A sorted lane stays sorted: a card that's added, edited, or moved
+  in falls into place, the menu marks the current sort with `$`, and the lane head says
+  "by title". Nothing is reshuffled in storage. `shownCards` in `src/shared.ts` gives the
+  order a lane displays, the board uses it, and so does the text board agents read over MCP
+  (which adds "sorted by title" to the lane line). Dragging a card to a new spot inside a
+  sorted lane switches that lane to Manual order and keeps what's on screen, as one change
+  (`setLaneManual`). Undo covers picking a sort and leaving one. Cards with no due date go
+  last, and ties keep the order they had. On an encrypted board the server can't read titles
+  or dates, so it leaves the cards in stored order and the browser sorts its decrypted view;
+  the sort name itself isn't encrypted. `npm run check:sort` covers all of it.
 - **Clearing and deleting a lane.** Clear all cards and Delete lane, in a lane's menu, take two
   taps on the same item. The first changes its label to say what the second will do ("Tap
   again to clear 21 cards", "Tap again to delete Doing and its 3 cards") and changes nothing;

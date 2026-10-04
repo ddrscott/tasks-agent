@@ -9,23 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The footer shows the running version; click it for the latest changes
-- Sort a lane from its menu by due date, title, newest, oldest, or recently updated — Undo puts it back
+- Sort a lane from its menu by due date, title, newest, oldest, or recently updated. The lane remembers it: it stays sorted as cards come and go, after a reload, and in any browser you sign in from
 - Attach files while creating a card — they upload as soon as the card is added
 - The Tags field suggests tags you've already used; tap one to add it
 - Agents can read a card in full over MCP with `get_card`: all of the notes, plus attached screenshots and small text files
+- An empty board shows `// START_HERE`: connect an agent, tag a card `#agent`, answer its questions
+- The Connect page has a Sessions section with the Claude Code hooks to copy and the hook script to download, and a section on working with an agent: the `#agent` tag, questions, claims, and the event feed
+- On a phone or tablet, an open card has a Move to row: tap a lane and the card moves there
+- A card an agent session is working on shows that session in the card: its state, machine, last action, and a Copy resume command button
+- With a tag filter on, each lane's count shows matches out of the total, like `2 / 22`
+- Menus and popovers work from the keyboard: opening one puts you inside it, Esc puts you back on its button, and the arrow keys move through the account and lane menus
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
 - Bigger buttons on touch screens, and Theme moves into the account menu on a phone
 - Long card titles wrap in the card dialogs instead of scrolling out of view
-- The card editor saves only when you hit Save; the X in the top corner (or Esc) closes it and discards your edits
-- Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts instead of the whole board
+- The card editor saves only when you hit Save. The X in the top corner (or Esc) closes it without saving, and asks "Discard changes?" first if you edited something
+- On a touch screen, answering an agent's question from the card on the board takes two taps: the first shows "Send: …?", the second sends it. The questions list and the open card are still one tap
+- The agent's recommended answer on a card is marked `REC`, not only outlined
+- Clear all cards and Delete lane take two taps: the first changes the item to say what the second will do
+- After something is removed, the toast says how many and stays 10 seconds, so there's time to hit Undo
+- The sign-in screen says what Tasks is for: a board your AI agents work from. Security is shorter and says plainly that an encrypted board is closed to outside agents
+- "Connect an agent" is the first item in the account menu, and the Sessions list links to the hook setup
+- When the top bar runs short on room, search shrinks to its icon, then the buttons drop to icon plus count, then the summary goes. On a phone the tag filter chip sits on its own row
+- Orange and gray text is darker in the light themes, and the count badges use dark ink, so small text is easier to read
+- Opening a card puts the cursor in the title. On a phone it leaves the keyboard down until you tap a field
+- The assistant's footer says where it runs instead of naming models
+- Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
 
 ### Fixed
 - Tapping the search icon on a phone opens search
 - iPhones no longer zoom in when you tap a field
 - The "Add card" label in quick add was unreadable against its button
+- Dragging a card to the edge of a phone screen brings in one lane at a time. It used to race to the last lane and drop the card in Done
+- The account button no longer slides off screen when agents have questions open or sessions are reporting in
+- Muted text in Solarized, Sakura, Ocean, and Nord was too faint to read comfortably
+- Screen readers announce every button by name. The account button used to be read out as your email address
+- The Connect page's tool list was missing `get_card` and didn't say `update_card` can set tags
+- On a phone, the Undo toast no longer lands on top of an open quick add
+- Two changes a few milliseconds apart could leave the board showing the older one until the next change
 
 ## [0.1.0] - 2026-10-03
 

@@ -823,6 +823,10 @@ a.att-name:hover { color: var(--accent-text); }
 /* After the first tap on Clear or Delete: the label now says what a second tap does. */
 .menu button.danger.armed, .menu button.danger.armed:hover { background: var(--danger); color: var(--bg); font-weight: 600; }
 .menu-group { display: flex; flex-direction: column; margin: 4px 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+/* The lane's current sort carries the $ marker, like any other live setting. */
+.menu [role="menuitemradio"]::before { content: "$ "; font-family: var(--font-mono); color: var(--accent); visibility: hidden; }
+.menu [role="menuitemradio"][aria-checked="true"]::before { visibility: visible; }
+.lane-sort { margin-left: 4px; font: 11px var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
 .toast {

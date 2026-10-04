@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { hasTag, laneCards, SORTS, sortedIds, type Board, type Card, type Lane, type SortBy } from "../shared";
+import { hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
@@ -18,7 +18,10 @@ export type Actions = {
   deleteLane(id: string): Promise<unknown>;
   moveLane(id: string, index: number): Promise<unknown>;
   clearLane(id: string): Promise<unknown>;
-  sortLane(id: string, ids: string[]): Promise<unknown>;
+  /** Put the lane in this order and turn its saved sort off, in one step. */
+  setLaneManual(id: string, ids: string[]): Promise<unknown>;
+  /** Keep the lane sorted by `by` from now on; null goes back to manual order. */
+  setLaneSort(id: string, by: SortBy | null): Promise<unknown>;
 };
 
 type Props = {
@@ -150,7 +153,9 @@ export function BoardView(p: Props) {
     const ev = e.activatorEvent;
     const at = "touches" in ev ? (ev as TouchEvent).touches[0] : "clientX" in ev ? (ev as MouseEvent) : null;
     pointer.current = at ? { x: at.clientX, y: at.clientY } : null;
-    setDrag({ id: String(e.active.id), cards: board.cards });
+    // Start from what's on screen: a lane with a saved sort shows its cards in that order, not
+    // in stored order, and the indexes worked out on drop have to mean the same thing.
+    setDrag({ id: String(e.active.id), cards: board.lanes.flatMap((l) => shownCards(board, l.id)) });
     p.onDragging(true);
   }
 
@@ -190,10 +195,20 @@ export function BoardView(p: Props) {
       if (a !== -1 && b !== -1 && next[a].laneId === next[b].laneId) next = arrayMove(next, a, b);
     }
     const lane = next.find((c) => c.id === id)!.laneId;
-    const index = laneCards({ ...board, cards: next }, lane).findIndex((c) => c.id === id);
+    const inLane = next.filter((c) => c.laneId === lane);
+    const index = inLane.findIndex((c) => c.id === id);
     const before = board.cards.find((c) => c.id === id)!;
-    const beforeIndex = laneCards(board, before.laneId).findIndex((c) => c.id === id);
+    const beforeIndex = shownCards(board, before.laneId).findIndex((c) => c.id === id);
     if (before.laneId === lane && beforeIndex === index) return;
+    const target = board.lanes.find((l) => l.id === lane);
+    if (target?.sort && before.laneId === lane) {
+      // Dragging a card to a new spot in a sorted lane is choosing your own order, so the lane goes
+      // back to manual and keeps exactly what's on screen.
+      p.onOptimistic({ ...board, cards: next, lanes: board.lanes.map((l) => (l.id === lane ? { id: l.id, name: l.name } : l)) });
+      void p.actions.setLaneManual(lane, inLane.map((c) => c.id)).then(() => p.toast(`${target.name} is in manual order now`, true));
+      return;
+    }
+    // A card dropped into a sorted lane from another one takes its sorted place, wherever it was let go.
     p.onOptimistic({ ...board, cards: next });
     void p.actions.moveCard(id, lane, index);
   }
@@ -229,7 +244,7 @@ export function BoardView(p: Props) {
         {board.lanes.map((lane, i) => (
           <LaneView
             key={lane.id} lane={lane} index={i} lanes={board.lanes}
-            cards={cards.filter((c) => c.laneId === lane.id)}
+            cards={drag ? cards.filter((c) => c.laneId === lane.id) : shownCards(board, lane.id)}
             isDone={lane.id === doneLane && board.lanes.length > 1}
             highlight={!!active && active.laneId === lane.id}
             {...p} onToggle={toggleDone}
@@ -265,12 +280,14 @@ function LaneView(props: Props & {
     setRenaming(false);
   }
 
-  function sort(by: SortBy, say: string) {
+  // The sort is a setting on the lane, saved with the board: it holds across reloads and
+  // browsers, and cards added or changed later fall into place (shownCards in shared.ts).
+  function sort(by: SortBy | null, say: string) {
     setMenu(false);
-    const ids = sortedIds(cards, by);
-    if (ids.every((id, i) => id === cards[i].id)) { props.toast(`${lane.name} is already sorted by ${say}`); return; }
-    void actions.sortLane(lane.id, ids).then(() => props.toast(`Sorted ${lane.name} by ${say}`, true));
+    if ((lane.sort ?? null) === by) return;
+    void actions.setLaneSort(lane.id, by).then(() => props.toast(by ? `${lane.name} stays sorted by ${say}` : `${lane.name} is in manual order`, true));
   }
+  const sortedBy = SORTS.find((o) => o.by === lane.sort);
 
   return (
     <section
@@ -296,6 +313,8 @@ function LaneView(props: Props & {
         ) : (
           <span className="lane-count">{cards.length}</span>
         )}
+        {/* Says why the cards are in this order, and that dragging one will change that. */}
+        {sortedBy && <span className="lane-sort" title={`Sorted by ${sortedBy.say}. Change it from the lane menu.`}>by {sortedBy.say}</span>}
         <span className="spacer" />
         <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
         <div className="anchor">
@@ -306,14 +325,13 @@ function LaneView(props: Props & {
                 <button role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }}>Rename</button>
                 {props.index > 0 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
                 {props.index < props.lanes.length - 1 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
-                {cards.length > 1 && (
-                  <div className="menu-group" role="group" aria-label="Sort by">
-                    <div className="menu-label">Sort by</div>
-                    {SORTS.map((o) => (
-                      <button key={o.by} role="menuitem" onClick={() => sort(o.by, o.say)}>{o.label}</button>
-                    ))}
-                  </div>
-                )}
+                <div className="menu-group" role="group" aria-label="Sort by">
+                  <div className="menu-label">Sort by</div>
+                  {SORTS.map((o) => (
+                    <button key={o.by} role="menuitemradio" aria-checked={lane.sort === o.by} onClick={() => sort(o.by, o.say)}>{o.label}</button>
+                  ))}
+                  <button role="menuitemradio" aria-checked={!sortedBy} onClick={() => sort(null, "")}>Manual order</button>
+                </div>
                 {cards.length > 0 && (
                   <button
                     className={`danger${armed === "clear" ? " armed" : ""}`} role="menuitem"
@@ -553,7 +571,7 @@ export function Popover({ children, onClose, label, menu }: PopoverProps) {
     // long list doesn't scroll to its first link.
     if (!el.contains(at)) {
       const first = menu
-        ? el.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
+        ? el.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')
         : el.querySelector<HTMLElement>('[aria-checked="true"]');
       (first ?? el).focus();
     }
@@ -577,7 +595,7 @@ export function Popover({ children, onClose, label, menu }: PopoverProps) {
     if (e.key === "Tab") { onClose(); return; }
     const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (!step && e.key !== "Home" && e.key !== "End") return;
-    const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
     if (!items.length) return;
     e.preventDefault();
     const i = items.indexOf(document.activeElement as HTMLElement);

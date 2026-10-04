@@ -260,10 +260,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.mutate("Move lane", (b) => ops.moveLane(b, id, index));
   }
 
-  /** Reorder a lane to the order the browser sorted it into (shared.ts, sortedIds). */
+  /** Dragging a card inside a sorted lane: keep the order on screen and drop the sort, as one change and one undo step. */
   @callable()
-  sortLane(id: string, ids: string[]) {
-    this.mutate("Sort lane", (b) => ops.orderLane(b, id, ids));
+  setLaneManual(id: string, ids: string[]) {
+    this.mutate("Manual order", (b) => ops.setLaneSort(ops.orderLane(b, id, ids), id, null));
   }
 
   /** Keep a lane sorted by `by` from now on (null for manual order). Saved on the lane, so it holds across reloads and browsers. */

@@ -96,6 +96,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
+  const newest = useRef<Board | null>(null);
   const pending = useRef<Board | null>(null);
   const agentBusy = useRef(false);
   const chatInput = useRef<HTMLTextAreaElement>(null);
@@ -149,8 +150,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     const layoutChanged = !prev || JSON.stringify({ l: prev.lanes, c: prev.cards }) !== JSON.stringify({ l: next.lanes, c: next.cards });
     const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
     if (prev && layoutChanged && doc.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      doc.startViewTransition(() => flushSync(() => setBoard(next)));
+      // Two updates a few milliseconds apart start two transitions, and the browser skips the first.
+      // Its callback can then run after the second one's, so each callback shows the newest board
+      // it knows of rather than the one it was started with.
+      newest.current = next;
+      doc.startViewTransition(() => flushSync(() => setBoard(newest.current!)));
     } else {
+      newest.current = next;
       setBoard(next);
     }
   }, []);
@@ -291,7 +297,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     deleteLane: (id) => agent.stub.deleteLane(id),
     moveLane: (id, index) => agent.stub.moveLane(id, index),
     clearLane: (id) => agent.stub.clearLane(id),
-    sortLane: (id, ids) => agent.stub.sortLane(id, ids),
+    setLaneManual: (id, ids) => agent.stub.setLaneManual(id, ids),
+    setLaneSort: (id, by) => agent.stub.setLaneSort(id, by),
   }), [agent, out, laneClash]);
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
