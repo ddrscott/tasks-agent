@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Check when the board says "No agent connected yet" (src/shared.ts: markAgentSeen,
 // agentConnected, needsAgent, waitsForAgent, keepSettings), plus what a card's notes and
-// question read as (statusLine, askState). Exits 1 on a failure.
+// question read as (statusLine, faceLine, askState). Exits 1 on a failure.
 //
 //   npm run check:nudge
 
@@ -14,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-nudge");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { markAgentSeen, agentConnected, needsAgent, waitsForAgent, keepSettings, addCard, updateCard, moveCard, deleteCards, newBoard, statusLine, askState, describeCard, askCard, answerAsk } = await import(pathToFileURL(outfile).href);
+const { markAgentSeen, agentConnected, needsAgent, waitsForAgent, keepSettings, addCard, updateCard, moveCard, deleteCards, newBoard, statusLine, faceLine, askState, describeCard, askCard, answerAsk } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -80,6 +80,21 @@ check("a card nobody asked on has no question", askState(describeCard(asked.boar
 asked = askCard(asked.board, askedId, { question: "Now or later?", options: ["Now", "Later"] });
 check("an open question reads as asking", askState(describeCard(asked, askedId)), "asking");
 check("an answered one reads as answered", askState(describeCard(answerAsk(asked, askedId, { choice: 0 }), askedId)), "answered");
+
+// The face of a card right after its question is answered (faceLine): never a STATUS from before the answer.
+const face = (b) => faceLine(b.cards.find((c) => c.id === askedId));
+let told = updateCard(asked, askedId, { notes: "STATUS: blocked — waiting on your pick" });
+check("a plain card shows its STATUS line", faceLine({ notes: "STATUS: working — on it" }), { kind: "status", text: "working — on it" });
+told = answerAsk(told, askedId, { choice: 1 });
+check("right after an answer the face says the answer, not the STATUS from before it", face(told), { kind: "answered", text: "answered: Later" });
+check("the old STATUS is still in the notes, under the ANSWER line", statusLine(told.cards.find((c) => c.id === askedId).notes), "blocked — waiting on your pick");
+const rewrote = updateCard(told, askedId, { notes: told.cards.find((c) => c.id === askedId).notes.replace(/^STATUS:.*$/m, "STATUS: working — going with Later") });
+check("once the agent writes a new STATUS, that shows", face(rewrote), { kind: "status", text: "working — going with Later" });
+check("moving the card doesn't bring the old STATUS back", face(moveCard(told, askedId, "done", 0)), { kind: "answered", text: "answered: Later" });
+const bare = answerAsk(askCard(updateCard(asked, askedId, { notes: "No status here." }), askedId, { question: "Now or later?", options: ["Now", "Later"] }), askedId, { text: "Next week" });
+check("a card with no STATUS shows a typed answer the same way", face(bare), { kind: "answered", text: "answered: Next week" });
+check("an answer from before this was recorded leaves the STATUS alone",
+  faceLine({ notes: "STATUS: old", answer: { question: "q", answer: "a", at: T1 } }), { kind: "status", text: "old" });
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);
