@@ -896,7 +896,9 @@ The machine name is the host's name, or `TASKS_MACHINE`. On a box without this r
 file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) keeps the
 same steps under "Do it by hand": a download of each script, and this JSON with a Copy button,
 pointed at `~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
-hooks") and when it isn't ("Add another machine").
+hooks") and when it isn't ("Add another machine"). When any row came from an agent with no hooks
+(no folder and no link, which is what the quick start alone gives you), one line under the list
+says why that row has no resume command and links there too ("add the session hooks").
 
 **Or with no script, hooks of type `http`.** The same endpoint takes Claude Code's hook payload
 directly:

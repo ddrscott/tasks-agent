@@ -230,6 +230,14 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
                 </ul>
               </section>
             ))}
+            {/* A quick-start agent's row is thinner than a hooks session's, and this is the one place that says why. */}
+            {sessions.some((s) => !s.cwd && !s.link) && (
+              <p className="sess-empty">
+                A row with no resume command is an agent that only claims cards, so that's all it
+                can say. For Claude Code, {connectLink("#sessions", "add the session hooks")} to see
+                its machine, live tool activity, and a resume command.
+              </p>
+            )}
             {/* The way to the Connect page from here, so setup isn't only in the account menu. */}
             <p className="sess-foot">
               {connectLink("", "Connect an agent")}

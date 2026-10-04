@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent's recommended answer on a card is marked `REC`, not only outlined
 - Clear all cards and Delete lane take two taps: the first changes the item to say what the second will do
 - After something is removed, the toast says how many and stays 10 seconds, so there's time to hit Undo
-- "Connect an agent" is the first item in the account menu, and the Sessions list links to the hook setup
+- "Connect an agent" is the first item in the account menu, and the Sessions list links to the hook setup. When a session there only claims cards (an agent connected by the quick start alone), a line under the list says why its row has no machine or resume command and links to the hooks
 - When the top bar runs short on room, search shrinks to its icon, then the buttons drop to icon plus count, then the summary goes. On a phone the tag filter chip sits on its own row
 - Orange and gray text is darker in the light themes, and the count badges use dark ink, so small text is easier to read
 - Opening a card puts the cursor in the title. On a phone it leaves the keyboard down until you tap a field
