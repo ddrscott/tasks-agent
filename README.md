@@ -687,9 +687,9 @@ transcripts in `~/.claude/projects` on the machine that ran them.
 resume command), machine, agent kind, state, the last-action line, when it started, and when it
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
-(`Claude needs your permission to use Bash`). For a session that only claims cards it's
-`claimed "<card title>"` or `released "<card title>"`, the one place a card's title is copied
-here. Rows are deleted 24 hours after they were last
+(`Claude needs your permission to use Bash`). For a session that only claims cards it's a line
+about the card, like `claimed "<card title>"` or `finished "<card title>"`, the one place a
+card's title is copied here. Rows are deleted 24 hours after they were last
 updated, when the session ends, and all at once when the board turns encryption on. At most 200
 are kept.
 
@@ -793,7 +793,9 @@ slow a session; the `X-Tasks-Presence` response header says what happened (`stor
 **Kept apart from the board.** Sessions and claims live in their own Durable Object, `Presence`
 (`src/presence.ts`), one per user, in its own SQLite tables. Nothing goes through
 `TodoAgent.mutate`, so a session reporting in never adds an undo step, flashes a card, reindexes
-search, or publishes an agent event. The browser reads the list over its own WebSocket,
+search, or publishes an agent event. The board tells `Presence` one thing, and nothing comes
+back: which cards a change just finished or deleted, so their claims can end (Claiming cards,
+below). The browser reads the list over its own WebSocket,
 `/tasks/presence`, which takes the session cookie and refuses other origins like the board's.
 
 **Claiming cards.** Several lead agents can work one board. Before starting a card, a lead calls
@@ -805,6 +807,27 @@ last heard from, which is longer than the 5-minute stale mark on purpose: a lead
 keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
 being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
 on the card, so they don't show up in undo, notes, or search.
+
+**A finished card isn't claimed.** A claim says a session is working on the card, and nothing is
+working on a card that's done or gone. So a claim ends the moment its card reaches the last lane
+or is deleted, whoever did it: the agent over MCP (with or without `release_card`), you in the
+app, or the assistant. The card stops saying "working" right then instead of 15 minutes later.
+A `release_card` that arrives afterward finds nothing to release and says so, which is fine.
+
+- **Where it happens.** `TodoAgent.mutate` (and undo and redo, which change the board without it)
+  compares the board before and after with `endedCards` in `src/presence-shared.ts`. If a card
+  ended, it calls `Presence.finish`, which drops the claim. That call is one-way and runs after
+  the change is saved: no undo step, no flash, no agent event. A board with one lane has no done
+  lane, so only a delete ends a claim there. An encrypted board keeps no presence and is skipped.
+- **What counts.** Being in the last lane now and not before. That covers a move, a card added
+  straight to the last lane, and a lane change that makes another lane the last one. A card
+  moved back out of the last lane is just a card again.
+- **Undo doesn't bring a claim back.** Undo the move and the card returns to its lane unclaimed.
+  The agent claims it again if it's still on it; a claim the board invented would say a session
+  is working when nobody has heard that from the session. Redoing the move, or undoing the
+  "Add card" that made a claimed card, ends the claim like any other change does.
+- **The session's row.** A session that reports through hooks keeps the row its hooks wrote.
+  One that only claims gets a new last-action line, below.
 
 **A session that only claims.** An agent with no hooks is heard from through `claim_card` and
 `release_card` alone, so those two calls write its whole row. `agent`, `machine`, and `project`
@@ -818,13 +841,19 @@ names the card by its title.
 | `claim_card`, refused | working if it holds another card, else idle | asked for "Fix the login redirect", which another session holds |
 | `release_card`, holds another card | working | released "Fix the login redirect" |
 | `release_card`, its last card | idle | released "Fix the login redirect" |
+| An agent moved the card to the last lane | idle, or working if it holds another card | finished "Fix the login redirect" |
+| You or the assistant moved it there | same | "Fix the login redirect" was moved to Done |
+| The card was deleted | same | "Fix the login redirect" was deleted |
 | 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
 
 So such a session is "working" only while it holds a card. A refused claim counts as being heard
 from and nothing more. Once a hook reports for a session, the event table above is in charge of
 its row, and a claim or release only moves its last-seen time (and fills in the agent kind when
-the hooks didn't send one). The rules are `afterClaim` and `afterRelease` in
-`src/presence-shared.ts`; `npm run check:presence` runs them, along with the "need you" count.
+the hooks didn't send one). The rules are `afterClaim`, `afterRelease`, `endedCards`, and
+`afterEnded` in `src/presence-shared.ts`; `npm run check:presence` runs them, along with the
+"need you" count. The last three rows don't count as hearing from the session, so its last-seen
+time stays put: the line says "finished" only when an agent made the move, since the board can't
+tell which agent, and says what happened to the card when a person did.
 What a hookless session can't say: that it's stopped at a prompt (its questions go through
 `ask_ceo`), or that it's alive between claims, which is why the lead instructions below renew
 the claim. For a lead agent's instructions:
@@ -832,8 +861,8 @@ the claim. For a lead agent's instructions:
 ```
 Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
 agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
-card you're working at least every 10 minutes, and release_card when you move it to Done or
-hand it to Scott with needs-ceo.
+card you're working at least every 10 minutes, and release_card when you hand it to Scott with
+needs-ceo. Moving a card to Done releases it for you.
 ```
 
 **Encrypted boards keep no presence.** It's metadata about sessions, not card text, so it could

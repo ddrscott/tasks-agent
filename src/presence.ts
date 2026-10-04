@@ -20,8 +20,8 @@ import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 
 import {
-  afterClaim, afterRelease, known, LAPSED, STALE_MS,
-  type Claim, type ClaimRow, type PresenceView, type Session, type SessionState,
+  afterClaim, afterEnded, afterRelease, known, LAPSED, STALE_MS,
+  type Claim, type ClaimRow, type Ended, type PresenceView, type Session, type SessionState,
 } from "./presence-shared";
 
 export { STALE_MS, type Claim, type PresenceView, type Session, type SessionState };
@@ -335,6 +335,32 @@ export class Presence extends DurableObject<Env> {
     }
     this.broadcast();
     return true;
+  }
+
+  /**
+   * Cards that just reached the last lane or were deleted (endedCards in presence-shared.ts; the
+   * board calls this from TodoAgent.mutate and from undo and redo). Their claims are over: nothing
+   * is working on a card that's done or gone. A session that reports through hooks keeps its row
+   * as its hooks left it. One that only claims gets the line from afterEnded, and goes idle if
+   * that was its last card. Nobody was heard from here, so no last-seen time moves.
+   */
+  finish(ended: Ended[]) {
+    this.expire();
+    let dropped = false;
+    for (const e of ended) {
+      const cardId = clean(e.cardId, 40);
+      const held = this.sql.exec("SELECT session_id FROM claims WHERE card_id = ?", cardId).toArray()[0] as { session_id: string } | undefined;
+      if (!held) continue;
+      this.sql.exec("DELETE FROM claims WHERE card_id = ?", cardId);
+      dropped = true;
+      const prev = this.sql.exec("SELECT project, machine, agent, state, last, hooks FROM sessions WHERE id = ?", held.session_id).toArray()[0] as
+        (ClaimRow & { hooks: number }) | undefined;
+      if (!prev || prev.hooks) continue;
+      const holds = this.sql.exec("SELECT COUNT(*) AS n FROM claims WHERE session_id = ?", held.session_id).toArray()[0].n as number;
+      const row = afterEnded(prev, { title: clean(e.title, 80), how: e.how, lane: clean(e.lane, 40), by: e.by }, holds);
+      this.sql.exec("UPDATE sessions SET state = ?, last = ? WHERE id = ?", row.state, row.last.slice(0, 120), held.session_id);
+    }
+    if (dropped) this.broadcast();
   }
 
   /** The browser's live list. The Worker has already checked the session cookie; `x-user` names the user. */

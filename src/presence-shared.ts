@@ -104,5 +104,54 @@ export function afterRelease(prev: ClaimRow, title: string, holds: number): Clai
   return { ...prev, state: holds > 0 ? "working" : "idle", last: `released ${named(title)}` };
 }
 
+// ── A claimed card that's finished or gone ───────────────────────────────────────────────────
+// A claim says "a session is working on this". A card in the last lane is done and a deleted
+// card is gone, so neither can be worked on, whoever moved it. The board (agent.ts) spots those
+// cards with endedCards on every change, undo and redo included, and Presence drops their claims.
+
+/** As much of a board as the rule needs. */
+type LanesAndCards = { lanes: { id: string; name: string }[]; cards: { id: string; laneId: string; title: string }[] };
+
+/** A card whose claim is over: it reached the last lane (`lane` is that lane's name) or was deleted. */
+export type Ended = { cardId: string; title: string; how: "done" | "deleted"; lane: string; by: "you" | "agent" };
+
+/**
+ * The cards a change finished or removed. "Finished" is being in the last lane now and not
+ * before, so dragging a card there counts, and so does a lane change that makes its lane the
+ * last one. A card that was already there, or a board with one lane, is left alone.
+ */
+export function endedCards(before: LanesAndCards, after: LanesAndCards, by: Ended["by"]): Ended[] {
+  if (before.cards === after.cards && before.lanes === after.lanes) return [];
+  const lastBefore = before.lanes.length > 1 ? before.lanes[before.lanes.length - 1].id : null;
+  const last = after.lanes.length > 1 ? after.lanes[after.lanes.length - 1] : null;
+  const now = new Map(after.cards.map((c) => [c.id, c]));
+  const was = new Map(before.cards.map((c) => [c.id, c]));
+  const out: Ended[] = [];
+  for (const c of before.cards) {
+    if (!now.has(c.id)) out.push({ cardId: c.id, title: c.title, how: "deleted", lane: "", by });
+  }
+  if (last) {
+    for (const c of after.cards) {
+      if (c.laneId !== last.id) continue;
+      const old = was.get(c.id);
+      if (old && old.laneId === lastBefore) continue;
+      out.push({ cardId: c.id, title: c.title, how: "done", lane: last.name, by });
+    }
+  }
+  return out;
+}
+
+/**
+ * The row of a session that only claims, after a card it held was finished or deleted. `holds`
+ * is how many cards it still has. An agent that moved the card itself "finished" it; when the
+ * person did, the line says what happened to the card instead of crediting the session.
+ */
+export function afterEnded(prev: ClaimRow, e: Pick<Ended, "title" | "how" | "lane" | "by">, holds: number): ClaimRow {
+  const last = e.how === "deleted" ? `${named(e.title)} was deleted`
+    : e.by === "agent" ? `finished ${named(e.title)}`
+    : `${named(e.title)} was moved to ${e.lane || "the last lane"}`;
+  return { ...prev, state: holds > 0 ? "working" : "idle", last };
+}
+
 /** What a row says once its claims ran out because the session stopped renewing them. */
 export const LAPSED = "its claim lapsed";
