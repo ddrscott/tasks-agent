@@ -1411,14 +1411,16 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 
 | | Limit | What happens past it |
 |---|---|---|
-| Frames from one member, all their tabs together | a token bucket: 40 at once, refilling 4 a second | the call answers `[slow_down] Slow down. …` and costs no D1 read |
+| Frames from one member, all their tabs together | a token bucket: 40 tokens at once, refilling 4 a second. A frame costs 1 token plus 1 for every 2 KB it carries (`frameCost`), so a drag or a typed card is 1 and the biggest notes are 6 or 7 | the call answers `[slow_down] Slow down. …` and costs no D1 read |
 | Refusals before the bucket has refilled to full (10 quiet seconds) | 100 | the socket is closed with code **4429**; a new one gets what the bucket holds, and connecting costs a token (an empty bucket answers the upgrade 429) |
 | One frame | 32 KB, text only | the socket is closed with code **1009** |
 | Sockets per member on one board | 4 | a fifth closes the oldest (code 1008) |
 | Member sockets on one board | 48 | the upgrade answers 503 until some close |
-| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date, 32 KB as JSON | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
+| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
+| The same text as it's stored (JSON, UTF-8 bytes) | title 600 bytes, notes 12 KB, the whole card 32 KB | `[too_big] …`. 4,000 characters of any script fit, and so do 4,000 quotes or line breaks. What doesn't is text that's short in characters and long in bytes |
+| Control characters in a member's title, notes, or tags | none, except a newline and a tab in notes | `[bad_text] …`. One is six bytes as stored (`\u0001`). The app takes them out of what's typed or pasted before it sends (`plainText`), so a person never sees this |
 | Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
-| The board as JSON | 1 MB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine |
+| The board as stored (JSON, UTF-8 bytes) | 768 KB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine. The board's Durable Object keeps it in one 2 MB row, so the owner always has more than half of it to themselves |
 | Card deletions by one member | 200 a UTC day | `[delete_limit] …`. Each one is a row in the audit log, which nothing prunes |
 | Board pushes to one member socket | at most one every 200 ms | a burst of writes is coalesced: each socket gets the board as it stands, five times a second at most. One change on a quiet board goes out at once |
 
@@ -1428,8 +1430,21 @@ their own path has the field sizes and no ceiling on cards. An error whose messa
 code in brackets is shown without it (`plainError`). Measured with `check:members`: 400
 `addCard` frames with 4,000-character notes, sent as fast as the socket takes them, used to all
 succeed in about 4.5 seconds and push 337 MB to each watching socket (the whole board, once per
-write). Now 38 get through, 100 are refused, the socket is closed in about 0.3 seconds, and a
-watching socket is sent the board twice, about 160 KB.
+write). Now 19 get through, 100 are refused, the socket is closed in about 0.3 seconds, and a
+watching socket is sent the board twice, about 84 KB.
+
+**How fast a member can make the board bigger.** A writer used to be able to take the board to
+1 MB in about three seconds: 45 frames of 4,000 control characters, which are six bytes each
+as stored, and every one of those writes sent the whole board to every owner tab and put a
+copy in undo history. Three things changed. Control characters are refused, and text is
+measured in bytes as stored, so 4,000 characters are 12 KB at most. A member's ceiling for
+the whole board is 768 KB, measured the same way, which leaves the owner more than half of the
+2 MB row. And the bucket charges a frame for what it carries, so growth has a speed limit:
+40 tokens of burst (about 80 KB) and then 4 tokens a second, 8 KB a second. `check:members`
+sends the biggest notes a card takes for six seconds: 10 of 40 writes land and the board
+grows 122 KB. At that rate the ceiling is about a minute and a half away, not three seconds,
+and the owner's tabs are sent the board about once a second while it lasts, not 45 times.
+The owner is never locked out: their own changes have no ceiling short of the row itself.
 
 **The write guard.** One place, `guard` in `src/agent.ts`, run twice on every change: in
 `mutate` before anything is written, and in the `setState` override that every path ends in.

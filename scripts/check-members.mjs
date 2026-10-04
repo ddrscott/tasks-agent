@@ -177,9 +177,25 @@ section("access rules (pure)");
   ok(`a member can't add a card past ${L.cards}`, memberChangeError(many(L.cards - 1), shared.addCard(many(L.cards - 1), { title: "last" }).board) === null && code(memberChangeError(full, shared.addCard(full, { title: "one more" }).board)) === "board_full");
   ok("on a full board a member can still edit, move, and delete", memberChangeError(full, shared.updateCard(full, "c1", { title: "edited" })) === null && memberChangeError(full, shared.moveCard(full, "c1", full.lanes[1].id, 0)) === null && memberChangeError(full, shared.deleteCards(full, ["c1"])) === null);
   const heavy = many(300, "n".repeat(3600));
-  ok("a member can't grow a board past 1 MB", JSON.stringify(heavy).length > L.boardBytes && code(memberChangeError(heavy, shared.addCard(heavy, { title: "more" }).board)) === "board_full" && code(memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "n".repeat(3700) }))) === "board_full");
+  ok(`a member can't grow a board past ${L.boardBytes / 1024} KB`, JSON.stringify(heavy).length > L.boardBytes && code(memberChangeError(heavy, shared.addCard(heavy, { title: "more" }).board)) === "board_full" && code(memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "n".repeat(3700) }))) === "board_full");
   ok("and can still shrink one that's over", memberChangeError(heavy, shared.deleteCards(heavy, ["c1"])) === null && memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "short" })) === null);
   ok("the owner isn't held to a member's limits", !throws(() => assertMayChange("owner", null, full, shared.addCard(full, { title: "one more" }).board)));
+
+  // Size is what's stored and sent: bytes of JSON, not characters. And control characters aren't text.
+  const { jsonBytes, plainText, frameCost } = rules;
+  const R0 = () => rules.MEMBER_RATE;
+  const notesOf = (notes) => memberChangeError(b, withCard({ notes }));
+  ok("notes take 4,000 characters of any script, quotes and line breaks included", notesOf("é".repeat(L.notes)) === null && notesOf("漢".repeat(L.notes)) === null && notesOf('"'.repeat(L.notes)) === null && notesOf("line\n\tindented\n".repeat(200)) === null && notesOf("😀".repeat(L.notes / 2)) === null);
+  ok("4,000 control characters are refused, not stored at six bytes each", code(notesOf("\u0001".repeat(L.notes))) === "bad_text" && jsonBytes("\u0001".repeat(L.notes)) > 20_000);
+  ok("so is one control character, in notes, a title, or a tag", ["\u0000", "\u0007", "\u001b", "\r", "\u007f", "\u0085"].every((ch) => code(notesOf(`a${ch}b`)) === "bad_text" && code(memberChangeError(b, withCard({ title: `a${ch}b` }))) === "bad_text") && code(memberChangeError(b, withCard({ title: "two\nlines" }))) === "bad_text" && code(memberChangeError(b, withCard({ tags: ["a\u0001b"] }))) === "bad_text");
+  ok("text that's small in characters and big in bytes is held to its bytes", code(notesOf("\ud800".repeat(L.notes))) === "too_big" && jsonBytes("\ud800".repeat(L.notes)) > L.notesBytes && code(memberChangeError(b, withCard({ title: "\ud800".repeat(L.title) }))) === "too_big");
+  ok("what the app sends has its control characters taken out first", plainText("a\u0000b\u0007c\r\nd\re\tf\u007f") === "abc\nd\ne\tf" && notesOf(plainText(`pasted\r\n${"\u0001".repeat(50)}text`)) === null);
+  const ownersNotes = withCard({ notes: `written some other way\r\n${"\u0001".repeat(100)}` });
+  ok("a member can still move, tag, or retitle a card whose notes weren't theirs to check", memberChangeError(ownersNotes, shared.moveCard(ownersNotes, card.id, b.lanes[1].id, 0)) === null && memberChangeError(ownersNotes, shared.updateCard(ownersNotes, card.id, { tags: ["x"], title: "Renamed" })) === null && code(memberChangeError(ownersNotes, shared.updateCard(ownersNotes, card.id, { notes: "mine now\u0001" }))) === "bad_text");
+  const wide = many(100, "漢".repeat(3000));
+  ok(`the board's ceiling is ${L.boardBytes / 1024} KB as stored, however few characters that is`, JSON.stringify(wide).length < L.boardBytes && jsonBytes(wide) > L.boardBytes && code(memberChangeError(wide, shared.addCard(wide, { title: "more" }).board)) === "board_full" && memberRoom(wide).bytes < 0 && L.boardBytes <= 1024 * 1024);
+  ok("a frame costs one token, and more the more it carries", frameCost(0) === 1 && frameCost(300) === 1 && frameCost(R0().bytesPerToken) === 2 && frameCost(12 * 1024) === 7 && frameCost(32 * 1024) === 17 && frameCost(32 * 1024) < R0().burst);
+  ok("a big frame is refused when the bucket can't cover it, and a small one still goes", (() => { const bk = { tokens: 5, at: 1000, strikes: 0 }; const big = rules.spendToken(bk, 1000, R0(), 7); const small = rules.spendToken(bk, 1000, R0(), 1); return big.ok === false && small.ok === true && bk.tokens === 4; })());
   // A pasted list is judged one card at a time (takeRoom), so what fits lands and the rest is handed back.
   const nearly = many(L.cards - 2);
   const room = memberRoom(nearly);
@@ -1346,6 +1362,44 @@ section("a member who floods");
   const rest = await calm.rpc("deleteCard", [ids[perDay]]);
   ok(`${perDay} deletions in a day go through, and the next is refused with delete_limit`, most.result?.outcomes?.[0]?.ok === true && rest.success === false && codeOf(rest) === "delete_limit", [most.result?.outcomes, rest]);
   ok("the owner isn't counted", (await fo.rpc("clearLane", [lane])).success === true && fo.state().cards.filter((c) => c.laneId === lane).length === 0);
+
+  // How fast a member can make the board bigger. It used to be 1 MB in about three seconds:
+  // 45 frames of 4,000 control characters, six bytes each as stored.
+  {
+    console.log(`     … waiting ${burst / perSecond + 1}s for the flooder's bucket to refill`);
+    await sleep((burst / perSecond + 1) * 1000);
+    const size = () => rules.jsonBytes(fo.state());
+    const grow = await open(flooder, { board: floodOwner.id, unpaced: true });
+    await grow.wait((f) => f.type === "cf_agent_state");
+    const from = size();
+    let gmark = grow.frames.length;
+    for (let i = 0; i < 45; i++) grow.send({ type: "rpc", id: `ctl${i}`, method: "addCard", args: [lane, `control ${i}`, false, { notes: "\u0001".repeat(4000) }] });
+    await grow.wait((f) => f.type === "rpc" && f.id === "ctl44", 8000, gmark);
+    const ctl = grow.frames.slice(gmark).filter((f) => f.type === "rpc");
+    await sleep(400);
+    ok("45 frames of 4,000 control characters add nothing", ctl.length === 45 && ctl.every((r) => !r.success && ["bad_text", "slow_down"].includes(codeOf(r))) && ctl.some((r) => codeOf(r) === "bad_text") && size() === from && !fo.state().cards.some((c) => /^control/.test(c.title)), [ctl.filter((r) => r.success).length, size() - from]);
+    console.log(`     … waiting ${burst / perSecond + 1}s for the bucket again`);
+    await sleep((burst / perSecond + 1) * 1000);
+    // The biggest notes a card takes, sent steadily for six seconds.
+    gmark = grow.frames.length;
+    const t0g = Date.now();
+    const big = "漢".repeat(4000);
+    let sent = 0;
+    while (Date.now() - t0g < 6000) { grow.send({ type: "rpc", id: `grow${sent}`, method: "addCard", args: [lane, `grow ${sent}`, false, { notes: big }] }); sent++; await sleep(150); }
+    await sleep(600);
+    const replies = grow.frames.slice(gmark).filter((f) => f.type === "rpc");
+    const landed = replies.filter((r) => r.success).length;
+    const grew = size() - from;
+    const most = (burst + perSecond * 7) * rules.MEMBER_RATE.bytesPerToken;
+    console.log(`     … ${sent} writes of 12 KB notes in 6 s: ${landed} landed, the board grew ${grew.toLocaleString("en-US")} bytes (the bucket allows ${most.toLocaleString("en-US")})`);
+    ok("the biggest legitimate notes, sent steadily, grow the board no faster than the bucket pays for", landed >= 4 && landed < sent && grew > 0 && grew <= most && replies.filter((r) => !r.success).every((r) => codeOf(r) === "slow_down"), [landed, sent, grew]);
+    ok("which is well short of the board's ceiling in that time", grew < rules.MEMBER_LIMITS.boardBytes / 4, grew);
+    grow.close();
+    await fo.rpc("clearLane", [lane]);
+    console.log(`     … waiting ${burst / perSecond + 1}s for the bucket again`);
+    await sleep((burst / perSecond + 1) * 1000);
+    pacers.delete(flooder.id);
+  }
 
   // Tabs. A fifth socket for one member closes their oldest.
   const tabs = [];

@@ -78,17 +78,25 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
  * with SLOW_DOWN. `strikes` refusals without the bucket ever refilling to full is a flood, and
  * the socket that sent the last one is closed (CLOSE_FLOOD).
  */
-export const MEMBER_RATE = { burst: 40, perSecond: 4, strikes: 100 } as const;
+export const MEMBER_RATE = { burst: 40, perSecond: 4, strikes: 100, /** A frame costs one token, plus one for every this many bytes of it. */ bytesPerToken: 2048 } as const;
 export type Bucket = { tokens: number; at: number; strikes: number };
 
-/** Take one token. `ok` is whether the frame may run; `flood` is whether to close the socket. Mutates and returns the bucket. */
-export function spendToken(b: Bucket | undefined, now: number, rate: { burst: number; perSecond: number; strikes: number } = MEMBER_RATE): { bucket: Bucket; ok: boolean; flood: boolean } {
+/**
+ * What a frame of `bytes` costs. A drag, a tick, or a typed card is one token. A frame that
+ * carries a lot of text costs more, so the bucket limits how fast a member can grow the board
+ * and not only how often they can call it: the biggest notes a card takes (12 KB) are 6 or 7
+ * tokens, which is one such write every second and a half once the burst is spent.
+ */
+export const frameCost = (bytes: number) => 1 + Math.floor(Math.max(0, bytes) / MEMBER_RATE.bytesPerToken);
+
+/** Take `cost` tokens. `ok` is whether the frame may run; `flood` is whether to close the socket. Mutates and returns the bucket. */
+export function spendToken(b: Bucket | undefined, now: number, rate: { burst: number; perSecond: number; strikes: number } = MEMBER_RATE, cost = 1): { bucket: Bucket; ok: boolean; flood: boolean } {
   const bucket = b ?? { tokens: rate.burst, at: now, strikes: 0 };
   bucket.tokens = Math.min(rate.burst, bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * rate.perSecond);
   bucket.at = now;
   // Quiet for long enough to fill up again: whatever happened before is forgiven.
   if (bucket.tokens >= rate.burst) bucket.strikes = 0;
-  if (bucket.tokens >= 1) { bucket.tokens -= 1; return { bucket, ok: true, flood: false }; }
+  if (bucket.tokens >= cost) { bucket.tokens -= cost; return { bucket, ok: true, flood: false }; }
   bucket.strikes += 1;
   return { bucket, ok: false, flood: bucket.strikes >= rate.strikes };
 }
@@ -100,23 +108,47 @@ export const plainError = (message: string) => message.replace(/^\[[a-z_]+\]\s*/
 export const SLOW_DOWN = "[slow_down] Slow down. That's too many changes at once. Wait a few seconds and try again.";
 
 /**
- * The most a member may grow someone else's board to. The field sizes are the ones every edit
- * already gets (clean and tidyNotes in shared.ts); here they're checked on the result, so no
- * path a member's change takes can skip them (text that looks encrypted is passed through
- * untrimmed by those, and a shared board is never encrypted). `cards` and `boardBytes` are
- * ceilings on growth only: on a board already over one, a member can still edit, move, and
- * delete, and can't add.
+ * The most a member may grow someone else's board to. The field sizes in characters are the
+ * ones every edit already gets (clean and tidyNotes in shared.ts); here they're checked on the
+ * result, so no path a member's change takes can skip them (text that looks encrypted is
+ * passed through untrimmed by those, and a shared board is never encrypted).
+ *
+ * Characters aren't what the board costs to store and send, bytes are, and one character can
+ * be six of them: a control character is written `\u0001` in JSON. So a member's text is also
+ * held to a size in bytes as it's stored (JSON, UTF-8), and control characters other than a
+ * newline and a tab are refused outright (`jsonBytes`, `CONTROL` below).
+ *
+ * `cards` and `boardBytes` are ceilings on growth only: on a board already over one, a member
+ * can still edit, move, and delete, and can't add. `boardBytes` is well under the 2 MB row the
+ * board's Durable Object stores it in, so a member can never fill what the owner has left.
  */
 export const MEMBER_LIMITS = {
   title: 200, notes: 4000, tags: 10, tag: 32,
-  /** One card as JSON, files and all. Room for 4,000 characters of notes that each need escaping, and 20 files. */
+  /** A title as stored: 200 characters of any script (3 bytes each at most for one UTF-16 unit). */
+  titleBytes: 600,
+  /** Notes as stored: 4,000 characters of any script, or of quotes and line breaks, which double when escaped. */
+  notesBytes: 12 * 1024,
+  /** One card as stored, files and all: the biggest notes, 20 files, and tags. */
   cardBytes: 32 * 1024,
   cards: 1000,
-  /** The whole board as JSON. Its Durable Object stores it in one 2 MB row, and every change sends all of it to every open tab. */
-  boardBytes: 1024 * 1024,
+  /** The whole board as stored, in bytes. A member can't push it past this; the owner has the rest of the 2 MB row. */
+  boardBytes: 768 * 1024,
   /** Cards one member may delete in a UTC day. Each is a row in the owner's audit log, which nothing prunes. */
   deletesPerDay: 200,
 } as const;
+
+const utf8 = new TextEncoder();
+/** How many bytes a value takes as the board stores and sends it: JSON, in UTF-8. */
+export const jsonBytes = (v: unknown) => utf8.encode(JSON.stringify(v ?? null)).length;
+/** Control characters. A title takes none; notes take a newline and a tab. */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const CONTROL_IN_NOTES = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
+const BAD_TEXT = "[bad_text] Card text can't hold control characters, only letters, numbers, punctuation, spaces, tabs, and line breaks. Take them out and try again.";
+/**
+ * Text as the app sends it: Windows line ends become plain ones, and control characters other
+ * than a newline and a tab are dropped, so what a person pastes is never refused for them.
+ */
+export const plainText = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
 
 // ---------- the tags that direct the owner's agents ----------
 
@@ -159,19 +191,19 @@ function memberCardError(p: Card | undefined, c: Card): string | null {
   if (p && isAgentCard(p)) return AGENT_CARD;
   const tag = ownerTagChanged(p, c) ?? (typeof c.title === "string" && p?.title !== c.title ? ownerTagInTitle(c.title) : null);
   if (tag) return ownerTagError(tag);
-  return cardTooBig(c);
+  return cardTooBig(p, c);
 }
 
 /** The most cards one `addCards` call takes: a pasted list. A longer paste goes in as several calls. */
 export const ADD_CARDS_MAX = 200;
 
 const BOARD_FULL_CARDS = `[board_full] This board has ${MEMBER_LIMITS.cards.toLocaleString("en-US")} cards, the most a member can add to. Delete some, or ask the owner.`;
-const BOARD_FULL_BYTES = "[board_full] This board is as big as a member can make it (1 MB of cards). Delete some cards or shorten some notes, or ask the owner.";
+const BOARD_FULL_BYTES = `[board_full] This board is as big as a member can make it (${MEMBER_LIMITS.boardBytes / 1024} KB of cards). Delete some cards or shorten some notes, or ask the owner.`;
 
-/** What's left under a member's ceilings: how many more cards, and how many more characters of board. */
+/** What's left under a member's ceilings: how many more cards, and how many more bytes of board. */
 export type Room = { cards: number; bytes: number };
 export function memberRoom(b: Board): Room {
-  return { cards: Math.max(0, MEMBER_LIMITS.cards - b.cards.length), bytes: MEMBER_LIMITS.boardBytes - JSON.stringify(b).length };
+  return { cards: Math.max(0, MEMBER_LIMITS.cards - b.cards.length), bytes: MEMBER_LIMITS.boardBytes - jsonBytes(b) };
 }
 /** Room kept for the "who added it" mark the board stamps on a card after this is asked (stampBy). */
 const BY_ROOM = 320;
@@ -186,21 +218,33 @@ export function takeRoom(room: Room, c: Card): string | null {
   const no = memberCardError(undefined, c);
   if (no) return no;
   if (room.cards < 1) return BOARD_FULL_CARDS;
-  const size = JSON.stringify(c).length + 1 + BY_ROOM;
+  const size = jsonBytes(c) + 1 + BY_ROOM;
   if (size > room.bytes) return BOARD_FULL_BYTES;
   room.cards -= 1;
   room.bytes -= size;
   return null;
 }
 
-function cardTooBig(c: Card): string | null {
+/**
+ * Whether a card a member added or changed is over a limit. `p` is the card before, when there
+ * was one. The lengths in characters are checked on the whole card. The checks on how text is
+ * stored (control characters, bytes) are only made on a field this change wrote, so a member
+ * can still move, tick, or tag a card whose notes the owner or the owner's agent wrote some
+ * other way.
+ */
+function cardTooBig(p: Card | undefined, c: Card): string | null {
   const L = MEMBER_LIMITS;
   if (typeof c.title !== "string" || !c.title || c.title.length > L.title) return `[too_big] A card's title can be up to ${L.title} characters.`;
   if (typeof c.notes !== "string" || c.notes.length > L.notes) return `[too_big] A card's notes can be up to ${L.notes.toLocaleString("en-US")} characters.`;
   if (c.due !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.due))) return "[too_big] Due dates must look like 2026-09-30.";
   const tags = c.tags ?? [];
   if (!Array.isArray(tags) || tags.length > L.tags || tags.some((t) => typeof t !== "string" || !t || t.length > L.tag)) return `[too_big] A card can have ${L.tags} tags of up to ${L.tag} characters each.`;
-  if (JSON.stringify(c).length > L.cardBytes) return "[too_big] That card is too big to save.";
+  const wrote = { title: p?.title !== c.title, notes: p?.notes !== c.notes, tags: !same(p?.tags, c.tags) };
+  if ((wrote.title && CONTROL.test(c.title)) || (wrote.notes && CONTROL_IN_NOTES.test(c.notes)) || (wrote.tags && tags.some((t) => CONTROL.test(t)))) return BAD_TEXT;
+  if (wrote.title && jsonBytes(c.title) > L.titleBytes) return `[too_big] That title takes more room than a title gets (${L.titleBytes} bytes as stored). Shorten it.`;
+  if (wrote.notes && jsonBytes(c.notes) > L.notesBytes) return `[too_big] Those notes take more room than a card's notes get (${L.notesBytes / 1024} KB as stored). Shorten them.`;
+  const size = jsonBytes(c);
+  if (size > L.cardBytes && (!p || size > jsonBytes(p))) return "[too_big] That card is too big to save.";
   return null;
 }
 
@@ -246,10 +290,8 @@ export function memberChangeError(before: Board, after: Board): string | null {
   if (after.cards.length > before.cards.length && after.cards.length > MEMBER_LIMITS.cards) {
     return BOARD_FULL_CARDS;
   }
-  const size = JSON.stringify(after).length;
-  if (size > MEMBER_LIMITS.boardBytes && size > JSON.stringify(before).length) {
-    return BOARD_FULL_BYTES;
-  }
+  const size = jsonBytes(after);
+  if (size > MEMBER_LIMITS.boardBytes && size > jsonBytes(before)) return BOARD_FULL_BYTES;
   return null;
 }
 

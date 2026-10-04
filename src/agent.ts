@@ -14,7 +14,7 @@ import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  MEMBER_LIMITS, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  frameCost, MEMBER_LIMITS, MEMBER_RATE, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -60,7 +60,7 @@ const MEMBER_TAG = "tasks-member";
 const MAX_SOCKETS_PER_MEMBER = 4;
 /** Every member's sockets on one board together. Past it, a new one is refused until some close. */
 const MAX_MEMBER_SOCKETS = 48;
-/** The biggest frame a member may send. A card's notes are 4,000 characters; a local assistant turn is eight small calls. */
+/** The biggest frame a member may send, in characters. A card's notes are 4,000 characters; a local assistant turn is eight small calls. */
 const MEMBER_FRAME_MAX = 32 * 1024;
 /**
  * How long a member's access check is trusted before D1 is asked again. Without it every frame
@@ -92,6 +92,8 @@ function memberMeta(ws: WebSocket): MemberMeta | null {
     return null;
   }
 }
+
+const utf8 = new TextEncoder();
 
 function sendTo(ws: WebSocket, frame: string) {
   try { ws.send(frame); } catch { /* it closed under us */ }
@@ -208,9 +210,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Token buckets, one per member id (spendToken in member-rules.ts). In memory: an idle board forgets them, and that's fine. */
   private buckets = new Map<string, Bucket>();
 
-  /** Spend one of a member's tokens. */
-  private spend(memberId: string) {
-    const r = spendToken(this.buckets.get(memberId), Date.now());
+  /** Spend a member's tokens: one for a call, more for a frame that carries a lot (frameCost). */
+  private spend(memberId: string, cost = 1) {
+    const r = spendToken(this.buckets.get(memberId), Date.now(), MEMBER_RATE, cost);
     this.buckets.set(memberId, r.bucket);
     return r;
   }
@@ -304,7 +306,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       try { ws.close(CLOSE_TOO_BIG, "frame too big"); } catch { /* already closed */ }
       return;
     }
-    const spent = this.spend(was.id);
+    // Charged by size as well as by count, in bytes as the text will be stored.
+    const spent = this.spend(was.id, frameCost(typeof message === "string" ? utf8.encode(message).length : size));
     if (!spent.ok) {
       const id = typeof message === "string" ? rpcIdOf(message) : null;
       if (id) sendTo(ws, JSON.stringify({ type: "rpc", id, done: true, success: false, error: SLOW_DOWN }));

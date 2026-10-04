@@ -35,7 +35,7 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
-import { ADD_CARDS_MAX, isOwnerTag, plainError } from "../member-rules";
+import { ADD_CARDS_MAX, isOwnerTag, plainError, plainText } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string };
@@ -563,7 +563,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
         let size = 0;
         while (i + piece.length < lines.length && piece.length < ADD_CARDS_MAX) {
           const { title, tags } = splitTitleTags(lines[i + piece.length]);
-          const item = { title: await out(clean(title, 200)), ...(tags.length ? { tags: await Promise.all(tags.map(out)) } : {}) };
+          const item = { title: await out(clean(plainText(title), 200)), ...(tags.length ? { tags: await Promise.all(tags.map(out)) } : {}) };
           const n = JSON.stringify(item).length + 1;
           if (piece.length && size + n > ADD_CARDS_FRAME) break;
           piece.push(item);
@@ -601,8 +601,9 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
     const p: typeof patch = {};
-    if (patch.title !== undefined) p.title = await out(clean(patch.title, 200));
-    if (patch.notes !== undefined) p.notes = patch.notes ? await out(patch.notes.slice(0, 4000)) : "";
+    // Control characters a paste can carry (other than a newline and a tab) are left out here: a member's are refused.
+    if (patch.title !== undefined) p.title = await out(clean(plainText(patch.title), 200));
+    if (patch.notes !== undefined) p.notes = patch.notes ? await out(plainText(patch.notes).slice(0, 4000)) : "";
     if (patch.due !== undefined) p.due = patch.due ? await out(patch.due) : null;
     if (patch.tags !== undefined) p.tags = await Promise.all(tidyTags(patch.tags).map(out));
     return agent.stub.updateCard(id, p).catch(refused);
@@ -610,8 +611,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
 
   // The New card dialog: one change, so one Undo takes the whole card back out.
   const addFullCard = useCallback(async (input: NewCardInput) => {
-    return agent.stub.addCard(input.laneId, await out(clean(input.title, 200)), false, {
-      notes: input.notes.trim() ? await out(input.notes.slice(0, 4000)) : "",
+    return agent.stub.addCard(input.laneId, await out(clean(plainText(input.title), 200)), false, {
+      notes: input.notes.trim() ? await out(plainText(input.notes).slice(0, 4000)) : "",
       due: input.due ? await out(input.due) : null,
       tags: await Promise.all(tidyTags(input.tags).map(out)),
     });
