@@ -317,6 +317,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "n" && saved.current.board.lanes[0]) { e.preventDefault(); setQuickAddLane(saved.current.board.lanes[0].id); }
       if (e.key === "t") { e.preventDefault(); setThemeOpen((o) => !o); }
+      if (e.key === "/") { e.preventDefault(); setAssistantOpen(true); }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
