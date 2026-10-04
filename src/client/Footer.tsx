@@ -2,7 +2,9 @@ import { useState } from "react";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 
-const day = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const short = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+/** A changelog day (YYYY-MM-DD) has no time zone: noon keeps it on that day everywhere. */
+const day = (date: string) => short(new Date(`${date}T12:00:00`));
 
 /** The running version (the build's commit and date). Click it for the newest lines of CHANGELOG.md. */
 function Version() {
@@ -14,7 +16,7 @@ function Version() {
         className="version-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}
         title={`Built ${new Date(builtAt).toLocaleString()}. Click for recent changes`}
       >
-        <span className="version-mark" aria-hidden="true">$</span>{sha} · {day(builtAt)}
+        <span className="version-mark" aria-hidden="true">$</span>{sha} · {short(new Date(builtAt))}
       </button>
       {open && (
         <Popover onClose={() => setOpen(false)}>

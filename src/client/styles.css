@@ -884,7 +884,8 @@ a.att-name:hover { color: var(--accent); }
 
 @media (max-width: 560px) {
   /* The sessions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
-  .popover:has(> .changes) { position: fixed; top: auto; bottom: 44px; left: 16px; right: 16px; }
+  /* Clear of the wrapped footer and the floating Ask button. */
+  .popover:has(> .changes) { position: fixed; top: auto; bottom: 76px; left: 16px; right: 16px; }
   .changes { width: auto; max-width: none; }
   .popover:has(> .sessions), .popover:has(> .asks) { position: fixed; top: 62px; left: 16px; right: 16px; }
   .sessions, .asks { width: auto; max-width: none; }

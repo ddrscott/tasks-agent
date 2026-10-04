@@ -615,6 +615,22 @@ build it measured about 250 ms.
 - Latencies go through `wrangler dev`'s remote-binding proxy, which adds overhead to
   every model call. GLM makes several calls per command, so it pays that overhead more often.
 
+## // VERSION_AND_CHANGELOG
+
+The footer on every page ends with the running version, like `$ 7270832 · Oct 3`: the short git
+commit the build came from and the day it was built. Clicking it opens `// WHATS_NEW`, the
+newest entries of `CHANGELOG.md`.
+
+- `vite.config.ts` works all of this out when the build starts and bakes it in as `__BUILD__`
+  (`src/client/Footer.tsx` reads it). Nothing is fetched at run time.
+- A `+` after the commit means the build had uncommitted changes, so the commit doesn't fully
+  say what's running. A deploy from a clean `main` never has one.
+- **Add a changelog entry with every change someone would notice.** Under a `## YYYY-MM-DD`
+  heading (add today's at the top if it's missing), write one `- ` line per change, newest
+  first, in plain words for the person using the app, with no markdown inside the line. The
+  footer shows the newest 3 days, up to 12 lines.
+- To check a deploy landed, compare the footer with `git rev-parse --short HEAD`.
+
 ## // DEPLOY
 
 ```sh
