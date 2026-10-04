@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board your agents take orders from you alone. The tags that direct them (`#agent`, `#gauntlet`, `#needs-ceo`, `#ship-ok`) are the owner's: a member can't put one on a card or take one off, and a card tagged `#agent` or `#gauntlet` is read only to members and says so. A member who types one gets the reason, with what they typed still in the box
 - Every line on the agent event feed says who made the change (`by`), and only the owner's changes are ever sent. Over MCP, `get_card` and `get_board` say when a card was last changed by a member, and the working rules tell agents that only the owner gives them work or answers
 - Admins get an Admin page from the account menu: every account, with a switch to make someone an admin and a switch to give them Pro without a subscription. An email that hasn't signed in yet can be added ahead of time
+- Pro given by an admin counts for team boards like a paid plan: that owner can invite people, and if an admin takes it back, members can only look from that moment, on the boards they have open, until Pro returns
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

@@ -1267,12 +1267,16 @@ each card.
   a hash of that string. Plus addressing is kept (`a+x@` and `a@` are two accounts). Invites
   take plain ASCII addresses only, so a look-alike letter can't put a stranger in the members
   list under a familiar-looking name (`inviteEmail` in `src/member-rules.ts`).
-- **Sharing is Pro only and the owner pays.** Members join free. With billing off
-  (`STRIPE_PRICE_ID` empty) nobody is Pro, so nobody can share.
+- **Sharing is Pro only and the owner pays.** Members join free. "Pro" is one question with
+  one answer, `planFor` in `src/billing.ts`: a live Stripe subscription, or Pro an admin gave
+  (`// ADMIN`). `access`, the members API, and the board's recheck all ask it and none has a
+  copy of the rule. With billing off (`STRIPE_PRICE_ID` empty) nobody can subscribe, so the
+  only owners who can share are the ones an admin gave Pro.
 - **When the owner's Pro lapses** nothing is deleted. Members stay listed and become view only
   (`effective: "viewer"`, `reason: "plan_lapsed"`), new invites and resends are refused
   (`pro_required`), and it all comes back when Pro does. The owner can still change roles,
   remove people, and revoke invites while lapsed. A pending invite can still be accepted.
+  An admin taking back a Pro grant from an owner who isn't also paying is the same lapse.
 - **An encrypted board can't be shared, and a shared board can't be encrypted.** Inviting on
   an encrypted board is refused (`board_encrypted`). `enableEncryption` on a board with any
   member or pending invite throws an error whose message starts with `[board_shared]`.
@@ -1591,6 +1595,14 @@ comes (and for a paid period that simply runs out, which `planFor` treats as lap
 days after its end): that's the "within about half a minute at worst" in the terms and in
 Members.
 
+The admin page's Pro switch (`// ADMIN`) takes the same path. After it writes the grant,
+`update` in `src/users.ts` calls the same `planChanged`, before it answers the admin: the same
+two audit entries (actor `system`, as with Stripe; the log doesn't name the admin), the same
+signal, the same retries, and the same sweep behind it. `check:members` gives and takes a
+grant with a member's socket open and fails past one second either way. An admin gets nothing
+else on a board: `access` never looks at the admin role, so an admin who isn't a member is
+refused like any stranger, and one who is a member is exactly that member.
+
 **Attribution.** Every card carries who last changed it: `by?: { email: string; via?: "assistant" | "agent" }`
 on `Card` (`src/shared.ts`), next to `updatedAt`. `email` is the owner or the member; `via` is
 `"assistant"` when the in-app assistant did it on their message and `"agent"` for an outside
@@ -1684,7 +1696,8 @@ after; on `invite_resent`, `from` is set only when the role changed with the res
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
 late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
 `sharing_restored`, and the two card entries, `card_deleted` and `card_restored` (**Who
-deleted it**, above), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when the board
+deleted it**, above), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when an admin
+gives or takes back Pro, when the board
 rechecks with members connected, or when the owner opens the members list, whichever is first.
 The log is kept for as long as the account exists; nothing prunes it.
 
@@ -1946,9 +1959,12 @@ Pro plan without a subscription. Admins see the link in the account menu.
   list. An admin can add an email that has never signed in; the flags are waiting when it does.
 - **Pro is a live Stripe subscription or a grant** (`planSource` in `src/billing.ts`). A
   granted account's `usage()` carries `granted: true`, so the app doesn't offer Manage
-  subscription for a subscription that isn't there. It can still subscribe.
-- **What an admin can't do.** Read a board, files, or chat; delete an account; sign in as
-  someone. The API has two calls, `GET` and `POST /api/admin/users`, and that's the whole of it.
+  subscription for a subscription that isn't there. It can still subscribe. Team boards
+  follow the same answer (`// TEAM_BOARDS`): a granted owner can share, and flipping the Pro
+  switch tells that owner's board at once (`planChanged`), so taking a grant back from an
+  owner who isn't paying turns their members view only on the tabs they have open.
+- **What an admin can't do.** Read a board, files, or chat; see who's on a board, its invites,
+  or its audit log; delete an account; sign in as someone. The API has two calls, `GET` and `POST /api/admin/users`, and that's the whole of it.
 - **Checks are on the server.** `/api/admin/*` takes the browser session, never an access
   token, and looks the role up on every call: 401 signed out, 403 without the role. `admin` in
   `/api/me` only decides whether the link shows. Writes go through the same same-origin check
@@ -2093,7 +2109,8 @@ npm run check:launch     # the launch copy against its limits, and the gallery's
 --strictPort` first (or pass another address: `npm run check:members -- http://localhost:5173`).
 It only runs against localhost with `DEV_LOGIN_CODES=1`: it signs up throwaway
 `tb-…@example.com` accounts, edits the local D1 through `wrangler d1 execute --local` (to make
-an owner Pro, age an invite, and confirm only a token hash is stored), and waits for the
+an owner Pro, make one throwaway account an admin, age an invite, and confirm only a token
+hash is stored), and waits for the
 board's own recheck in the plan-lapse rows and for a flooder's bucket to refill, so it takes
 about four minutes.
 

@@ -232,8 +232,9 @@ async function signal(env: Env, ownerId: string): Promise<void> {
 /**
  * Write "sharing suspended" or "sharing restored" to the audit log the moment the owner's plan
  * changes what members can do. Nothing is deleted either way. Called by the Stripe webhook, by
- * the board while members are connected, and when the owner opens the members list, so a
- * lapse nobody announced (a missed webhook, a period that ran out) is still written down.
+ * the admin page's Pro switch, by the board while members are connected, and when the owner
+ * opens the members list, so a lapse nobody announced (a missed webhook, a period that ran
+ * out) is still written down.
  */
 export async function syncSharing(env: Env, ownerId: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
   const row = await env.DB.prepare("SELECT suspended FROM board_sharing WHERE owner_id = ?").bind(ownerId).first<{ suspended: number }>();
@@ -252,7 +253,10 @@ export async function syncSharing(env: Env, ownerId: string): Promise<{ suspende
   return { suspended: !!suspended, flipped };
 }
 
-/** The owner's subscription just changed (billing.ts). Record it and tell the open sockets. */
+/**
+ * The owner's plan just changed: Stripe's webhook stored a subscription (billing.ts), or an
+ * admin gave or took back Pro (users.ts). Record it and tell the open sockets.
+ */
 export async function planChanged(env: Env, ownerId: string): Promise<void> {
   if ((await syncSharing(env, ownerId)) !== null) await signal(env, ownerId);
 }
