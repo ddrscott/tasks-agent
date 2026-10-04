@@ -1,5 +1,6 @@
 import { BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 
 // Privacy policy and terms at /tasks/privacy and /tasks/terms. Public (no sign-in),
 // because Google and Microsoft link to them from their sign-in screens. Keep them
@@ -11,6 +12,7 @@ const CONTACT = "hey@askscottpierce.com";
 export type LegalPage = "privacy" | "terms";
 
 export function Legal({ page, onBack }: { page: LegalPage; onBack(): void }) {
+  useTitle(page === "privacy" ? "Privacy" : "Terms");
   return (
     <div className="connect">
       <header className="topbar">

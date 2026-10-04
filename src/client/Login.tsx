@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 
 async function post(path: string, body: unknown) {
   const r = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -39,6 +40,7 @@ function loadTurnstile(): Promise<void> {
 const safeNext = (raw: string | null) => (raw && raw.startsWith("/tasks/") && !raw.startsWith("//") && !/[\\\s]/.test(raw) ? raw : null);
 
 export function Login({ onSignedIn }: { onSignedIn: () => void }) {
+  useTitle();
   // Where to go after signing in, e.g. back to an agent's OAuth consent screen.
   const [next] = useState(() => safeNext(new URLSearchParams(location.search).get("next")));
   const [providers, setProviders] = useState<Provider[]>([]);
