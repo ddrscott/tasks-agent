@@ -312,6 +312,9 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
     if (busy || !canInvite || blocked) return;
     setFormError(null);
     setDevLink(null);
+    // What the last invite said isn't about this one. Left up, "Invited dana@…" sat right
+    // under a red error for the next address.
+    setNote(null);
     // The same trim and lower-casing the server does (inviteEmail in member-rules.ts), so the
     // checks against the list below compare like with like.
     const to = email.trim().toLowerCase();
