@@ -96,7 +96,7 @@ export function FirstRun({ board, onConnect, add, say }: {
         <h2 className="h" id="first-run-h">START_HERE</h2>
         {slim && (
           <p className="first-run-next" role="status">
-            <b>Copied.</b> Paste it in a terminal. Your agent's question will show up on the sample card.
+            <b>Copied.</b> Paste it in a terminal, and pick Yes if Claude Code asks to trust the folder (Enter alone exits). Your agent's question will show up on the sample card.
           </p>
         )}
         {copied && hasSample && (

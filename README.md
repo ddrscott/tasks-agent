@@ -133,8 +133,9 @@ run ahead of whatever serves the zone.
     board never shows it.
   - **It folds once the command is copied.** With the sample on the board and the command on the
     clipboard, steps 1 to 3 are done and the rest happens in a terminal, then on the card. So the
-    block folds to one line: "Copied. Paste it in a terminal. Your agent's question will show up
-    on the sample card.", with a **Show the steps** button that opens it again (and **Hide the
+    block folds to one line: "Copied. Paste it in a terminal, and pick Yes if Claude Code asks to
+    trust the folder (Enter alone exits). Your agent's question will show up on the sample
+    card.", with a **Show the steps** button that opens it again (and **Hide the
     steps** to fold it back). That keeps the lanes and the sample card in view at 1280x800 and on
     a phone, where the open block takes up to 55% of the screen and scrolls inside itself. The
     steps stay mounted while folded, since they hold the command and its token is shown once. A
@@ -502,7 +503,8 @@ strip, and the not-found page link to it too.
     Undo takes back, and writing files and running commands aren't pre-approved. Write, Edit,
     and Bash stay out of `--allowedTools` on purpose; the sample card is built to not need them.
   - Step 4 says what happens and no more: Claude Code may ask once whether you trust the
-    folder, a question lands on the card, and an answer gets a plan in the notes and the card
+    folder, and to pick Yes there, because that prompt starts on "No, exit" and Enter alone
+    quits (the folded line says the same); a question lands on the card, and an answer gets a plan in the notes and the card
     in Done. The lede after step 2 says two steps are left, not that Claude Code is working.
   - The front page tells the same four steps under `// CONNECT_AN_AGENT`, without the buttons
     (a signed-out page can't mint a token), with a Sign in to start button. The OAuth command

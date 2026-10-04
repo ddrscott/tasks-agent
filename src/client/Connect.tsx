@@ -316,7 +316,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         </li>
         <li>
           <b>Paste it in a terminal</b>
-          <span>In any folder. Say yes if Claude Code asks whether you trust it, then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
+          <span>In any folder. If Claude Code asks whether you trust it, pick Yes (Enter alone exits), then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
         </li>
       </ol>
       {error && (
