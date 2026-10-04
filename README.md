@@ -498,8 +498,8 @@ strip, and the not-found page link to it too.
   id, plus `agent`, `machine`, and `project` for `claim_card`, none of which the agent runs a
   command to find; `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
   Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
-  notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo`, release, move
-  on; Done and `release_card`.
+  notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo` with the session
+  id, keep the claim, move on; Done and `release_card`; and at the very end, hold nothing.
   - **The session id needs no shell.** `get_started` makes an id for the call (`tasks-` and 8
     characters; nothing is stored until it claims) and the rules say to use it. That works in
     every client and under the quick start's permissions, where `echo $CLAUDE_CODE_SESSION_ID`
@@ -518,23 +518,31 @@ strip, and the not-found page link to it too.
     then tell me to check the board" and stop. It's the same in an interactive Claude Code
     session, a `claude -p` run, and any other MCP client. The MCP server stays stateless: the
     Worker rereads the cards every 2 seconds (`cardDetail`, at most 30 reads a call) and keeps
-    nothing; a client that hangs up ends the loop. A card you delete, or move to the last lane
+    nothing; a client that hangs up ends the loop. Each call counts as hearing from the
+    session, at both ends of the hold, so an agent that's waiting never reads stale and keeps
+    its cards (`// SESSIONS`). A card you delete, or move to the last lane
     with its question still open, ends the wait too: the answer says the card is gone or
     finished and to stop waiting on it, the same rule that ends its claim (`// SESSIONS`).
   - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
     failing: the rules have the agent call `ask_ceo` on the card with what it needs and options
     that are whole actions ("I've allowed it in the terminal, try again", "Do it another way:
     …", "Skip this card"), so it lands on the card face and in "need you". Writing blocked in
-    the notes and releasing isn't enough, because nobody sees it. It can't cover a permission
+    the notes isn't enough, because nobody sees it. It can't cover a permission
     prompt that's still open in an interactive terminal, since the agent is stopped inside the
     tool call; the Sessions hooks report that one as a session that needs input.
-  - **The event feed is an upgrade, in the same rules.** The agent starts it only when its
-    context has the line `Tasks event feed: installed`, which the Sessions hook prints on
-    `SessionStart` when `tasks-events.mjs` sits next to it, or when the owner says to, and it
-    has Claude Code's Monitor tool. It doesn't go looking for the file, which is outside the
-    folder it's allowed to read. The feed adds new cards, edits, and deletes to what
-    `wait_for_answer` hears. Claude Code asks once before it runs the script unless it's been
-    allowed. So the quick start command works before the Sessions setup has been run.
+  - **The rules only use tools the quick start approved.** The copied command allows the
+    board's tools (`--allowedTools mcp__tasks`) and nothing else, and step 4 says "Nothing else
+    needs approving in the terminal". So nothing in the rules reaches for another tool on its
+    own: no shell, no sleep, no background command.
+  - **The event feed is there when you ask for it.** The agent starts it only when the
+    owner's prompt asks for the event feed in so many words, and it has Claude Code's Monitor
+    tool. It used to start it whenever the Sessions hook had printed `Tasks event feed:
+    installed`, which put an approval prompt in a terminal nobody was watching, and a denied
+    one left the session reading "needs input · wants to use Monitor". The hook still prints
+    the line, and the rules say to leave it alone. The feed adds new cards, edits, and deletes
+    to what `wait_for_answer` hears; Claude Code asks once before it runs the script unless
+    it's been allowed. With the feed running, the agent still calls `wait_for_answer` while a
+    question of its own is open, since that's what tells the board it's waiting.
   - When a tool's behavior changes, check `src/agent-rules.ts` against `src/tool-docs.ts`,
     `src/mcp.ts`, and `src/shared.ts`.
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
@@ -600,9 +608,9 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 ```
 
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
-agent definition (`~/.claude/agents/lead.md`) does this itself, and the working rules from
-`get_started` tell Claude Code to do it when the Sessions hook has said the script is installed
-(it prints `Tasks event feed: installed` into the session when it starts). The Sessions setup command (`// SESSIONS`)
+agent definition (`~/.claude/agents/lead.md`) does this itself. The working rules from
+`get_started` start it only when your prompt asks for the event feed, because Monitor is an
+approval prompt in the terminal and `wait_for_answer` already covers waiting. The Sessions setup command (`// SESSIONS`)
 installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
@@ -638,7 +646,8 @@ When an agent needs you to decide something, it asks on the card and you answer 
 - **Asking.** The MCP tool `ask_ceo` takes a card id, a one-line question, 2 to 4 options, and
   optionally which option the agent recommends (counting from 1). The card gets `#needs-ceo` and
   holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
-  notes. Asking again replaces the question.
+  notes. Asking again replaces the question. It also takes `session_id`, the id the agent
+  claimed the card with, so the board can say who's waiting (below).
 - **Answering.** The card face shows the question with a button per option, the recommended one
   outlined and marked `REC` ("recommended" where there's room). On a touch screen the buttons
   on the card face take two taps, since that's where a stray tap lands and an answer reaches
@@ -648,15 +657,24 @@ When an agent needs you to decide something, it asks on the card and you answer 
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. When the bar is short on room, and always on a phone, the
   count is all that shows.
+- **Who's waiting.** The session that asked reads `needs input` and `asked: <the question>`
+  from the moment it asks until you answer: on its row in Sessions, on the session line of
+  the card (the line's tooltip has the question; the question itself is right under it), and
+  as one line under the question in the "need you" list: agent · machine · project, and how
+  long the question has been open (`waiting 4m`). The agent keeps its claim while it waits,
+  which is what keeps that line on the card. The mechanics are in `// SESSIONS`, under
+  "A session that asked".
 - **One count for everything waiting on you.** "Need you" also counts the sessions that are
   stopped at a prompt (state needs input, heard from in the last 5 minutes; see `// SESSIONS`),
   and lists them under the questions: project, what it wants, machine, and Copy resume command.
   Those can't be answered from the board, so the row is the way back to the terminal. Three
   questions and one blocked session read "4 need you" (`AsksButton` in `src/client/Ask.tsx`).
-- **One decision counts once.** A session that's stopped at a prompt while it holds the claim on
-  a card with an open question is the same decision as that question. It counts as the question,
-  and the session shows as one line under it instead of as a row of its own. A blocked session
-  that holds no card with a question still counts. The rule is `blockedSessions` in
+- **One decision counts once.** A session that needs input while it holds the claim on a card
+  with an open question is the same decision as that question, whether it's waiting on the
+  answer or stopped at a terminal prompt as well. It counts as the question, and the session
+  shows as one line under it instead of as a row of its own. A blocked session that holds no
+  card with a question still counts. An asker that stopped polling is still shown under its
+  question, marked stale, so you know nobody is listening for that answer right now. The rule is `blockedSessions` in
   `src/presence-shared.ts`, and the top bar, the list, the demo, and the front page's sample
   bar all read it.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
@@ -668,6 +686,7 @@ When an agent needs you to decide something, it asks on the card and you answer 
   returns when a card was deleted, was moved to the last lane with its question still open, or
   had its question cleared by hand. The working rules have
   an agent call it in a loop for up to 10 minutes (`// CONNECT_AN_AGENT`). No shell, no feed.
+  Every call counts as hearing from the session, so it doesn't go stale while it waits.
 - **The feed says it too.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
   and `question`, so the agent acts on it without reading the card:
   `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?"}`.
@@ -680,7 +699,15 @@ When an agent needs you to decide something, it asks on the card and you answer 
   any `ANSWER:` lines), the card face shows it as one line of small mono text, two lines at
   most, so nobody opens a card to see what its agent is doing (`statusLine` in
   `src/shared.ts`, drawn by `CardFace`). A card with an open question shows the question
-  instead, and a card in the last lane shows neither. An encrypted board is the same as any
+  instead, and a card in the last lane shows neither.
+- **Right after you answer, the card says what you answered.** The STATUS line an agent wrote
+  before asking usually says it's waiting on you, and it stays in the notes until the agent
+  rewrites it, some seconds after your tap. So an answer remembers the STATUS line the card
+  had at that moment (`was` on `answer`), and while the card's STATUS is still that one, the
+  face shows `answered: <your answer>` in its place. The agent's next STATUS line takes over;
+  moving or retagging the card doesn't bring the old one back. A card with no STATUS line
+  shows the answer the same way until it gets one. The rule is `faceLine` in `src/shared.ts`,
+  and `npm run check:nudge` runs it. An encrypted board is the same as any
   other here: the browser has the decrypted notes, and nothing new is stored or sent.
 - **Undo.** Undoing an answer puts the question back, but nothing tells the agent, the same as
   every other undo. If it already acted, say so on the card.
@@ -691,8 +718,9 @@ For a lead agent's instructions:
 ```
 When you need Scott to decide something, call ask_ceo on the card with a one-line question and
 2 to 4 options that are each a complete action, and say which you recommend. Put the reasoning
-in the notes under the status line. Leave the card in Doing and move on. When an `answered`
-event arrives with an `answer`, act on that answer; without one, reread the card.
+in the notes under the status line. Pass your session id to ask_ceo, leave the card in Doing,
+keep your claim on it, and move on. When an `answered` event arrives with an `answer`, act on
+that answer; without one, reread the card.
 ```
 
 ## // GAUNTLET
@@ -744,7 +772,8 @@ folder has nothing to resume, so its row has no such button; one that sent `X-Ta
 and a machine it didn't name is left off the row. An agent with no hooks at all (Cursor, Codex,
 anything that only speaks MCP) still gets a row, from its claims: see Claiming cards below.
 The button's count is the
-sessions that are live, and it never turns orange: the ones that need input are counted on
+sessions that are live (heard from in the last 5 minutes, and not an MCP-only session that's
+idle; see "A session that only speaks MCP" below), and it never turns orange: the ones that need input are counted on
 "need you" beside it, in one list with the open questions (`// QUESTIONS`), so there's one
 number to watch. A stale session isn't counted there. Claude Code's "waiting for your input"
 notice puts every finished session in needs input after a minute, so without that cutoff the
@@ -760,7 +789,7 @@ transcripts in `~/.claude/projects` on the machine that ran them.
 resume command), machine, agent kind, state, the last-action line, when it started, and when it
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
-(`Claude needs your permission to use Bash`). For a session that only claims cards it's a line
+(`Claude needs your permission to use Bash`). For a session with no hooks it's a line
 about the card, like `claimed "<card title>"` or `finished "<card title>"`, the one place a
 card's title is copied here. Rows are deleted 24 hours after they were last
 updated, when the session ends, and all at once when the board turns encryption on. At most 200
@@ -820,7 +849,8 @@ never leaves the machine. It prints only on `SessionStart`, where Claude Code ad
 output to the session's context: `Tasks session id: <id>`, so the agent claims cards under
 the id this row has without running a command, and `Tasks event feed: installed` when
 `tasks-events.mjs` sits next to it. It always exits 0, gives up after 3 seconds, and sends
-tool-use events at most once every 30 seconds per session. The two events that fire constantly
+tool-use events at most once every 30 seconds per session, except that the first tool event
+after any other kind of event always goes (below, "A settled prompt clears"). The two events that fire constantly
 (`UserPromptSubmit`, `PostToolUse`) run in the background with `async`. The rest run in line,
 which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
 `claude -p` run exits, so the row would be left saying "working".
@@ -860,11 +890,25 @@ slow a session; the `X-Tasks-Presence` response header says what happened (`stor
 | `SessionStart` | idle | session started |
 | `UserPromptSubmit` | working | got a prompt |
 | `PreToolUse`, `PostToolUse`, anything else | working | `Edit: server.ts` (at most one write per 30s while already working) |
-| `PermissionRequest` | needs input | wants to use Bash |
+| `PermissionRequest` | needs input, until the session's next event of any kind | wants to use Bash |
 | `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
 | `Notification` (`auth_success`, `agent_completed`, `quota_…`) | unchanged | the notification's message |
 | `Stop` | idle | finished its turn |
 | `SessionEnd` | row deleted | |
+| `ask_ceo` over MCP, while the question is open | reads needs input, over whatever the rows above last wrote | asked: Limit by IP or by account? |
+| You answer it, or the question is taken back | what the rows above last wrote | the same |
+
+**A settled prompt clears.** `needs input` from a `PermissionRequest` or a `Notification` isn't
+a state the session has to leave by a matching event: the next event of any kind replaces the
+row, so `PostToolUse` puts it back to working and `Stop` to idle. Approved or denied, the
+session moved on, and the row says so. The catch was the throttle. A tool event inside the
+30-second window was dropped before it was sent, so a prompt you'd answered could sit at
+"needs input · wants to use Monitor" for a minute with nothing waiting. Now any event that
+isn't a tool event clears the script's stamp, and the first tool event after it is always
+sent; the server's own throttle only ever applied to a row that already says working. A
+denied tool fires no `PostToolUse` of its own, so the row clears on the session's next tool
+call or at the end of its turn. Add a `PreToolUse` hook beside the others if you want it a
+call sooner; the endpoint takes it as a tool event.
 
 **Kept apart from the board.** Sessions and claims live in their own Durable Object, `Presence`
 (`src/presence.ts`), one per user, in its own SQLite tables. Nothing goes through
@@ -881,8 +925,10 @@ hooks have printed it into the session, otherwise the one `get_started` handed i
 one gets the card and the other is told who has it. `get_board` ends with the list of claimed
 cards, and `release_card` gives one back. A claim holds for 15 minutes after its session was
 last heard from, which is longer than the 5-minute stale mark on purpose: a lead that's thinking
-keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
-being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
+keeps its card, and one that died gives it up without anyone cleaning up. Any MCP call that
+names a session counts as hearing from it: `claim_card`, `release_card`, `ask_ceo`, and
+`wait_for_answer`, which also counts for whoever holds the cards it was given. So a lead with no
+hooks installed can still hold cards, and one that's waiting on your answer keeps them. Claims aren't written
 on the card, so they don't show up in undo, notes, or search.
 
 **A finished card isn't claimed.** A claim says a session is working on the card, and nothing is
@@ -906,10 +952,53 @@ A `release_card` that arrives afterward finds nothing to release and says so, wh
 - **The session's row.** A session that reports through hooks keeps the row its hooks wrote.
   One that only claims gets a new last-action line, below.
 
-**A session that only claims.** An agent with no hooks is heard from through `claim_card` and
-`release_card` alone, so those two calls write its whole row. `agent`, `machine`, and `project`
+**A session that asked.** A session with a question open is waiting on you, and both the card
+and Sessions say so until you answer. How it works, and what was decided:
+
+- **`ask_ceo` says who asked.** It takes an optional `session_id`. When the agent leaves it
+  off, the asker is whoever holds the claim on the card, which is the agent itself when it
+  claimed first, as the rules have it. So forgetting the id costs nothing. A named session
+  that holds no claim gets one by asking, unless another live session has the card; then the
+  question stands on the card with no session tied to it. `Presence.asked` in `src/presence.ts`.
+- **The agent keeps its claim while it waits.** The rules used to say release, so another
+  agent could take the card. But a card waiting on its owner isn't up for grabs (the rules
+  already skip cards showing ASKING), and the held claim is what puts the session's line on
+  the card. So the question lives on the claim (`asked` on `Claim`), not in a table of its own.
+- **Needs input is read, not written.** The row underneath keeps whatever hooks or claims last
+  wrote, like `working · mcp__tasks__wait_for_answer`. `Presence.view` runs the rows through
+  `withAsks` (`src/presence-shared.ts`): a session whose claim carries a question reads
+  `needs input` and `asked: <question>` (its newest, with several open). Hook events keep
+  landing underneath and can't flip it back, and the moment the question closes the row is
+  simply what was last stored. The demo and the front page's sample board build their rows
+  with the same function.
+- **Answering.** The board tells `Presence` which questions a change closed (`settledAsks`,
+  next to `endedCards`): answered, or taken back by removing `#needs-ceo` or undoing the ask.
+  The question comes off the claim and the claim stays. A hookless session's row goes back to
+  working and says `got your answer on "<card>"`; a session with hooks shows what its hooks
+  last wrote. Nobody was heard from, so last-seen doesn't move. Within about 2 seconds the
+  agent's `wait_for_answer` returns, it claims again, and the row is its own from there.
+- **A waiting agent never goes stale.** Each `wait_for_answer` call moves last-seen for the
+  session it names and for the sessions holding the cards it names (`Presence.touch`), when
+  the call starts and again when a hold ends unanswered. An agent 10 minutes into waiting was
+  heard from at most 30 seconds ago.
+- **When it gives up.** The rules stop the wait at 10 minutes. The agent stops calling, the row
+  goes stale 5 minutes later (still under its question in "need you", marked stale), and
+  after 15 quiet minutes the claim lapses and takes the question's tie with it: the card keeps
+  its question and still counts once, with no session line. The next agent run takes
+  ANSWERED cards first, so the answer isn't lost.
+- **Undo doesn't bring the tie back.** Undo an answer and the question returns to the card;
+  the session keeps its claim but no longer reads needs input, the same way a claim that
+  ended stays ended. Nothing told the agent either.
+- **Passed on:** leaving it to the agent to re-claim on a timer while it waits (it has no
+  timer), a separate "waiting" state (needs input is what it is), and writing needs input into
+  the stored row (the next hook event would overwrite it).
+
+**A session that only speaks MCP.** An agent with no hooks is heard from through its MCP calls
+alone, and `claim_card`, `release_card`, and `ask_ceo` write its whole row. `agent`, `machine`, and `project`
 on `claim_card` are how it says who it is; passing them again on a later claim replaces what it
-said before, and leaving them off keeps it. MCP can read the board, so the last-action line
+said before, and leaving them off keeps it. The card's session line reads the name from the
+session's row, the same one Sessions shows, so a later `claim_card` without `agent` can't put
+"agent" on the card while Sessions says "cursor". MCP can read the board, so the last-action line
 names the card by its title.
 
 | Call | State | Last action |
@@ -918,29 +1007,42 @@ names the card by its title.
 | `claim_card`, refused | working if it holds another card, else idle | asked for "Fix the login redirect", which another session holds |
 | `release_card`, holds another card | working | released "Fix the login redirect" |
 | `release_card`, its last card | idle | released "Fix the login redirect" |
+| `ask_ceo` on a card it holds | needs input while the question is open | asked: Limit by IP or by account? |
+| You answered | working (it kept the card) | got your answer on "Fix the login redirect" |
+| The question was taken back | working | its question on "Fix the login redirect" was taken back |
+| `wait_for_answer` | unchanged; last-seen moves | unchanged |
 | An agent moved the card to the last lane | idle, or working if it holds another card | finished "Fix the login redirect" |
 | You or the assistant moved it there | same | "Fix the login redirect" was moved to Done |
 | The card was deleted | same | "Fix the login redirect" was deleted |
 | 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
 
-So such a session is "working" only while it holds a card. A refused claim counts as being heard
+So such a session is "working" only while it holds a card. **Idle means finished, and isn't
+counted as live.** With no hooks, nothing says the agent's process is still running, and an
+idle MCP-only session holds no card and waits on nothing. So the Sessions button doesn't count
+it (`isLive`): a one-shot agent that moved its card to Done and exited drops out of "N live
+sessions" right then, not 5 minutes later, while its row stays in the list saying what it
+finished. The rules' last step has the agent release anything it still holds, which is what
+makes its row idle. An idle session with hooks still counts: its terminal is open. The test
+for "MCP-only" is a row with no folder, since every hook report carries one. A refused claim counts as being heard
 from and nothing more. Once a hook reports for a session, the event table above is in charge of
 its row, and a claim or release only moves its last-seen time (and fills in the agent kind when
 the hooks didn't send one). The rules are `afterClaim`, `afterRelease`, `endedCards`, and
-`afterEnded` in `src/presence-shared.ts`; `npm run check:presence` runs them, along with the
-"need you" count. The last three rows don't count as hearing from the session, so its last-seen
+`afterEnded`, `afterAsk`, `settledAsks`, `afterSettled`, `withAsks`, and `isLive` in
+`src/presence-shared.ts`; `npm run check:presence` runs them, along with the "need you" count. The last three rows don't count as hearing from the session, so its last-seen
 time stays put: the line says "finished" only when an agent made the move, since the board can't
 tell which agent, and says what happened to the card when a person did.
-What a hookless session can't say: that it's stopped at a prompt (its questions go through
-`ask_ceo`), or that it's alive between claims, which is why the lead instructions below renew
-the claim. For a lead agent's instructions:
+What a hookless session can't say: that it's stopped at a terminal prompt, or that it's alive
+between MCP calls, which is why the lead instructions below renew the claim. For a lead
+agent's instructions:
 
 ```
 Before you move a card to Doing, call claim_card with its id, your session id (the "Tasks
 session id:" line in your context, or $CLAUDE_CODE_SESSION_ID), and
 agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
-card you're working at least every 10 minutes, and release_card when you hand it to Scott with
-needs-ceo. Moving a card to Done releases it for you.
+card you're working at least every 10 minutes. When you ask Scott something with ask_ceo, pass
+the same session id and keep the claim: the card shows you waiting on him. Call wait_for_answer
+with the card's id while you wait. Moving a card to Done releases it for you; call release_card
+only when you give a card up.
 ```
 
 **Encrypted boards keep no presence.** It's metadata about sessions, not card text, so it could

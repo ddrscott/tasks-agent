@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a sample agent card puts a real `#agent` card on the board. It has the agent read the folder you start it in, ask you which of a few small improvements to plan, write that plan on the card as a checklist, and move the card to Done. It only reads, so the terminal has nothing to approve. One undo removes it
 - Copy the command gives one line that connects Claude Code to your board with a new access token and starts it on your `#agent` cards, with no Authenticate and Allow step. It pre-approves the board's tools, deleting cards included, and not file writes or shell commands, and the page says so. The Connect page has the same quick start at the top, and a one-line command for Codex
 - Agents can call `get_started` over MCP to read the rules for working the board. The rules have an agent say what it is, its machine, and its folder when it claims a card, keep your `ANSWER:` lines when it updates its status, and ask you on the card when it's stuck instead of stopping quietly. It hands the agent a session id to claim with, so nothing needs a shell
-- Agents wait for your answer with `wait_for_answer` over MCP: it holds until you answer and hands the card back, in any MCP client. Delete the card or move it to the last lane instead, and the agent is told to stop waiting on it
-- A card shows its agent's `STATUS:` line on its face, so you can see what it's doing without opening it
+- Agents wait for your answer with `wait_for_answer` over MCP: it holds until you answer and hands the card back, in any MCP client. Delete the card or move it to the last lane instead, and the agent is told to stop waiting on it. An agent that's waiting keeps its card and never reads stale: every wait counts as hearing from it
+- An agent that asked you a question reads `needs input` with `asked: <the question>` until you answer, on its card and in the Sessions list, with or without the Claude Code hooks. The "need you" list shows it under its question: agent, machine, project, and how long it's been waiting. Answer, and it's back to working on the card it kept
+- A card shows its agent's `STATUS:` line on its face, so you can see what it's doing without opening it. Right after you answer a question the face says `answered: <your answer>` until the agent writes a new status, instead of an old line that still says it's waiting on you
 - With the Sessions hooks installed, a Claude Code session is told its session id when it starts, so the cards it claims show under the same row as the session
 - The Connect page has a Sessions section with the Claude Code hooks to copy and the hook script to download, and a section on working with an agent: the `#agent` tag, questions, claims, and the event feed
 - On a phone or tablet, an open card has a Move to row: tap a lane and the card moves there
@@ -68,7 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A card moved to the last lane, or deleted, stops saying an agent is working on it right away, whether the agent, you, or the assistant moved it. Before, it read "working" for up to 15 minutes unless the agent called `release_card`. In the Sessions list an agent without hooks goes idle and says `finished "<card title>"`
 - A session's last action names the card by its title instead of its id
 - A session with no project is listed under "No project" and a machine it didn't name is left off, instead of the word "unknown" twice. A session with no folder no longer offers a resume command
-- "Need you" counts one decision once: a session stopped on a card that has an open question shows under that question instead of adding to the count
+- "Need you" counts one decision once: a session waiting on a card that has an open question shows under that question instead of adding to the count
+- With the Sessions hooks, a permission prompt you approved or denied stops reading "needs input" on the session's next tool call. It could sit there for a minute, counted in "need you" with nothing waiting
+- The working rules no longer start the event feed on their own, so the quick start asks for nothing in the terminal beyond the board's tools. Ask for the event feed in your prompt to get it
+- A card's session line and the Sessions list show the same agent name. A later `claim_card` without `agent` put "agent" on the card
+- An agent without hooks that finished and exited stops counting in "N live sessions" as soon as it holds no card, not 5 minutes later
+- The sample board on the front page and the demo's scripted agent read the way real sessions do: the same `asked:` line, tool lines like `mcp__tasks__wait_for_answer` and `Edit: 0007_sessions.sql`, and a waiting session that was heard from seconds ago
 - Tapping the search icon on a phone opens search
 - iPhones no longer zoom in when you tap a field
 - The "Add card" label in quick add was unreadable against its button
