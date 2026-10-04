@@ -4,6 +4,7 @@ import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
+import { pageAt } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
 import { reportFrom } from "./presence";
@@ -19,11 +20,26 @@ export { TodoAgent } from "./agent";
 export { TaskEvents } from "./events";
 export { Presence } from "./presence";
 
-// Everything lives under this path on askscottpierce.com. Static files are built
-// into dist/client/tasks/assets (see vite.config.ts), so only the API, the agent
-// connection, OAuth, and the MCP endpoint reach this Worker; run_worker_first in
-// wrangler.jsonc lists them.
+// Everything lives under this path on askscottpierce.com. The Worker answers all of it except
+// the hashed build output in /tasks/assets and the Needle model files, which the asset layer
+// serves on its own (run_worker_first in wrangler.jsonc). That's what lets an address that
+// isn't a page get a real 404.
 const BASE = "/tasks";
+
+/**
+ * The app's HTML. Every page is the same document, and the client draws the one the address
+ * names. `status` is 404 for an address that names nothing, so crawlers and link checkers hear
+ * the truth while a person still gets the not-found page with its links.
+ */
+async function shell(req: Request, env: Env, status: 200 | 404): Promise<Response> {
+  // A bare request: a 404 must never come back as "304 Not Modified" from a conditional header.
+  const page = await env.ASSETS.fetch(new Request(new URL("/", req.url), { method: req.method === "HEAD" ? "HEAD" : "GET" }));
+  if (status === 200 || !page.ok) return page;
+  const headers = new Headers(page.headers);
+  headers.delete("ETag");
+  headers.set("Cache-Control", "no-store");
+  return new Response(page.body, { status, headers });
+}
 
 /**
  * A browser request sent from another origin. The session cookie is SameSite=Lax, which
@@ -48,7 +64,7 @@ const NO_ORIGIN_CHECK = new Set(["/api/stripe/webhook"]);
 const app: ExportedHandler<Env> = {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
-    if (!path.startsWith(`${BASE}/`)) return new Response("Not found", { status: 404 });
+    if (path !== BASE && !path.startsWith(`${BASE}/`)) return new Response("Not found", { status: 404 });
     const sub = path.slice(BASE.length);
 
     if (sub.startsWith("/api/")) {
@@ -100,7 +116,11 @@ const app: ExportedHandler<Env> = {
       return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
 
-    return env.ASSETS.fetch(req);
+    // A page (src/routes.ts lists them) gets the app. Anything else is a file in public/tasks,
+    // like og.png, or it's nothing, and nothing is a 404 that still draws the not-found page.
+    if (pageAt(path, BASE)) return shell(req, env, 200);
+    const file = await env.ASSETS.fetch(req);
+    return file.status === 404 ? shell(req, env, 404) : file;
   },
 };
 

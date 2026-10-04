@@ -1,22 +1,53 @@
-// What a signed-out visitor sees at /tasks/: what Tasks is, the sign-in form, and a picture of
-// the product. The picture is the app's own components and CSS fed sample data, not a bitmap,
-// so it follows the theme and can't drift from what the board really looks like.
+// What a signed-out visitor sees at /tasks/: what Tasks is, a picture of the product, the sign-in
+// form, and what they can check for themselves. The picture is the app's own components and CSS
+// fed sample data, not a bitmap, so it follows the theme and can't drift from what the board
+// really looks like. /tasks/pricing is this same page, scrolled to its pricing section.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
 import type { Claim, Session } from "../presence-shared";
 import type { Card } from "../shared";
+import { pageAt } from "../routes";
 import { api, BASE } from "./base";
 import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
 import { blockedSessions, isStale, PresenceContext, SessionRow } from "./Sessions";
+import { useTitle } from "./title";
 
 const DEMO = `${BASE}/demo`;
+const REPO = "https://github.com/ddrscott/tasks-agent";
 
-export function Landing({ signIn }: { signIn: ReactNode }) {
+/**
+ * `signIn` is the sign-in form (Login.tsx owns it). Someone already signed in only gets here
+ * through /tasks/pricing, and sees `SignedInCard` in its place.
+ */
+export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signedIn?: boolean }) {
   const command = claudeMcpAdd(`${location.origin}${BASE}/mcp`);
+  const [toPricing] = useState(() => pageAt(location.pathname, BASE) === "pricing");
+  // Signed out, Login.tsx names the tab; this only matters for the signed-in pricing page.
+  useTitle(toPricing ? "Pricing" : undefined);
+
+  // /tasks/pricing lands on the pricing section. The form and the plans above and inside it
+  // finish loading a moment later and move things, so keep the section in place for the first
+  // couple of seconds, and stop the instant the visitor scrolls or types.
+  useEffect(() => {
+    if (!toPricing) return;
+    const jump = () => document.getElementById("pricing")?.scrollIntoView();
+    jump();
+    const watch = new ResizeObserver(jump);
+    watch.observe(document.body);
+    const stop = () => {
+      watch.disconnect();
+      clearTimeout(timer);
+      for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) removeEventListener(e, stop);
+    };
+    const timer = setTimeout(stop, 2500);
+    for (const e of ["wheel", "touchstart", "keydown", "pointerdown"]) addEventListener(e, stop, { passive: true });
+    return stop;
+  }, [toPricing]);
+
   return (
     <div className="landing">
       <header className="topbar">
@@ -26,7 +57,9 @@ export function Landing({ signIn }: { signIn: ReactNode }) {
           <a href={DEMO}>Demo</a>
           <a href="#connect">Connect</a>
           <a href="#pricing">Pricing</a>
-          <a className="landing-nav-signin" href="#sign-in">Sign in</a>
+          {signedIn
+            ? <a className="landing-nav-signin" href={`${BASE}/`}>Your board</a>
+            : <a className="landing-nav-signin" href="#sign-in">Sign in</a>}
         </nav>
       </header>
 
@@ -42,9 +75,10 @@ export function Landing({ signIn }: { signIn: ReactNode }) {
               <a className="btn primary" href={DEMO}>Try the demo board</a>
               <span>No sign-up needed.</span>
             </p>
-            {signIn}
           </div>
+          {/* In the markup the picture comes before the form, which is the order a phone shows them in. */}
           <Shot />
+          <div className="landing-signin">{signIn}</div>
         </section>
 
         <section className="landing-section" aria-labelledby="different-h">
@@ -54,31 +88,33 @@ export function Landing({ signIn }: { signIn: ReactNode }) {
               <h3>Agents ask. You answer in one tap.</h3>
               <p>
                 An agent that needs a call from you puts the question on the card with two to four options
-                and marks the one it would pick. Tap one. The answer goes on the card and out on the event
-                feed, so the agent picks it up and keeps going.
+                and can mark the one it would pick. Tap one and the answer goes on the card. An agent
+                listening on the event feed hears it right then. Any other agent sees it the next time it
+                reads the board.
               </p>
             </li>
             <li>
               <h3>See every session, and which ones need you.</h3>
               <p>
                 Claude Code sessions report in through hooks: working, waiting on you, or idle, with the
-                machine and the last thing each one did. A claimed card shows who has it, so two agents
-                don't grab the same work.
+                machine and the last thing each one did. An agent claims a card before it starts, and a
+                second session that tries for the same card is turned away.
               </p>
             </li>
             <li>
-              <h3>Any MCP client connects with one command.</h3>
+              <h3>Any MCP client can connect.</h3>
               <p>
-                It's a plain MCP server over HTTP with OAuth sign-in. Claude Code, Claude, ChatGPT, Cursor,
-                VS Code, and Codex each have setup steps on the Connect page. Nothing to install or host.
+                It's a plain MCP server over HTTP with OAuth sign-in. Claude Code takes one command. Claude,
+                ChatGPT, Cursor, VS Code, and Codex each have their steps on the Connect page. There's no
+                server for you to run or host.
               </p>
             </li>
             <li>
               <h3>End-to-end encryption, if you want it.</h3>
               <p>
-                Set a passphrase and the board is encrypted in your browser. We store only ciphertext, in an
-                open format (JWE). The trade-off: an encrypted board is closed to outside agents, because the
-                server can't read it either.
+                Set a passphrase and every lane name, title, note, tag, and file is encrypted in your browser
+                before it's sent. The server holds that as ciphertext in an open format (JWE). The trade-off:
+                an encrypted board is closed to outside agents, because the server can't read it either.
               </p>
               <p className="landing-aside"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
             </li>
@@ -100,18 +136,108 @@ export function Landing({ signIn }: { signIn: ReactNode }) {
           </p>
         </section>
 
+        <Proof />
+
         <Pricing />
 
         <section className="landing-section landing-last">
           <p className="landing-lede">Look before you sign up.</p>
           <p className="landing-try">
             <a className="btn primary" href={DEMO}>Try the demo board</a>
-            <a className="btn" href="#sign-in">Sign in</a>
+            {signedIn ? <a className="btn" href={`${BASE}/`}>Open your board</a> : <a className="btn" href="#sign-in">Sign in</a>}
           </p>
         </section>
       </main>
       <Footer />
     </div>
+  );
+}
+
+/** What sits where the sign-in form would, for someone who's already signed in (/tasks/pricing). */
+export function SignedInCard({ email }: { email: string }) {
+  return (
+    <div className="login-card" id="sign-in">
+      <h2 className="h">SIGNED_IN</h2>
+      <p>You're signed in as <b>{email}</b>.</p>
+      <a className="btn primary" href={`${BASE}/`}>Open your board</a>
+    </div>
+  );
+}
+
+// ---------- proof ----------
+
+/** "12 changes" from the changelog counts baked into the build. Never typed in by hand. */
+const changes = (n: number) => `${n.toLocaleString()} ${n === 1 ? "change" : "changes"}`;
+
+/** How much has shipped, in the changelog's own numbers (`counts` in vite.config.ts). */
+function shipped(): string {
+  const { total, unreleased, latest } = __BUILD__.counts;
+  if (!latest) return `${changes(total)} written up so far.`;
+  const release = `v${latest.name}`;
+  return unreleased > 0
+    ? `${changes(unreleased)} written up since ${release}, ${total.toLocaleString()} in all.`
+    : `${changes(latest.count)} in ${release}, ${total.toLocaleString()} in all.`;
+}
+
+/**
+ * What a visitor can check without trusting us: the demo, the code, the changelog, the formats,
+ * and who makes it. Every line here has to be true and checkable from the link beside it. No
+ * user counts, star counts, logos, or quotes from anyone but the maker, because there are none
+ * to show. The numbers come from CHANGELOG.md at build time.
+ */
+function Proof() {
+  const out = { target: "_blank", rel: "noopener noreferrer" };
+  return (
+    <section className="landing-section" id="proof" aria-labelledby="proof-h">
+      <h2 className="h" id="proof-h">CHECK_IT_YOURSELF</h2>
+      <p className="landing-lede">Don't take our word for it.</p>
+      <div className="proof">
+        <dl className="proof-list">
+          <div>
+            <dt>Demo</dt>
+            <dd>The demo is the real board, running in your browser tab with a scripted agent. No account, and nothing is saved.</dd>
+            <dd className="proof-go"><span className="prompt" aria-hidden="true">$</span> <a href={DEMO}>Try the demo board</a></dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>The code is public: the Worker, the client, and the MCP tools your agent calls.</dd>
+            <dd className="proof-go"><a href={REPO} {...out}>Read the code</a></dd>
+          </div>
+          <div>
+            <dt>Changelog</dt>
+            <dd>Built in the open by coding agents working cards on a Tasks board. <b>{shipped()}</b></dd>
+            <dd className="proof-go"><a href={`${REPO}/blob/main/CHANGELOG.md`} {...out}>Read the changelog</a></dd>
+          </div>
+          <div>
+            <dt>Encryption</dt>
+            <dd>An encrypted board is standard JWE (RFC 7516). Download a backup and any JOSE library opens it with your passphrase. Without the passphrase, nobody does.</dd>
+            <dd className="proof-go"><a href={`${REPO}#-end_to_end_encryption`} {...out}>See the format</a></dd>
+          </div>
+          <div>
+            <dt>Protocol</dt>
+            <dd>The agent side is MCP over Streamable HTTP with OAuth sign-in, nothing custom. It all runs on Cloudflare Workers.</dd>
+            <dd className="proof-go"><a href={`${BASE}/connect`}>See the setup</a></dd>
+          </div>
+          <div>
+            <dt>Sessions</dt>
+            <dd>It's presence, not a log. Each session overwrites one row: its state and one line about its last action. No transcript, prompt, tool output, or Bash command is stored.</dd>
+            <dd className="proof-go"><a href={`${REPO}#-sessions`} {...out}>See what's stored</a></dd>
+          </div>
+        </dl>
+        <figure className="maker">
+          <figcaption className="maker-who">
+            <span>Maker</span>
+            Tasks is made by one developer, <a href="https://askscottpierce.com" {...out}>Scott Pierce</a>. Here's why:
+          </figcaption>
+          <blockquote>
+            “… I still get lost in progressing my projects forward. This Tasks app is my initial approach at
+            getting back to basics so I can manage the projects without needing to swim through oceans of
+            text to recall what's going on.”
+          </blockquote>
+          <p className="maker-by">Scott Pierce</p>
+        </figure>
+      </div>
+    </section>
   );
 }
 

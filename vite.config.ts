@@ -10,7 +10,8 @@ type Release = { name: string; date: string | null; groups: { kind: string; item
 /**
  * What the footer shows (src/client/Footer.tsx): the released version from package.json, the
  * commit this build came from, when it was built, and the newest changes in CHANGELOG.md
- * (Keep a Changelog format). Worked out once, when Vite starts.
+ * (Keep a Changelog format). Plus how many entries the changelog holds, for the landing page.
+ * Worked out once, when Vite starts.
  */
 function buildInfo() {
   let sha = "dev";
@@ -54,8 +55,16 @@ function buildInfo() {
     }
     if (groups.length) changes.push({ ...r, groups });
   }
-  const total = releases.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.items.length, 0), 0);
-  return { version, sha, builtAt: new Date().toISOString(), changes, more: Math.max(total - (MAX_ITEMS - Math.max(left, 0)), 0) };
+  const size = (r: Release) => r.groups.reduce((m, g) => m + g.items.length, 0);
+  const total = releases.reduce((n, r) => n + size(r), 0);
+  // What the landing page's // CHECK_IT_YOURSELF quotes: counted here, never typed in.
+  const newest = releases.find((r) => /^\d/.test(r.name));
+  const counts = {
+    total,
+    unreleased: releases.filter((r) => !/^\d/.test(r.name)).reduce((n, r) => n + size(r), 0),
+    latest: newest ? { name: newest.name, date: newest.date, count: size(newest) } : null,
+  };
+  return { version, sha, builtAt: new Date().toISOString(), changes, more: Math.max(total - (MAX_ITEMS - Math.max(left, 0)), 0), counts };
 }
 
 export default defineConfig({

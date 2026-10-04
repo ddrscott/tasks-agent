@@ -1,14 +1,15 @@
+import { pageAt } from "../routes";
 import { BASE } from "./base";
 import { Footer } from "./Footer";
 import { useTitle } from "./title";
 
-/** Every address the app answers under /tasks/. Anything else gets the not-found page. */
-const KNOWN = ["", "connect", "privacy", "terms", "demo"];
+/** Whether the address bar names a page that doesn't exist. The pages are listed in src/routes.ts. */
+export const isUnknownPath = () => pageAt(location.pathname, BASE) === null;
 
-/** Whether the address bar names a page that doesn't exist. */
-export const isUnknownPath = () => !KNOWN.includes(location.pathname.replace(/\/+$/, "").slice(BASE.length + 1));
-
-/** Shown for a mistyped or stale link, signed in or not. The links are plain ones, so they load the real page. */
+/**
+ * Shown for a mistyped or stale link, signed in or not. The Worker sends it with a real 404
+ * (src/server.ts). The links are plain ones, so they load the real page.
+ */
 export function NotFound() {
   useTitle("Not found");
   return (
@@ -29,6 +30,7 @@ export function NotFound() {
           <li><a href={`${BASE}/`}>Your board</a><span>or the sign-in page, if you're signed out</span></li>
           <li><a href={`${BASE}/demo`}>The demo board</a><span>try it without an account</span></li>
           <li><a href={`${BASE}/connect`}>Connect an agent</a><span>setup for Claude Code, Cursor, and other MCP clients</span></li>
+          <li><a href={`${BASE}/pricing`}>Pricing</a><span>what's free and what Pro adds</span></li>
           <li><a href={`${BASE}/privacy`}>Privacy</a><span>what we keep and why</span></li>
           <li><a href={`${BASE}/terms`}>Terms</a><span>the rules for using Tasks</span></li>
         </ul>

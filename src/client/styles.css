@@ -881,7 +881,8 @@ a.att-name:hover { color: var(--accent-text); }
 /* ============================================================ landing (signed out) */
 
 /* The pitch and the sign-in form on the left, a picture of the board on the right, all above the
-   fold at 1280x800. On a phone it's one column: pitch, form, then the picture. */
+   fold at 1280x800. On a phone it's one column in markup order: pitch, a slice of the picture,
+   then the form, so the first screen shows the product and not a form. */
 .landing { min-height: 100%; display: flex; flex-direction: column; }
 .landing .topbar { flex: none; }
 .landing p.wordmark, .connect p.wordmark { margin: 0; }
@@ -890,7 +891,13 @@ a.att-name:hover { color: var(--accent-text); }
 .landing-nav a:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
 .landing-nav-signin { display: none; }
 .landing main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 24px; }
-.landing-hero { display: grid; grid-template-columns: minmax(0, 364px) minmax(0, 1fr); gap: 32px; align-items: start; padding: 28px 0 40px; }
+.landing-hero {
+  display: grid; grid-template-columns: minmax(0, 364px) minmax(0, 1fr); grid-template-rows: auto 1fr;
+  grid-template-areas: "pitch shot" "signin shot"; gap: 14px 32px; align-items: start; padding: 28px 0 40px;
+}
+.landing-pitch { grid-area: pitch; }
+.landing-signin { grid-area: signin; min-width: 0; }
+.landing-hero .shot { grid-area: shot; }
 .landing-pitch { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .landing-pitch h1 { margin: 0; font: 700 clamp(28px, 2.9vw, 36px)/1.12 var(--font-display); letter-spacing: -.02em; text-wrap: balance; }
 .landing-sub { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
@@ -932,6 +939,24 @@ a.att-name:hover { color: var(--accent-text); }
 .landing-aside b { color: var(--accent-text); font-weight: 600; }
 .landing-last { align-items: flex-start; }
 
+/* // CHECK_IT_YOURSELF: a ledger of things a visitor can verify, each with the link that proves
+   it, and a word from the maker. Rows are ruled, not boxed. */
+.proof { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+.proof-list { margin: 0; border-top: 1px solid var(--line); }
+.proof-list > div { display: grid; grid-template-columns: 96px minmax(0, 1fr) 168px; gap: 4px 20px; align-items: baseline; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.proof-list dt { font: 600 11px/1.9 var(--font-mono); letter-spacing: .08em; text-transform: var(--heading-case, uppercase); color: var(--ink); }
+.proof-list dd { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.proof-list dd b { color: var(--ink); font-weight: 600; }
+.proof-list .proof-go { font: 12px/1.9 var(--font-mono); }
+.proof-go a, .maker a { color: var(--accent-text); text-underline-offset: 3px; }
+.proof-go .prompt { color: var(--accent); font-weight: 600; }
+.maker { margin: 0; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; background: var(--surface); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); }
+.maker-who { color: var(--muted); font-size: 14px; line-height: 1.55; }
+.maker-who span { display: block; margin-bottom: 6px; font: 600 11px/1.9 var(--font-mono); letter-spacing: .08em; text-transform: var(--heading-case, uppercase); color: var(--ink); }
+.maker blockquote { margin: 0; font: 500 16px/1.5 var(--font-display); color: var(--ink); text-wrap: pretty; }
+.landing-section .maker-by { font: 12px/1.6 var(--font-mono); color: var(--muted); }
+.maker-by::before { content: "— "; }
+
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 340px)); gap: 16px; }
 .plan { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; background: var(--surface); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); min-width: 0; }
 .plan h3 { margin: 0; font: 600 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: var(--heading-case, uppercase); color: var(--muted); }
@@ -954,8 +979,9 @@ a.att-name:hover { color: var(--accent-text); }
 }
 @media (max-width: 900px) {
   .landing main { padding: 0 16px; }
-  .landing-hero { grid-template-columns: minmax(0, 1fr); gap: 28px; padding: 24px 0 32px; }
-  .landing-pitch { max-width: 520px; }
+  .landing-hero { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "pitch" "shot" "signin"; gap: 20px; padding: 24px 0 32px; }
+  .landing-pitch, .landing-signin { max-width: 520px; }
+  .proof { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .landing-nav { gap: 14px; }
   .landing-nav-signin { display: inline; }
   .landing-section { padding: 32px 0; }
@@ -963,7 +989,11 @@ a.att-name:hover { color: var(--accent-text); }
 @media (max-width: 560px) {
   .landing-points { grid-template-columns: minmax(0, 1fr); gap: 22px; }
   .shot-body { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  /* A phone gets a slice of the picture: the top bar's counts and the lane with the question and
+     the claimed card. The Sessions list would push the sign-in form two screens down. */
+  .shot .sessions { display: none; }
   .shot .asks-btn .label { display: none; }
+  .proof-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .plans { grid-template-columns: minmax(0, 1fr); }
   .landing-try .btn { flex: 1 0 auto; justify-content: center; }
   .landing-nav a[href="#connect"] { display: none; }

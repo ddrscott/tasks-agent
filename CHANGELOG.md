@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Connect page has a starter prompt to copy into a newly connected agent, so it works `#agent` cards the right way from the first message. A second version for Claude Code also listens for your changes
 - One command sets up Sessions on a machine: it saves your token, installs the two scripts, and adds the hooks to `~/.claude/settings.json` without touching what's already there. The Connect page shows it with a new token filled in
 - End a new card's title with `#agent` and it's tagged: "Write a haiku #agent" adds the card "Write a haiku" with the tag. Works in quick add, on each line of a pasted list, and in the new-card dialog, with several tags too. `#123`, `C#`, and a `#tag` in the middle of a title are left as typed
+- The front page has `// CHECK_IT_YOURSELF`: links to the public code, the changelog with how many changes it holds, the encryption format, what Sessions stores, and who makes Tasks and why
+- `/tasks/pricing` opens the front page at its pricing section, signed in or not
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
@@ -52,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
 - The assistant's starter suggestions are about agent work: queue up cards tagged `agent`, ask what's waiting on your answer, ask which `#agent` cards aren't done
 - "Need you" in the top bar is the one count of what's waiting on you. It adds sessions stopped at a permission prompt to the open questions and lists both, each session with its project, what it wants, its machine, and Copy resume command. The Sessions button just counts live sessions
+- On a phone, the front page shows the headline, the demo button, and a piece of the sample board before the sign-in form
+- The front page says how an answer reaches your agent: right away on the event feed, or the next time the agent reads the board
 
 ### Fixed
 - An agent with no Claude Code hooks (Cursor, Codex, anything on MCP) reads true in the Sessions list: it's working only while it holds a card, releasing a card says `released "<card title>"` and goes idle, and a claim that was refused no longer says it claimed the card
@@ -72,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With the assistant open and more lanes than fit, the board no longer sits scrolled a little sideways with the first lane tight against the left edge
 - "Add a card" in an empty lane opens right under the lane's name instead of leaving a blank gap above the box
 - A long conversation with the assistant scrolls inside the panel instead of pushing the message box off the bottom of the screen
+- A mistyped address like `/tasks/nope` answers 404 Not Found. It used to say 200 OK while showing the not-found page
+- Opening the front page or the demo signed out no longer leaves an error in the browser console
 
 ## [0.1.0] - 2026-10-03
 

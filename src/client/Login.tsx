@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./base";
+import { pageAt } from "../routes";
+import { api, BASE } from "./base";
 import { Footer } from "./Footer";
 import { useTitle } from "./title";
 import { Landing } from "./Landing";
@@ -60,6 +61,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const codeRef = useRef<HTMLInputElement>(null);
+  // Focusing a field scrolls to it. On the landing page at phone width the form sits below the
+  // pitch and the picture, and /tasks/pricing is headed for another section, so leave it alone there.
+  const [focusEmail] = useState(() => !!next || (matchMedia("(min-width: 901px)").matches && pageAt(location.pathname, BASE) !== "pricing"));
 
   // The email link lands here as /?email=…&code=…; finish signing in automatically.
   // Google and Microsoft sign-in land here with ?login_error=… when they fail.
@@ -186,7 +190,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
             <form onSubmit={send}>
               <label className="sr-only" htmlFor="email">Email</label>
               <input
-                id="email" className="field" type="email" required autoFocus autoComplete="email"
+                id="email" className="field" type="email" required autoFocus={focusEmail} autoComplete="email"
                 placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)}
               />
               <button className="btn primary" disabled={busy || !email || needsHuman}>
