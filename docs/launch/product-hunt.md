@@ -161,9 +161,9 @@ order; the first image is the one Product Hunt uses when the launch is shared.
 | `07-landing.png` | The front page. The board in it is the app's own components, not a picture. (Optional; drop it if seven is too many.) |
 | `thumbnail-240.png` | The thumbnail: the favicon's three bars. |
 
-The pictures in this folder were shot from a local dev server, so the footer in them shows a dev
-build (`v0.1.0 · aa53203+`). Shoot them again from the live site after the deploy; see
-`checklist.md`.
+The pictures in this folder were shot from a local dev server, so the footer in them shows a
+branch commit and the Connect shot's address was swapped for the hosted one. Shoot them again
+from the live site after the deploy; see `checklist.md`.
 
 ## // FIRST_COMMENT
 
@@ -181,7 +181,7 @@ What it does:
 
 What's different: it's hosted, so there's nothing to install and it works from your phone. Any MCP client connects. Encryption is there if you want it.
 
-What's rough: the Sessions list only knows Claude Code. It's one person's board, with no teams. An encrypted board is closed to agents. It won't start your agents or review their diffs. And it's a v0.1 from one guy.
+What's rough: only Claude Code reports every step to the Sessions list; other agents show up there when they claim a card. It's one person's board, with no teams. An encrypted board is closed to agents. It won't start your agents or review their diffs. And it's a v0.1 from one guy.
 
 One ask: try the demo, no sign-up, and tell me where it breaks.
 https://askscottpierce.com/tasks/demo
@@ -222,7 +222,7 @@ Linear is a team issue tracker, and a good one. Tasks is a lot smaller: one pers
 **Does it work with Cursor / Codex / ChatGPT?**
 
 ```
-Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the Sessions list and the live event feed are Claude Code only today, because they run on its hooks. Other agents see your answer the next time they read the board.
+Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the live event feed and step-by-step session reporting are Claude Code only today, because they run on its hooks. Other agents show in Sessions as working while they hold a card, and see your answer the next time they read the board.
 ```
 
 **What about privacy?**

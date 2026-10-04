@@ -11,7 +11,7 @@ Do these top to bottom. Each later step assumes the earlier ones.
 
 - [ ] Merge this work to `main` and run the checks: `npm run typecheck`, `npm run build`,
       `npm run check:markdown`, `npm run check:sort`, `npm run check:events`, `npm run check:nudge`,
-      `npm run check:setup`, `npm run check:launch`.
+      `npm run check:setup`, `npm run check:tags`, `npm run check:presence`, `npm run check:launch`.
 - [ ] `npm run deploy`, and `npm run db:migrate:remote` if `migrations/` changed since the last deploy.
 - [ ] Open https://askscottpierce.com/tasks/ and compare the footer with `git rev-parse --short HEAD`.
       It should read `$ v0.1.0 · <that commit>` with no `+` after it. A `+` means the build had
@@ -32,9 +32,13 @@ Do these top to bottom. Each later step assumes the earlier ones.
 - [ ] Sign in with Google from that private window too.
 - [ ] **Q:** Microsoft sign-in only appears when both of its secrets are set. Is it meant to be on
       for launch?
-- [ ] From that new account: create a card, tag it `#agent`, open `/tasks/connect`, run the
-      `claude mcp add` command on a machine that has never connected, and have the agent ask a
-      question. Answer it from your phone. That's the whole pitch, so it has to work cold.
+- [ ] From that new account: follow the four steps of `// START_HERE` on the empty board. Add
+      the sample agent card, copy the command, and paste it on a machine that has never
+      connected. The agent asks its question on the card; answer it from your phone. That's the
+      whole pitch, so it has to work cold. Then add a card of your own with `#agent` at the end
+      of its title and check the agent picks it up.
+- [ ] Do the OAuth way once too: `/tasks/connect`, step 02, the `claude mcp add` command, then
+      `/mcp` and Authenticate in Claude Code.
 - [ ] Open https://askscottpierce.com/tasks/demo in a private window and on your phone. Answer
       the question and watch the scripted agent finish the card and ask the next one.
 
@@ -184,8 +188,8 @@ Keep a terminal open on each.
 - [ ] Day 2: reply to anything that came in overnight. Thank people by name.
 - [ ] Go through every comment and DM and put each real problem on the board as a card. Tag the
       ones an agent can take.
-- [ ] Write down what people expected that wasn't there. The likely ones: sessions for agents
-      other than Claude Code, sharing a board with a teammate, and agents on an encrypted board.
+- [ ] Write down what people expected that wasn't there. The likely ones: fuller session reporting for
+      agents other than Claude Code, sharing a board with a teammate, and agents on an encrypted board.
 - [ ] Post one follow-up when the first round of fixes ships: what people found and what changed.
       Add those lines to `CHANGELOG.md` as you go.
 - [ ] If you held Hacker News back, post the Show HN now, with what you learned folded in.
