@@ -65,8 +65,9 @@ export function App() {
   // The privacy policy and terms are public; everything else needs a session.
   if (page === "privacy" || page === "terms") return <Legal page={page} onBack={() => go("board")} />;
   if (me === undefined) return <div className="splash">loading</div>;
+  // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
+  if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   if (me === null) return <Login onSignedIn={load} />;
-  if (page === "connect") return <Connect onBack={() => go("board")} />;
   return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 
