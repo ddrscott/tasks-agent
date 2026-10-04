@@ -329,9 +329,9 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
       <header className="topbar">
         <h1 className="wordmark">tasks<span>.</span></h1>
         <span className="spacer" />
-        {signedIn
-          ? <a className="btn" href={`${BASE}/`} onClick={(e) => { e.preventDefault(); onBack(); }}>← Back to board</a>
-          : <a className="btn primary" href={signInHref()}>Sign in</a>}
+        {/* Signed out, back is the front page: someone who came from it or from the demo has a way out besides signing in. */}
+        <a className="btn" href={`${BASE}/`} onClick={(e) => { e.preventDefault(); onBack(); }}>{signedIn ? "← Back to board" : "← Back to Tasks"}</a>
+        {!signedIn && <a className="btn primary" href={signInHref()}>Sign in</a>}
       </header>
 
       <main className="connect-body">
