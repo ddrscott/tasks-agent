@@ -339,7 +339,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         it starts Claude with a one-line prompt, allowed to use the board's tools without asking each
         time. That includes deleting cards and lanes; Undo on the board takes back anything an agent
         does. The command doesn't approve writing files or running commands: for anything that changes
-        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command; revoke it under {connectLink("#apps", "Connected apps")}.
+        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command. It's on the command line, so your shell history keeps it too; revoke it any time under {connectLink("#apps", "Connected apps")}.
         OAuth is the other way, with no token on disk: {connectLink("#add", "the full steps")}, with Cursor and Codex too.
       </p>
     </>

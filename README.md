@@ -487,7 +487,9 @@ strip, and the not-found page link to it too.
   ```
 
   - No `/mcp` Authenticate and Allow round trip: the token is the sign-in. It's shown once, in
-    the command, and the page says so and says what the command changes. OAuth, which leaves no
+    the command, and the page says so and says what the command changes. The token is typed on
+    the command line, so it also stays in the shell's history; the page says that too, and that
+    it can be revoked under Connected apps. OAuth, which leaves no
     token on disk, is the Claude Code tab under `#add`.
   - `claude mcp add` refuses a name that's already there, so the local-scope entry is removed
     first; that fails quietly when there isn't one. The new entry is local scope (the folder
