@@ -1508,6 +1508,19 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   signalled change waits on nothing. A change with no signal (a row edited by hand, a plan
   that ran out with no webhook) holds within 2 seconds on a socket that's sending, and at the
   next sweep on one that isn't.
+- **A connect can't straddle a change.** `acceptMember` reads the member's access and then
+  accepts the socket, and a `membersChanged` that lands while that read is out can't see a
+  socket that doesn't exist yet. So after the read comes back the board looks at the epoch
+  again, and if it moved it asks D1 again, until an answer comes back under the epoch it began
+  in; nothing is awaited between that answer and accepting the socket. A member removed in
+  that gap gets the 404, and one demoted in it comes up as a viewer. Local D1 is too fast to
+  race, so a dev server (`DEV_LOGIN_CODES=1`, and only then) takes `&hold=<ms>` on the socket
+  address and waits that long in exactly that gap; `check:members` removes and demotes a
+  member inside it.
+- **Every push needs a current check.** The board, and "who deleted it", go to a member's
+  socket only on an access check that began under the current epoch (`pushFresh` in
+  `src/member-rules.ts`). A socket whose check is from an older epoch, for any reason, is
+  checked against D1 first and gets the push only if it still has a way in.
 - The backstop: while any member is connected the board rechecks them all every
   `MEMBER_RECHECK_SECONDS` (30), and a state push to a socket not checked within that window
   waits for a recheck. 30 seconds because it only matters when the signal was lost (a failed

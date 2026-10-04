@@ -339,8 +339,14 @@ export const H_USER = "x-tasks-user";
 export const H_EMAIL = "x-tasks-email";
 /** `{"id","email"}` of a member the Worker has checked. Its presence picks the member protocol. */
 export const H_MEMBER = "x-tasks-member";
+/**
+ * Dev servers only (DEV_LOGIN_CODES=1): hold a member's connect this many milliseconds between
+ * its access check and accepting the socket, so `check:members` can land a removal in the gap.
+ * Local D1 answers too fast to race otherwise. Ignored everywhere else.
+ */
+export const H_HOLD = "x-tasks-dev-hold";
 export const INTERNAL_HEADERS = [
-  H_USER, H_EMAIL, H_MEMBER, "x-user",
+  H_USER, H_EMAIL, H_MEMBER, H_HOLD, "x-user",
   // The Agents SDK's own: startup props, and the marker that routes a socket to a sub-agent.
   "x-agents-lifecycle-props", "x-cf-agents-subagent-url",
 ] as const;
@@ -360,6 +366,16 @@ export type ActivityFrame = {
   count: number;
   undo?: number;
 };
+
+/**
+ * Whether the board may be pushed to a member's socket on the strength of the access check it
+ * remembers. The check has to have begun under the current membership epoch (so nothing read
+ * before the last "membership changed" counts, including a read that was in flight when it
+ * landed) and within `maxAgeMs`. Otherwise the socket is checked against D1 first.
+ */
+export function pushFresh(m: { at: number; ep: number; effective: Effective }, epoch: number, now: number, maxAgeMs: number): boolean {
+  return m.ep === epoch && now - m.at < maxAgeMs && m.effective !== "none";
+}
 
 /** The frame a member's socket gets on connect and whenever its access changes. */
 export type AccessFrame = { type: "tasks_access" } & Access & {

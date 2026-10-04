@@ -5,7 +5,7 @@ import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
 import { access, handleMembers } from "./members";
-import { H_EMAIL, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
+import { H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -214,8 +214,10 @@ async function memberConnect(req: Request, env: Env, user: User, sub: string, bo
   const a = await access(env, user, board);
   if (a.effective === "none" || a.role === "owner") return refuse();
   const agent = await getAgentByName(env.TodoAgent, board);
+  // A dev server can be asked to hold the connect open inside the board (H_HOLD), for check:members.
+  const hold = env.DEV_LOGIN_CODES === "1" ? Math.min(5000, Number(new URL(req.url).searchParams.get("hold")) || 0) : 0;
   const res = await agent.fetch(new Request("https://tasks.internal/agent", {
-    headers: { Upgrade: "websocket", [H_MEMBER]: encodeURIComponent(JSON.stringify({ id: user.id, email: user.email })) },
+    headers: { Upgrade: "websocket", [H_MEMBER]: encodeURIComponent(JSON.stringify({ id: user.id, email: user.email })), ...(hold > 0 ? { [H_HOLD]: String(hold) } : {}) },
   }));
   return res.status === 101 && res.webSocket ? relay(res.webSocket) : res;
 }

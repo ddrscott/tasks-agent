@@ -13,7 +13,7 @@ import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
-  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
   frameCost, MEMBER_LIMITS, MEMBER_RATE, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
@@ -222,6 +222,23 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return (Number.isFinite(n) && n >= 5 ? n : 30) * 1000;
   }
 
+  /**
+   * Ask D1 what a member may do, once per member at a time. A board change, a deleted card,
+   * and a membership signal can all want the same answer in the same moment, for each of the
+   * member's tabs; they share one read. A read is only shared within the epoch it began
+   * under, so nothing started before a membership change answers for anything after it.
+   */
+  private reads = new Map<string, { ep: number; at: number; answer: Promise<Access> }>();
+  private readAccess(id: string, email: string): { ep: number; at: number; answer: Promise<Access> } {
+    const going = this.reads.get(id);
+    if (going && going.ep === this.epoch) return going;
+    const read = { ep: this.epoch, at: Date.now(), answer: access(this.env, { id, email }, this.name, { sealed: !!this.state.sealed }) };
+    this.reads.set(id, read);
+    const done = () => { if (this.reads.get(id) === read) this.reads.delete(id); };
+    read.answer.then(done, done);
+    return read;
+  }
+
   /** Take the board away from a socket: say why, then close it. Nothing more is sent to it. */
   private dropMember(ws: WebSocket, m: MemberMeta, why: "removed" | "encrypted") {
     sendTo(ws, this.accessFrame({ ...m, role: null, effective: "none", reason: why === "encrypted" ? "encrypted" : "not_member", ownerEmail: null, plan: "free" }, why));
@@ -233,12 +250,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * is closed. Role or plan changed: the socket is told, and remembers the new answer.
    * Returns what the member may do now.
    */
-  private async refresh(ws: WebSocket, m: MemberMeta, asked?: Promise<Access>): Promise<MemberMeta | null> {
+  private async refresh(ws: WebSocket, m: MemberMeta): Promise<MemberMeta | null> {
     // Stamped with when and under which epoch the read began, not when it came back: an answer
     // that was already on its way when membership changed must not count as newer than the change.
-    const ep = this.epoch;
-    const at = Date.now();
-    const a = await (asked ?? access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed }));
+    const { ep, at, answer } = this.readAccess(m.id, m.email);
+    const a = await answer;
     if (a.effective === "none" || a.role === "owner") {
       this.dropMember(ws, m, a.reason === "encrypted" ? "encrypted" : "removed");
       return null;
@@ -259,9 +275,20 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     await this.__unsafe_ensureInitialized();
     // Connecting costs a token too, so reconnecting isn't a way around the bucket.
     if (!this.spend(who.id).ok) return new Response("Slow down", { status: 429, headers: { "Cache-Control": "no-store" } });
-    const ep = this.epoch;
-    const at = Date.now();
-    const a = await access(this.env, { id: who.id, email: who.email }, this.name, { sealed: !!this.state.sealed });
+    let read = this.readAccess(who.id, who.email);
+    let a = await read.answer;
+    const hold = this.env.DEV_LOGIN_CODES === "1" ? Number(request.headers.get(H_HOLD)) || 0 : 0;
+    if (hold > 0) await new Promise((r) => setTimeout(r, Math.min(hold, 5000)));
+    // Membership changed while that read was out. `membersChanged` couldn't see this socket to
+    // close or downgrade it, because it isn't accepted yet, and the answer in hand may be from
+    // before the change. So ask again, until an answer comes back under the epoch it began in.
+    // Nothing is awaited between that answer and accepting the socket below.
+    for (let i = 0; read.ep !== this.epoch && i < 3; i++) {
+      read = this.readAccess(who.id, who.email);
+      a = await read.answer;
+    }
+    if (read.ep !== this.epoch) return new Response("The board's members are changing. Try again in a moment.", { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "1" } });
+    const { ep, at } = read;
     if (a.effective === "none" || a.role === "owner") return refuse();
     // One person, a handful of tabs. The oldest gives way.
     const mine = this.ctx.getWebSockets(`m:${who.id}`);
@@ -392,15 +419,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const sealed = !!this.state.sealed;
     const frame = sealed ? "" : this.memberFrame();
     const stale: WebSocket[] = [];
-    const cutoff = Date.now() - this.recheckMs();
+    const now = Date.now();
     for (const ws of sockets) {
       const m = memberMeta(ws);
       if (!m) continue;
       if (sealed) this.dropMember(ws, m, "encrypted");
-      else if (m.at < cutoff) stale.push(ws);
-      else sendTo(ws, frame);
+      // Only on a check made under the current epoch, and recently (pushFresh). Any other
+      // socket is checked against D1 first and gets the board only if it still has a way in.
+      else if (pushFresh(m, this.epoch, now, this.pushFreshMs())) sendTo(ws, frame);
+      else stale.push(ws);
     }
-    if (stale.length) this.ctx.waitUntil(this.recheck(stale, true).catch((e: Error) => console.warn("member recheck failed", e.message)));
+    if (stale.length) this.ctx.waitUntil(this.recheck(stale, () => [this.memberFrame()]).catch((e: Error) => console.warn("member recheck failed", e.message)));
+  }
+
+  /** How old a socket's access check may be for the board to be pushed to it without asking again. */
+  private pushFreshMs(): number {
+    return this.recheckMs();
   }
 
   /**
@@ -408,15 +442,15 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * and shared by that member's tabs, so nobody's close waits behind somebody else's read, and
    * one failed read leaves only that member's sockets for the next sweep.
    */
-  private async recheck(sockets: WebSocket[], thenSend: boolean) {
-    const asked = new Map<string, Promise<Access>>();
+  private async recheck(sockets: WebSocket[], thenSend?: () => string[]) {
     await Promise.all(sockets.map(async (ws) => {
-      const m = memberMeta(ws);
+      let m = memberMeta(ws);
       if (!m) return;
-      let a = asked.get(m.id);
-      if (!a) asked.set(m.id, a = access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed }));
       try {
-        if ((await this.refresh(ws, m, a)) && thenSend) sendTo(ws, this.memberFrame());
+        m = await this.refresh(ws, m);
+        // Membership changed again while that read was out: its answer isn't one to send on.
+        for (let i = 0; m && m.ep !== this.epoch && i < 3; i++) m = await this.refresh(ws, m);
+        if (m && m.ep === this.epoch && thenSend) for (const frame of thenSend()) sendTo(ws, frame);
       } catch (e) {
         console.warn("member recheck failed", (e as Error).message);
       }
@@ -434,7 +468,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // First, and before any await: nothing a socket remembers about its access counts from here on.
     this.epoch += 1;
     this.markShared();
-    await this.recheck(this.ctx.getWebSockets(MEMBER_TAG), false);
+    await this.recheck(this.ctx.getWebSockets(MEMBER_TAG));
     this.tellOwner();
   }
 
@@ -461,7 +495,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const sockets = this.ctx.getWebSockets(MEMBER_TAG);
     if (!sockets.length) return;
     const sharing = await syncSharing(this.env, this.name).catch((e: Error) => { console.warn("sharing state check failed", e.message); return null; });
-    await this.recheck(sockets, false);
+    await this.recheck(sockets);
     // A lapse or a return nobody announced: the owner's tabs hear about it here.
     if (sharing?.flipped) this.tellOwner();
     // Buckets of members who are gone or have been quiet don't need keeping.
@@ -688,13 +722,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     };
     const forMembers = JSON.stringify(frame);
     const forOwner = JSON.stringify(step === undefined ? frame : { ...frame, undo: step });
-    const cutoff = Date.now() - this.recheckMs();
+    const now = Date.now();
+    const stale: WebSocket[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       const m = memberMeta(ws);
-      // A member's socket that hasn't been checked lately waits for the board itself, which is checked first (flushMembers).
-      if (m) { if (m.at >= cutoff && m.effective !== "none") sendTo(ws, forMembers); }
+      // The same rule as the board itself (flushMembers): a member's socket hears it on a
+      // current, recent access check, and any other is checked first.
+      if (m) { if (pushFresh(m, this.epoch, now, this.pushFreshMs())) sendTo(ws, forMembers); else stale.push(ws); }
       else if (!this.ctx.getTags(ws).includes(MEMBER_TAG)) sendTo(ws, forOwner);
     }
+    if (stale.length) this.ctx.waitUntil(this.recheck(stale, () => [forMembers]).catch((e: Error) => console.warn("member recheck failed", e.message)));
   }
 
   // ---------- attachments ----------

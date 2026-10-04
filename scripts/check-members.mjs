@@ -215,6 +215,14 @@ section("access rules (pure)");
   ok("a member who goes quiet is forgiven", (() => { const r = spendToken({ ...bucket }, 1000 + (R.burst / R.perSecond) * 1000 + 1); return r.ok && r.bucket.strikes === 0; })());
   ok("an error's code comes off before a person reads it", rules.plainError(rules.SLOW_DOWN).startsWith("Slow down.") && rules.errorCode(rules.SLOW_DOWN) === "slow_down" && rules.plainError("No code here") === "No code here");
 
+  // When the board may be pushed to a member's socket without asking D1 again.
+  const { pushFresh } = rules;
+  const sockMeta = { at: 10_000, ep: 7, effective: "viewer" };
+  ok("a socket checked under the current epoch, recently, gets the board", pushFresh(sockMeta, 7, 10_500, 30_000) === true);
+  ok("one checked before the last membership change doesn't, however recently", pushFresh(sockMeta, 8, 10_001, 30_000) === false && pushFresh({ ...sockMeta, ep: 8 }, 7, 10_001, 30_000) === false);
+  ok("one whose check is too old doesn't", pushFresh(sockMeta, 7, 10_000 + 30_000, 30_000) === false && pushFresh(sockMeta, 7, 10_000 + 29_999, 30_000) === true);
+  ok("and one with no way in never does", pushFresh({ ...sockMeta, effective: "none" }, 7, 10_001, 30_000) === false);
+
   const by = { email: "w@example.com" };
   const b2 = shared.addCard(b, { title: "Two" }).board;
   const stamped = shared.stampBy(b, b2, by);
@@ -1399,6 +1407,42 @@ section("a member who floods");
     console.log(`     … waiting ${burst / perSecond + 1}s for the bucket again`);
     await sleep((burst / perSecond + 1) * 1000);
     pacers.delete(flooder.id);
+  }
+
+  // A connect that straddles a membership change. The board reads the member's access, and
+  // while that read is out the owner removes them: `membersChanged` can't close a socket that
+  // isn't accepted yet. Local D1 is too fast to race, so the dev server holds the connect in
+  // exactly that gap (`hold`, honored only with DEV_LOGIN_CODES=1).
+  {
+    const straddler = await account("straddler");
+    const inv = await invite(floodOwner, straddler.email, "writer");
+    await call(straddler, "POST", "/api/invites/accept", { token: tokenOf(inv) });
+    const normal = await open(straddler, { board: floodOwner.id });
+    ok("a new member connects", normal.opened && !!(await normal.wait((f) => f.type === "cf_agent_state")) && normal.access()?.effective === "writer", how(normal));
+    normal.close();
+    const tHeld = Date.now();
+    const held = await open(straddler, { board: floodOwner.id, extra: "&hold=1200" });
+    await held.wait((f) => f.type === "cf_agent_state");
+    ok("the dev server holds a connect between its access check and the socket", held.opened && Date.now() - tHeld >= 1100, Date.now() - tHeld);
+    held.close();
+
+    const slow1 = open(straddler, { board: floodOwner.id, extra: "&hold=1800" });
+    await sleep(600);
+    const demoted = await call(floodOwner, "POST", "/api/board/members/role", { email: straddler.email, role: "viewer" });
+    const s1 = await slow1;
+    await s1.wait((f) => f.type === "tasks_access");
+    ok("a connect that straddles a demotion comes up as a viewer, not as the writer it was when it asked", demoted.status === 200 && s1.opened && s1.access()?.effective === "viewer" && s1.access()?.role === "viewer" && !s1.frames.some((f) => f.type === "tasks_access" && f.effective === "writer") && (await s1.rpc("addCard", [lane, "Straddled"])).success === false, s1.access());
+    s1.close();
+
+    const slow2 = open(straddler, { board: floodOwner.id, extra: "&hold=1800" });
+    await sleep(600);
+    const gone = await call(floodOwner, "POST", "/api/board/members/remove", { email: straddler.email });
+    const s2 = await slow2;
+    const afterGone = (await fo.rpc("addCard", [lane, "After the straddled removal"])).result;
+    await sleep(800);
+    ok("a connect that straddles a removal is refused: no socket, no frame, no board", gone.status === 200 && typeof afterGone === "string" && refused(s2, 404) && s2.frames.length === 0, [how(s2), s2.frames.length]);
+    s2.close();
+    await fo.rpc("deleteCard", [afterGone]);
   }
 
   // Tabs. A fifth socket for one member closes their oldest.
