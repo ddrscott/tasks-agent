@@ -58,7 +58,8 @@ run ahead of whatever serves the zone.
   screens.
 - **Adding a card.** The + in a lane's header opens the full `// NEW_CARD` dialog
   (`src/client/NewCard.tsx`): title, notes, lane, due date, tags, and files in one go.
-  Nothing is added until Add card, so Cancel or Esc leaves no empty card behind, and the
+  Nothing is added until Add card, so the X or Esc leaves no empty card behind (they ask
+  "Discard changes?" first if anything was typed or a file is waiting), and the
   card goes in as one change, so one Undo takes it back out. Files picked, dropped, or
   pasted wait in the dialog and upload once the card exists; if one fails, the card stays
   and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
@@ -66,8 +67,10 @@ run ahead of whatever serves the zone.
 - **Editing a card.** Nothing changes until Save (or Enter in the title or tags). The X in
   the top corner and Esc close the editor and throw the edits away, so opening a card to
   read it can't change it by accident; that covers the title, notes, due date, tags, and
-  the lane. A click outside closes an untouched card and does nothing once something has
-  been edited. Files are the exception: they upload and come off as you go. Mark done, Reopen,
+  the lane. An untouched card closes at once. If something was edited, the X or Esc shows
+  "Discard changes?" where the footer buttons were, with Keep editing and Discard; Esc again
+  means Keep editing, so mashing Esc never loses work (`src/client/Discard.tsx`). A click
+  outside closes an untouched card and does nothing once something has been edited. Files are the exception: they upload and come off as you go. Mark done, Reopen,
   and the Move to buttons are actions of their own: each saves the edits and then moves the card.
 - **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
   shows the tags already on the board above the input, most used first (`tagsByUse` in

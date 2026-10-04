@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cleanTag, type Lane } from "../shared";
 import { formatBytes, uploadFile } from "./Attachments";
+import { DiscardBar, useDiscardGuard } from "./Discard";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
@@ -75,6 +76,9 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
   }, []);
 
   const dirty = !!(title.trim() || notes.trim() || due || tags.trim() || files.length);
+  // The X and Esc ask before throwing away what was typed or queued. Once the card is added
+  // there's nothing left to lose but a retry, so they just close.
+  const guard = useDiscardGuard(() => dirty && !addedId, onClose);
 
   async function add() {
     if ((!title.trim() && !addedId) || busy) return;
@@ -112,14 +116,14 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
   return (
     <dialog
       ref={ref} className="card-dialog" aria-label="New card"
-      onCancel={(e) => { e.preventDefault(); onClose(); }}
+      {...guard.dialogProps}
       // A stray click outside shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}
     >
       <div className="dialog-body">
         <div className="dialog-top">
           <h2 className="h">NEW_CARD</h2>
-          <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={onClose}><IconClose /></button>
+          <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={guard.requestClose}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} placeholder="What needs doing?" autoFocus />
         <label>
@@ -167,12 +171,14 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
           )}
         </div>
       </div>
+      {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">
         <span className="spacer" />
         <button className="btn primary" disabled={(!title.trim() && !addedId) || busy} onClick={() => void add()}>
           {addedId ? <><IconClip />Try the upload again</> : <><IconPlus />{busy ? "Adding…" : "Add card"}</>}
         </button>
       </div>
+      )}
     </dialog>
   );
 }

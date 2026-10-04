@@ -663,6 +663,10 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .dialog-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-foot { flex: none; display: flex; gap: 8px; padding: 14px 20px; border-top: var(--border-w) solid var(--line); }
 .dialog-foot .spacer { flex: 1; }
+/* "Discard changes?", where the footer buttons were, after X or Esc on an edited card (Discard.tsx). */
+.discard-bar { align-items: center; }
+.discard-q { font: 600 12px var(--font-mono); color: var(--ink); }
+.discard-q::before { content: "$ "; color: var(--accent); }
 .dialog-meta { font: 11px var(--font-mono); color: var(--muted); }
 .dialog-error { font: 12px var(--font-mono); color: var(--danger); }
 

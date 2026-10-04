@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
+import { DiscardBar, useDiscardGuard } from "./Discard";
 import { Markdown, toggleTask } from "./Markdown";
 import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
@@ -30,8 +31,9 @@ type Props = {
 
 /**
  * Edit a card. Save (or Enter in the title or tags) keeps the changes. The X and Esc throw them
- * away, so opening a card to read it can't change it by accident. Files are the exception: they
- * upload and come off as you go, and Undo covers a removal.
+ * away, so opening a card to read it can't change it by accident; if something was edited they
+ * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
+ * and Undo covers a removal, so they don't count as edits.
  */
 export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -105,24 +107,22 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
     onClose();
   }
 
-  /** The X and Esc: close and keep nothing. */
-  const cancel = onClose;
+  /** Whether Save would change anything. */
+  const edited = () => { const { patch, lane: to } = pending(); return Object.keys(patch).length > 0 || !!to; };
+  // The X and Esc: close and keep nothing, after asking if there's something to lose.
+  const guard = useDiscardGuard(edited, onClose);
 
   return (
     <dialog
       ref={ref} className="card-dialog" aria-label="Edit card"
-      onCancel={(e) => { e.preventDefault(); cancel(); }}
+      {...guard.dialogProps}
       // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
-      onClick={(e) => {
-        if (e.target !== ref.current) return;
-        const { patch, lane: to } = pending();
-        if (!Object.keys(patch).length && !to) cancel();
-      }}
+      onClick={(e) => { if (e.target === ref.current && !edited()) onClose(); }}
     >
       <div className="dialog-body">
         <div className="dialog-top">
           <h2 className="h">CARD</h2>
-          <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={cancel}><IconClose /></button>
+          <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={guard.requestClose}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
         <CardSession cardId={card.id} />
@@ -198,6 +198,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>
       </div>
+      {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">
         <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>
         <span className="spacer" />
@@ -208,6 +209,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
         )}
         <button className="btn primary" onClick={save}>Save</button>
       </div>
+      )}
     </dialog>
   );
 }
