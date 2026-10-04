@@ -283,6 +283,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     deleteLane: (id) => agent.stub.deleteLane(id),
     moveLane: (id, index) => agent.stub.moveLane(id, index),
     clearLane: (id) => agent.stub.clearLane(id),
+    sortLane: (id, ids) => agent.stub.sortLane(id, ids),
   }), [agent, out, laneClash]);
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {

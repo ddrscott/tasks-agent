@@ -56,6 +56,13 @@ run ahead of whatever serves the zone.
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
   screens.
+- **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
+  first, oldest first, and recently updated. It reorders that lane's cards once, the same
+  as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
+  Cards with no due date go last, and ties keep the order they had. The browser works out
+  the order (`sortedIds` in `src/shared.ts`) and the server only applies it (`orderLane`),
+  so it works on an encrypted board, where the server can't read titles or due dates.
+  `npm run check:sort` covers both.
 - **Tags.** A card can carry up to 10 tags, like `#agent` for work an AI agent owns.
   Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
@@ -570,6 +577,7 @@ npm run dev          # http://localhost:5173/tasks/ — Workers AI is always rem
 npm run dev:local    # no Cloudflare login needed; everything works except the assistant
 npm run typecheck
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
+npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,

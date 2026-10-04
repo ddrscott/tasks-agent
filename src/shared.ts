@@ -247,6 +247,46 @@ export function moveCard(b: Board, id: string, laneRef: string, index?: number):
   return { ...b, cards: rest };
 }
 
+/** The ways a lane can be sorted from its menu. `say` is how the toast names it. */
+export const SORTS = [
+  { by: "due", label: "Due date", say: "due date" },
+  { by: "title", label: "Title A–Z", say: "title" },
+  { by: "newest", label: "Newest first", say: "newest first" },
+  { by: "oldest", label: "Oldest first", say: "oldest first" },
+  { by: "updated", label: "Recently updated", say: "last updated" },
+] as const;
+export type SortBy = (typeof SORTS)[number]["by"];
+
+/**
+ * Card ids in sorted order. Ties keep the order they had. This runs in the browser, on the
+ * decrypted cards, because the server can't read titles or due dates on an encrypted board.
+ */
+export function sortedIds(cards: Card[], by: SortBy): string[] {
+  const cmp: Record<SortBy, (a: Card, b: Card) => number> = {
+    // Cards with no due date go last.
+    due: (a, b) => (a.due && b.due ? a.due.localeCompare(b.due) : Number(!a.due) - Number(!b.due)),
+    title: (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }),
+    newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
+    updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt),
+  };
+  const f = cmp[by];
+  if (!f) throw new Error(`Unknown sort ${String(by)}`);
+  return cards.map((c, i) => ({ c, i })).sort((x, y) => f(x.c, y.c) || x.i - y.i).map((x) => x.c.id);
+}
+
+/** Put a lane's cards in the order of `ids`, which must be exactly that lane's cards. Other lanes don't move. */
+export function orderLane(b: Board, laneRef: string, ids: string[]): Board {
+  const lane = requireLane(b, laneRef);
+  const inLane = b.cards.filter((c) => c.laneId === lane.id);
+  const byId = new Map(inLane.map((c) => [c.id, c]));
+  if (!Array.isArray(ids) || ids.length !== inLane.length || new Set(ids).size !== ids.length || !ids.every((id) => byId.has(id))) {
+    throw new Error(`${lane.name} changed while it was being sorted. Try again.`);
+  }
+  let n = 0;
+  return { ...b, cards: b.cards.map((c) => (c.laneId === lane.id ? byId.get(ids[n++])! : c)) };
+}
+
 export function addAttachment(b: Board, cardId: string, att: Attachment): Board {
   const card = requireCard(b, cardId);
   const list = card.attachments ?? [];

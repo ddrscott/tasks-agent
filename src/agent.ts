@@ -259,6 +259,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.mutate("Move lane", (b) => ops.moveLane(b, id, index));
   }
 
+  /** Reorder a lane to the order the browser sorted it into (shared.ts, sortedIds). */
+  @callable()
+  sortLane(id: string, ids: string[]) {
+    this.mutate("Sort lane", (b) => ops.orderLane(b, id, ids));
+  }
+
   @callable()
   clearLane(id: string) {
     this.mutate("Clear lane", (b) => ops.deleteCards(b, ops.laneCards(b, id).map((c) => c.id)));

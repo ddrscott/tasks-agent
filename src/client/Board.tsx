@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useRef, useState } from "react";
-import { hasTag, laneCards, type Board, type Card, type Lane } from "../shared";
+import { hasTag, laneCards, SORTS, sortedIds, type Board, type Card, type Lane, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
@@ -18,6 +18,7 @@ export type Actions = {
   deleteLane(id: string): Promise<unknown>;
   moveLane(id: string, index: number): Promise<unknown>;
   clearLane(id: string): Promise<unknown>;
+  sortLane(id: string, ids: string[]): Promise<unknown>;
 };
 
 type Props = {
@@ -165,6 +166,13 @@ function LaneView(props: Props & {
     setRenaming(false);
   }
 
+  function sort(by: SortBy, say: string) {
+    setMenu(false);
+    const ids = sortedIds(cards, by);
+    if (ids.every((id, i) => id === cards[i].id)) { props.toast(`${lane.name} is already sorted by ${say}`); return; }
+    void actions.sortLane(lane.id, ids).then(() => props.toast(`Sorted ${lane.name} by ${say}`, true));
+  }
+
   return (
     <section
       className={`lane${props.highlight ? " over" : ""}`}
@@ -194,6 +202,14 @@ function LaneView(props: Props & {
                 <button onClick={() => { setMenu(false); setRenaming(true); }}>Rename</button>
                 {props.index > 0 && <button onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
                 {props.index < props.lanes.length - 1 && <button onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
+                {cards.length > 1 && (
+                  <div className="menu-group" role="group" aria-label="Sort by">
+                    <div className="menu-label">Sort by</div>
+                    {SORTS.map((o) => (
+                      <button key={o.by} onClick={() => sort(o.by, o.say)}>{o.label}</button>
+                    ))}
+                  </div>
+                )}
                 {cards.length > 0 && (
                   <button className="danger" onClick={() => { setMenu(false); void actions.clearLane(lane.id).then(() => props.toast(`Cleared ${cards.length} from ${lane.name}`, true)); }}>
                     {props.isDone ? "Clear finished cards" : "Clear all cards"}

@@ -717,6 +717,8 @@ a.att-name:hover { color: var(--accent); }
 .menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
 .menu button:hover { background: var(--surface-2); }
 .menu button.danger { color: var(--danger); }
+.menu-group { display: flex; flex-direction: column; margin: 4px 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50;

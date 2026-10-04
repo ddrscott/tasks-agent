@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The footer shows the running version; click it for the latest changes
+- Sort a lane from its menu by due date, title, newest, oldest, or recently updated — Undo puts it back
 
 ## [0.1.0] - 2026-10-03
 
