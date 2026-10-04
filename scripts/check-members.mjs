@@ -504,8 +504,11 @@ ok("the owner has a chat transcript to protect", transcript.includes("add a secr
 const writerSock = await open(writer, { board: owner.id });
 const viewerSock = await open(viewer, { board: owner.id });
 const removedSock = await open(removed, { board: owner.id });
+// A second tab for the member who gets removed, and it never sends a frame. A socket like that
+// once stayed open for ten seconds after the board closed it.
+const removedQuiet = await open(removed, { board: owner.id });
 const leaverSock = await open(leaver, { board: owner.id });
-for (const s of [writerSock, viewerSock, removedSock, leaverSock]) await s.wait((f) => f.type === "cf_agent_state");
+for (const s of [writerSock, viewerSock, removedSock, removedQuiet, leaverSock]) await s.wait((f) => f.type === "cf_agent_state");
 ok("a writer connects and gets the board", writerSock.opened && writerSock.state()?.cards.some((c) => c.id === seed), writerSock.status);
 ok("a viewer connects and gets the board", viewerSock.opened && viewerSock.state()?.cards.some((c) => c.id === seed), viewerSock.status);
 ok("a member is told their role, the owner, and the plan", writerSock.access()?.role === "writer" && writerSock.access()?.effective === "writer" && writerSock.access()?.reason === null && writerSock.access()?.ownerEmail === owner.email && writerSock.access()?.plan === "pro" && writerSock.access()?.board === owner.id, writerSock.access());
@@ -804,11 +807,19 @@ section("open sockets follow membership");
 
   ok("the member to be removed can write first", (await removedSock.rpc("addCard", [lanes[0].id, "From the member about to go"])).success === true);
   mark = removedSock.frames.length;
+  const quietMark = removedQuiet.frames.length;
+  const tGone = Date.now();
   const gone = await call(owner, "POST", "/api/board/members/remove", { email: removed.email });
   const bye = await removedSock.wait((f) => f.type === "tasks_access" && f.effective === "none", 3000, mark);
   const closed = await removedSock.waitClosed(3000);
+  const quietBye = await removedQuiet.wait((f) => f.type === "tasks_access" && f.effective === "none", 3000, quietMark);
+  const quietClosed = await removedQuiet.waitClosed(3000);
+  const lag = (s) => (s.closedAt === null ? null : s.closedAt - tGone);
+  console.log(`     … removal: told in ${bye ? bye._at - tGone : "?"} ms, closed in ${lag(removedSock)} ms; the tab that never sent a frame: told in ${quietBye ? quietBye._at - tGone : "?"} ms, closed in ${lag(removedQuiet)} ms`);
   ok("removing a member tells their open socket why", gone.status === 200 && bye?.closed === "removed" && bye?.role === null, bye);
   ok("and closes it", closed?.code === 4403, closed);
+  ok("within 2 seconds, the last frame first", lag(removedSock) !== null && lag(removedSock) < 2000 && bye._at <= removedSock.closedAt && removedSock.frames[removedSock.frames.length - 1] === bye, lag(removedSock));
+  ok("their other tab, which never sent a frame, is told and closed as fast", quietBye?.closed === "removed" && quietClosed?.code === 4403 && lag(removedQuiet) < 2000, [quietClosed, lag(removedQuiet)]);
   const framesAtRemoval = removedSock.frames.length;
   const after = (await ownerSock.rpc("addCard", [lanes[0].id, "After the removal"])).result;
   await writerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === after));
@@ -821,12 +832,15 @@ section("open sockets follow membership");
   ok("the removed member's old invite link is still dead", (await call(removed, "POST", "/api/invites/lookup", { token: randomBytes(32).toString("base64url") })).status === 404);
 
   mark = leaverSock.frames.length;
+  const tLeft = Date.now();
   const left = await call(leaver, "POST", "/api/boards/leave", { board: owner.id });
   ok("a member leaves on their own", left.status === 200, left);
-  // This socket never sent a frame. Under the dev server such a socket doesn't always see the
-  // close itself, so what's checked is what matters: it's told, and it's dead.
+  // This socket never sent a frame either.
   const leftFrame = await leaverSock.wait((f) => f.type === "tasks_access" && f.effective === "none", 3000, mark);
+  const leftClosed = await leaverSock.waitClosed(3000);
+  console.log(`     … leaving: told in ${leftFrame ? leftFrame._at - tLeft : "?"} ms, closed in ${leaverSock.closedAt === null ? "?" : leaverSock.closedAt - tLeft} ms`);
   ok("their open socket is told", leftFrame?.closed === "removed", how(leaverSock));
+  ok("and closed within 2 seconds", leftClosed?.code === 4403 && leaverSock.closedAt - tLeft < 2000, how(leaverSock));
   const leaverFrames = leaverSock.frames.length;
   const afterLeave = (await ownerSock.rpc("addCard", [lanes[0].id, "After the leaver left"])).result;
   await writerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === afterLeave));
@@ -1029,7 +1043,7 @@ section("the audit log");
   ok("a member still can't read it", !(await call(writer, "GET", "/api/board/audit")).text.includes(owner.email) && !(await call(writer, "GET", "/api/board/audit.json")).text.includes(removed.email));
 }
 
-for (const s of [ownerSock, writerSock, viewerSock, removedSock, leaverSock]) s.close();
+for (const s of [ownerSock, writerSock, viewerSock, removedSock, removedQuiet, leaverSock]) s.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${failed ? "FAILED" : "passed"}: ${passed} ok, ${failed} failed`);
 process.exit(failed ? 1 : 0);

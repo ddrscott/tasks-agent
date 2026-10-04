@@ -229,12 +229,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * is closed. Role or plan changed: the socket is told, and remembers the new answer.
    * Returns what the member may do now.
    */
-  private async refresh(ws: WebSocket, m: MemberMeta): Promise<MemberMeta | null> {
+  private async refresh(ws: WebSocket, m: MemberMeta, asked?: Promise<Access>): Promise<MemberMeta | null> {
     // Stamped with when and under which epoch the read began, not when it came back: an answer
     // that was already on its way when membership changed must not count as newer than the change.
     const ep = this.epoch;
     const at = Date.now();
-    const a = await access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed });
+    const a = await (asked ?? access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed }));
     if (a.effective === "none" || a.role === "owner") {
       this.dropMember(ws, m, a.reason === "encrypted" ? "encrypted" : "removed");
       return null;
@@ -397,18 +397,32 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (stale.length) this.ctx.waitUntil(this.recheck(stale, true).catch((e: Error) => console.warn("member recheck failed", e.message)));
   }
 
+  /**
+   * Check these sockets against D1 now. One read per member, started for all of them at once
+   * and shared by that member's tabs, so nobody's close waits behind somebody else's read, and
+   * one failed read leaves only that member's sockets for the next sweep.
+   */
   private async recheck(sockets: WebSocket[], thenSend: boolean) {
-    for (const ws of sockets) {
+    const asked = new Map<string, Promise<Access>>();
+    await Promise.all(sockets.map(async (ws) => {
       const m = memberMeta(ws);
-      if (!m) continue;
-      if ((await this.refresh(ws, m)) && thenSend) sendTo(ws, this.memberFrame());
-    }
+      if (!m) return;
+      let a = asked.get(m.id);
+      if (!a) asked.set(m.id, a = access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed }));
+      try {
+        if ((await this.refresh(ws, m, a)) && thenSend) sendTo(ws, this.memberFrame());
+      } catch (e) {
+        console.warn("member recheck failed", (e as Error).message);
+      }
+    }));
   }
 
   /**
    * The Worker calls this the moment membership or the owner's plan changes (members.ts):
-   * every member socket is checked against D1 now, so a removed member's tab loses the board
-   * before the owner's request has even answered.
+   * every member socket is checked against D1 now. A member who was removed, who left, or
+   * whose access is gone gets one last `tasks_access` frame saying so and is closed (4403)
+   * right here, before the request that changed it has answered. The Worker's relay
+   * (server.ts) ends the browser's connection the moment it hears that close.
    */
   async membersChanged() {
     // First, and before any await: nothing a socket remembers about its access counts from here on.

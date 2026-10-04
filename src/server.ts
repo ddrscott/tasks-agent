@@ -214,9 +214,46 @@ async function memberConnect(req: Request, env: Env, user: User, sub: string, bo
   const a = await access(env, user, board);
   if (a.effective === "none" || a.role === "owner") return refuse();
   const agent = await getAgentByName(env.TodoAgent, board);
-  return agent.fetch(new Request("https://tasks.internal/agent", {
+  const res = await agent.fetch(new Request("https://tasks.internal/agent", {
     headers: { Upgrade: "websocket", [H_MEMBER]: encodeURIComponent(JSON.stringify({ id: user.id, email: user.email })) },
   }));
+  return res.status === 101 && res.webSocket ? relay(res.webSocket) : res;
+}
+
+/** The biggest frame a member's browser may send (MEMBER_FRAME_MAX in agent.ts checks it again). */
+const MEMBER_FRAME_MAX = 32 * 1024;
+
+/**
+ * Stand between a member's browser and the board's end of their socket, passing frames both
+ * ways, so that when the board closes the socket (removed, left, lost access, flooding) the
+ * browser's connection ends then and there. Handing the board's socket straight through, a
+ * socket that had never sent a frame got the board's last frame at once but stayed open until
+ * the board's object next went idle, about ten seconds later. Here the Worker hears the close
+ * and closes the browser's side itself, with the same code and reason.
+ *
+ * It adds no way in: both ends exist only after memberConnect's access check and the board's
+ * own. It only ever narrows what gets through: text frames up to MEMBER_FRAME_MAX from the
+ * browser, and whatever the board sends back.
+ */
+function relay(board: WebSocket): Response {
+  const [browser, mine] = Object.values(new WebSocketPair());
+  board.accept();
+  mine.accept();
+  const shut = (ws: WebSocket, code: number, reason: string) => {
+    // 1005 and 1006 mean "no code came" and can't be sent.
+    try { ws.close(code === 1005 || code === 1006 ? 1000 : code, reason); } catch { /* already closed */ }
+  };
+  const both = (code: number, reason: string) => { shut(mine, code, reason); shut(board, code, reason); };
+  board.addEventListener("message", (e) => { try { mine.send(e.data); } catch { /* the browser went away */ } });
+  mine.addEventListener("message", (e) => {
+    if (typeof e.data !== "string" || e.data.length > MEMBER_FRAME_MAX) return both(1009, "frame too big");
+    try { board.send(e.data); } catch { /* the board closed it */ }
+  });
+  board.addEventListener("close", (e) => both(e.code, e.reason));
+  mine.addEventListener("close", (e) => both(e.code, e.reason));
+  board.addEventListener("error", () => both(1011, "board socket error"));
+  mine.addEventListener("error", () => both(1011, "socket error"));
+  return new Response(null, { status: 101, webSocket: browser });
 }
 
 /** The most a hook may send. Real payloads are a few hundred bytes; a Write's tool_input can be big, and it's thrown away. */

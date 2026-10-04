@@ -1297,9 +1297,18 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
   `"writer" | "viewer"`, `reason` is `null | "plan_lapsed"`, `plan` is the owner's.
 - Before the socket is closed it gets one last frame with `"closed": "removed"` (removed, or
   left) or `"closed": "encrypted"`, and `role: null`, `effective: "none"`, `ownerEmail: null`.
-  Then the server closes it with code **4403**. Treat the frame as the end and close the
-  socket from the client too: under the dev server a socket that never sent a frame doesn't
-  always see the close event. A reconnect is refused with the 404 above.
+  Then the server closes it with code **4403**, at once: `check:members` measures the frame
+  and the close at about 10 ms after the request that removed them, and fails past 2 seconds,
+  for a tab that has sent calls and for one that never sent a frame. The app treats the frame
+  as the end and closes from its side too. A reconnect is refused with the 404 above.
+- **The Worker relays a member's socket** (`relay` in `src/server.ts`): it accepts the board's
+  end and the browser's end and passes frames between them. That's what makes a close land
+  right away. Handed straight through, a socket that had never sent a frame got the board's
+  last frame at once and then stayed open until the board's object next went idle, about ten
+  seconds. The relay hears the board's close and closes the browser's side itself, with the
+  same code and reason. It also drops the connection on a binary frame or one over 32 KB
+  before the board sees it. It opens nothing: both ends exist only after the two access
+  checks above. The owner's own socket isn't relayed.
 - `cf_agent_state` is the same `Board` the owner gets, on connect and after changes: at once
   for one change, and at most every 200 ms through a burst (each push is the board as it
   stands, so nothing is missed). Its
