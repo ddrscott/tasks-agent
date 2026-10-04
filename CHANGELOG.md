@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
 - Agents see which lanes are the to do, doing, and done lanes in `get_board`
-- The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone. The screens for it are still to come
+- The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone
 - A card remembers who last changed it: you, a member, the assistant on someone's behalf, or an agent
 - An audit log of invites, role changes, removals, and people leaving, with who and when, that the owner can download as CSV or JSON
 - Members, in the account menu: invite someone by email as a viewer or a writer, see who's on your board and since when, change a role in place, and remove someone with two taps. Pending invites show when they were sent and when they expire, with Resend and Revoke

@@ -1403,7 +1403,7 @@ invited you, the role, the link, when it expires, and that you can ignore it. Wi
 **`ALLOWED_EMAILS`.** An address with a live invite or a membership may sign in even when the
 list would refuse it (`maySignIn` in `src/auth.ts`). Nothing else about the list changes.
 
-**For whoever builds the UI.**
+**For whoever changes the UI.**
 
 - Both sides are built. The owner's side shows `board.sharing` (`pro_required`, `suspended`,
   `encrypted`) in the Members dialog, with the upgrade prompt at the Invite button. A member's
