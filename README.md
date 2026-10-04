@@ -480,6 +480,12 @@ When an agent needs you to decide something, it asks on the card and you answer 
   and lists them under the questions: project, what it wants, machine, and Copy resume command.
   Those can't be answered from the board, so the row is the way back to the terminal. Three
   questions and one blocked session read "4 need you" (`AsksButton` in `src/client/Ask.tsx`).
+- **One decision counts once.** A session that's stopped at a prompt while it holds the claim on
+  a card with an open question is the same decision as that question. It counts as the question,
+  and the session shows as one line under it instead of as a row of its own. A blocked session
+  that holds no card with a question still counts. The rule is `blockedSessions` in
+  `src/presence-shared.ts`, and the top bar, the list, the demo, and the front page's sample
+  bar all read it.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
@@ -546,7 +552,12 @@ The Sessions button in the top bar lists every Claude Code session that's report
 machine: grouped by project, the ones waiting on you first. A row shows the state (working,
 needs input, idle), the agent and machine, one line about its last action, and how long ago it
 was heard from. After 5 quiet minutes a row is marked stale. "Copy resume command" copies
-`cd <folder> && claude --resume <id>` for the machine it runs on. The button's count is the
+`cd <folder> && claude --resume <id>` for the machine it runs on. A session that never sent a
+folder has nothing to resume, so its row has no such button; one that sent `X-Tasks-Link` shows
+"open session" either way. A session that didn't say its project is listed under "No project",
+and a machine it didn't name is left off the row. An agent with no hooks at all (Cursor, Codex,
+anything that only speaks MCP) still gets a row, from its claims: see Claiming cards below.
+The button's count is the
 sessions that are live, and it never turns orange: the ones that need input are counted on
 "need you" beside it, in one list with the open questions (`// QUESTIONS`), so there's one
 number to watch. A stale session isn't counted there. Claude Code's "waiting for your input"
@@ -563,7 +574,9 @@ transcripts in `~/.claude/projects` on the machine that ran them.
 resume command), machine, agent kind, state, the last-action line, when it started, and when it
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
-(`Claude needs your permission to use Bash`). Rows are deleted 24 hours after they were last
+(`Claude needs your permission to use Bash`). For a session that only claims cards it's
+`claimed "<card title>"` or `released "<card title>"`, the one place a card's title is copied
+here. Rows are deleted 24 hours after they were last
 updated, when the session ends, and all at once when the board turns encryption on. At most 200
 are kept.
 
@@ -678,7 +691,30 @@ cards, and `release_card` gives one back. A claim holds for 15 minutes after its
 last heard from, which is longer than the 5-minute stale mark on purpose: a lead that's thinking
 keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
 being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
-on the card, so they don't show up in undo, notes, or search. For a lead agent's instructions:
+on the card, so they don't show up in undo, notes, or search.
+
+**A session that only claims.** An agent with no hooks is heard from through `claim_card` and
+`release_card` alone, so those two calls write its whole row. `agent`, `machine`, and `project`
+on `claim_card` are how it says who it is; passing them again on a later claim replaces what it
+said before, and leaving them off keeps it. MCP can read the board, so the last-action line
+names the card by its title.
+
+| Call | State | Last action |
+|---|---|---|
+| `claim_card`, got the card | working | claimed "Fix the login redirect" |
+| `claim_card`, refused | working if it holds another card, else idle | asked for "Fix the login redirect", which another session holds |
+| `release_card`, holds another card | working | released "Fix the login redirect" |
+| `release_card`, its last card | idle | released "Fix the login redirect" |
+| 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
+
+So such a session is "working" only while it holds a card. A refused claim counts as being heard
+from and nothing more. Once a hook reports for a session, the event table above is in charge of
+its row, and a claim or release only moves its last-seen time (and fills in the agent kind when
+the hooks didn't send one). The rules are `afterClaim` and `afterRelease` in
+`src/presence-shared.ts`; `npm run check:presence` runs them, along with the "need you" count.
+What a hookless session can't say: that it's stopped at a prompt (its questions go through
+`ask_ceo`), or that it's alive between claims, which is why the lead instructions below renew
+the claim. For a lead agent's instructions:
 
 ```
 Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
@@ -875,6 +911,7 @@ npm run check:sort       # lane sorting: each order, and that only the sorted la
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
+npm run check:presence   # Sessions rules: what a claim, a refused claim, and a release say, and that one decision counts once
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 ```
 

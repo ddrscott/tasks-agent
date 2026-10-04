@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Need you" in the top bar is the one count of what's waiting on you. It adds sessions stopped at a permission prompt to the open questions and lists both, each session with its project, what it wants, its machine, and Copy resume command. The Sessions button just counts live sessions
 
 ### Fixed
+- An agent with no Claude Code hooks (Cursor, Codex, anything on MCP) reads true in the Sessions list: it's working only while it holds a card, releasing a card says `released "<card title>"` and goes idle, and a claim that was refused no longer says it claimed the card
+- Passing `agent`, `machine`, or `project` to `claim_card` again updates the session's row
+- A session's last action names the card by its title instead of its id
+- A session with no project is listed under "No project" and a machine it didn't name is left off, instead of the word "unknown" twice. A session with no folder no longer offers a resume command
+- "Need you" counts one decision once: a session stopped on a card that has an open question shows under that question instead of adding to the count. The front page's sample bar and the demo count the same way
 - Tapping the search icon on a phone opens search
 - iPhones no longer zoom in when you tap a field
 - The "Add card" label in quick add was unreadable against its button
