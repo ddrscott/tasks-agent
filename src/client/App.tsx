@@ -98,8 +98,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [asksOpen, setAsksOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
+  // The assistant panel. Whoever opened or closed it gets it back that way ("todo-chat"). With no
+  // choice saved it waits for the board (receive, below): open beside a board that has cards,
+  // closed on an empty one, so a new account's first screen is // START_HERE and the lanes.
+  const chatSaved = useRef<string | null>(null);
   const [chatOpen, setChatOpen] = useState(() => {
-    try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
+    try { chatSaved.current = localStorage.getItem("todo-chat"); } catch { /* private window */ }
+    return chatSaved.current === "open" && innerWidth > 900;
   });
   const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
 
@@ -139,6 +144,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const receive = useCallback((next: Board) => {
     if (dragging.current) { pending.current = next; return; }
     const prev = boardRef.current;
+    // The first board decides the assistant panel when nobody has. An empty board keeps it closed,
+    // and that's saved, so it doesn't spring open later: it opens when the person opens it.
+    if (!prev && chatSaved.current === null && innerWidth > 900) {
+      chatSaved.current = next.cards.length ? "open" : "closed";
+      if (next.cards.length) setChatOpen(true);
+      else try { localStorage.setItem("todo-chat", "closed"); } catch { /* private window */ }
+    }
     // A new account (another sign-in email) starts on Auto. Until the user picks a theme
     // on it, keep the one this browser already uses instead of switching under them.
     const cached = readCachedTheme();

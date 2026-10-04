@@ -95,6 +95,13 @@ run ahead of whatever serves the zone.
 - **Who's signed in.** `GET /tasks/api/me` answers 200 either way: the user, or `null` when
   nobody is signed in. It isn't a 401, so a signed-out visit leaves the browser console clean.
   Everything that needs a session still answers 401 without one.
+- **The assistant panel** opens the way you left it: the Assistant button saves `open` or
+  `closed` in this browser (`localStorage["todo-chat"]`). With nothing saved, the first board to
+  load decides (`receive` in `App.tsx`). A board with cards opens the panel, as it always has.
+  A board with no cards keeps it closed and saves that, so a new account's first screen is
+  `// START_HERE` and the lanes at full width, and the panel doesn't spring open on a later
+  visit: it opens when you open it (the Assistant button, or `/`). Under 900px wide it's always
+  closed to start, behind the Ask button.
 - **First run.** A board with no cards shows `// START_HERE` above its lanes
   (`src/client/FirstRun.tsx`): four steps that end with Claude Code working a card. Sign in
   (done), **Add a sample agent card**, **Copy the command**, paste it in a terminal. The steps
