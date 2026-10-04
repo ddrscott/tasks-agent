@@ -816,10 +816,21 @@ resume command), machine, agent kind, state, the last-action line, when it start
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
 (`Claude needs your permission to use Bash`). For a session with no hooks it's a line
-about the card, like `claimed "<card title>"` or `finished "<card title>"`, the one place a
-card's title is copied here. Rows are deleted 24 hours after they were last
-updated, when the session ends, and all at once when the board turns encryption on. At most 200
-are kept.
+about the card, like `claimed "<card title>"` or `finished "<card title>"`. Rows are deleted
+24 hours after they were last updated, when the session ends, and all at once when the board
+turns encryption on. At most 200 are kept.
+
+Per claim: the card's id, the session's id, the agent kind, and when it was claimed. While a
+question that session asked on the card is open (`ask_ceo`), the claim also holds a copy of
+the question and when it was asked, which is how the row reads `needs input` and `asked: …`
+without that being written into the row. The copy comes off when you answer or the question is
+taken back. A claim ends when its card is done or deleted, when it's released, when its
+session ends, and 15 minutes after the session was last heard from; encryption erases them
+with the rows. Card text is copied here in those two places and no others: a title in a
+hookless session's last-action line, and an open question on its claim. A session's row is
+made by its first hook report, its first `claim_card`, or an `ask_ceo` that names a session;
+`wait_for_answer` only moves last-seen on a row that's already there. The privacy page
+(`src/client/Legal.tsx`) says the same in plainer words; change them together.
 
 **Install the hook** on each machine with one command. The Connect page shows it with a fresh
 token filled in (`/tasks/connect#sessions`; "Create a token" is right there):
