@@ -134,7 +134,10 @@ section("access rules (pure)");
   ok("with nobody to name, a changed card loses its old mark", shared.stampBy(stamped, { ...stamped, cards: stamped.cards.map((c) => ({ ...c, notes: "x" })) }, null).cards.every((c) => c.by === undefined));
   ok("a mark doesn't change the board's shape", shared.sameShape(b2, stamped));
 
-  ok("next= takes the invite page with its token", auth.safeNext("/tasks/invite#t=abc") === "/tasks/invite#t=abc");
+  // The invite page signs people in with next=/tasks/invite and keeps the token in the tab.
+  // If a page ever did put the link's fragment in `next`, it's cut before `next` reaches the
+  // sign-in email or the SSO redirect.
+  ok("next= takes the invite page, and never its token", auth.safeNext("/tasks/invite") === "/tasks/invite" && auth.safeNext("/tasks/invite#t=SECRET") === "/tasks/invite" && auth.safeNext("/tasks/?board=abc#t=SECRET") === "/tasks/?board=abc" && auth.safeNext("#/tasks/") === null);
   ok("next= refuses other sites", auth.safeNext("//evil.example/tasks/") === null && auth.safeNext("https://evil.example/tasks/") === null && auth.safeNext("/tasksevil") === null && auth.safeNext("/tasks/\\evil.example") === null);
   const db = (row) => ({ prepare: () => ({ bind: () => ({ first: async () => row }) }) });
   ok("ALLOWED_EMAILS still refuses an address nobody invited", (await auth.maySignIn({ ALLOWED_EMAILS: "boss@example.com", DB: db(null) }, "new@example.com")) === false);
