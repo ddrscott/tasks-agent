@@ -33,8 +33,8 @@ const doc = (name: (typeof BY_HAND)[number]) => TOOL_DOCS[name].description;
 const INSTRUCTIONS = `This is the user's personal task board, laid out as kanban lanes. Call get_board to see
 lanes, cards, and card ids, or search_cards to find specific cards on a big board, then use the other
 tools to change it. get_board shows only the start of each card's notes and the names of its files:
-call get_card for the full notes and to see attached images. The last lane is the
-done lane: move a card there when the user finished it rather than deleting it. Dates
+call get_card for the full notes and to see attached images. get_board marks the
+done lane, wherever it sits: move a card there when the user finished it rather than deleting it. Dates
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
 search_cards to see only those cards. The user can undo any change from the app.
 
@@ -220,9 +220,9 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         for (const id of ids) {
           const card = await agent.cardDetail(id);
           const state = card ? askState(card.text) : null;
-          // A card the owner moved to the last lane is finished, question and all: its claim ended
+          // A card the owner moved to the done lane is finished, question and all: its claim ended
           // there too (Presence.finish), and the rules never pick up a card in that lane.
-          if (card && state === "asking" && card.done) ready.push(`[${id}] was moved to the last lane with its question still open: the owner finished it, so stop waiting on it.`);
+          if (card && state === "asking" && card.done) ready.push(`[${id}] was moved to the done lane with its question still open: the owner finished it, so stop waiting on it.`);
           else if (state === "asking") waiting.push(id);
           else if (!card) ready.push(`[${id}] is gone: the owner deleted it, so stop working on it.`);
           else if (state === "answered") ready.push(`ANSWERED. Call claim_card on it (that renews your claim, or takes it back if it lapsed) and act on the answer:\n${card.text}`);
@@ -274,10 +274,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const no = await locked();
       if (no) return no;
       const released = await presence.release({ cardId: input.id, sessionId: input.session_id, title: (await agent.cardTitle(input.id)) ?? undefined });
-      // Not an error: a claim ends by itself when its card reaches the last lane or is deleted
+      // Not an error: a claim ends by itself when its card reaches the done lane or is deleted
       // (Presence.finish), so an agent that moves a card to Done and then releases lands here.
       return text(released ? `Released [${input.id}].`
-        : `Session ${input.session_id} holds no claim on [${input.id}], so there's nothing to release. A claim ends by itself when its card reaches the last lane or is deleted.`);
+        : `Session ${input.session_id} holds no claim on [${input.id}], so there's nothing to release. A claim ends by itself when its card reaches the done lane or is deleted.`);
     });
 
     server.registerTool(SEARCH_TOOL.name, {

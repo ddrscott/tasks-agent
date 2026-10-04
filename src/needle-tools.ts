@@ -7,6 +7,7 @@
 // and how sure it is. The client (src/client/needle.ts) and the bench (bench/needle.mjs)
 // both go through here, so what ships is what was measured. No DOM, no Workers types.
 
+import type { LaneRole } from "./lanes";
 import type { Board } from "./shared";
 import type { ToolName } from "./tools";
 
@@ -189,10 +190,12 @@ export function resolveEnvelope(env: NeedleEnvelope, board: Board, text: string,
   if (ands && calls.length < ands + 1) return { ok: false, reason: "more things named than calls made", confidence };
   // Which lane "finished", "started", and "reopen" mean is read off the lane names. A board whose
   // names don't say (four lanes, none called Doing) sends those turns to the big model.
+  // A lane that carries a role (lanes.ts) settles it before any name is read.
+  const byRole = (role: LaneRole) => lanes.find((l) => l.role === role)?.id;
   const byName = (re: RegExp) => lanes.find((l) => re.test(l.name))?.id;
-  const last = byName(/\b(done|finished|shipped|complete|completed|closed|released|live)\b/i) ?? (lanes.length <= 3 ? lanes[lanes.length - 1]?.id : undefined);
-  const middle = byName(/\b(doing|in progress|wip|working|active|started|now|today)\b/i) ?? (lanes.length === 3 ? lanes[1]?.id : undefined);
-  const first = byName(/\b(to ?do|backlog|inbox|open|later|ideas|someday|queue)\b/i) ?? (lanes.length <= 3 ? lanes[0]?.id : undefined);
+  const last = byRole("done") ?? byName(/\b(done|finished|shipped|complete|completed|closed|released|live)\b/i) ?? (lanes.length <= 3 ? lanes[lanes.length - 1]?.id : undefined);
+  const middle = byRole("doing") ?? byName(/\b(doing|in progress|wip|working|active|started|now|today)\b/i) ?? (lanes.length === 3 ? lanes[1]?.id : undefined);
+  const first = byRole("todo") ?? byName(/\b(to ?do|backlog|inbox|open|later|ideas|someday|queue)\b/i) ?? (lanes.length <= 3 ? lanes[0]?.id : undefined);
 
   let minChoice = 1;
   const out: LocalCall[] = [];

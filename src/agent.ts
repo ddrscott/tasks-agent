@@ -136,7 +136,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
-   * A card that just reached the last lane, or was deleted, can't still be "working": tell
+   * A card that just reached the done lane, or was deleted, can't still be "working": tell
    * Presence so its claim ends now instead of 15 minutes later (endedCards in presence-shared.ts).
    * A question that was answered or taken back is told the same way, so the session that asked
    * stops reading "needs input" (settledAsks).
@@ -282,6 +282,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.mutate("Move lane", (b) => ops.moveLane(b, id, index));
   }
 
+  /** Make a lane the to do, doing, or done lane (null for an ordinary lane). Whoever held the role gives it up. */
+  @callable()
+  setLaneRole(id: string, role: ops.LaneRole | null) {
+    this.mutate("Lane role", (b) => ops.setLaneRole(b, id, role));
+  }
+
   /** Dragging a card inside a sorted lane: keep the order on screen and drop the sort, as one change and one undo step. */
   @callable()
   setLaneManual(id: string, ids: string[]) {
@@ -406,9 +412,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const text = ops.describeCard(this.state, id);
     if (text === null) return null;
     const card = this.state.cards.find((c) => c.id === id);
-    const lanes = this.state.lanes;
-    // Done is the last lane, the same rule that ends a claim (endedCards in presence-shared.ts).
-    return { text, attachments: card?.attachments ?? [], done: lanes.length > 1 && card?.laneId === lanes[lanes.length - 1].id };
+    // Done is being in the done lane, the same rule that ends a claim (endedCards in presence-shared.ts).
+    return { text, attachments: card?.attachments ?? [], done: !!card && card.laneId === ops.doneLaneId(this.state.lanes) };
   }
 
   /** Lane names and card counts, for what a write tool echoes over MCP. */

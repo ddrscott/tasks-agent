@@ -40,12 +40,12 @@ Settle four things first and use the same ones all session. Don't run a command 
 Then repeat until no agent card is left for you:
 
 1. Call get_board with tag "agent". Skip cards listed as claimed by another session, and cards showing ASKING: those are waiting on the owner.
-2. Pick a card, in this order. First, one outside the last lane that shows ANSWERED: that's the owner's decision on a question an agent asked, so act on it. Next, one in Doing that nobody has claimed: read its STATUS line and pick up where it left off. Otherwise take the top card in the first lane.
+2. Pick a card, in this order. First, one outside the done lane that shows ANSWERED: that's the owner's decision on a question an agent asked, so act on it. Next, one in Doing that nobody has claimed: read its STATUS line and pick up where it left off. Otherwise take the top card in the to do lane. get_board marks the to do, doing, and done lanes; they can sit in any order.
 3. Call claim_card with the card's id and your session_id, agent, machine, and project before anything else. If the claim is refused, another session has the card: take the next one.
 4. Call get_card for the full notes and attached files, then move_cards to put it in Doing.
 5. Do the work. Keep one line in the notes that starts with STATUS: and says what's happening and when. The board shows that line on the card, so write it for the owner. It goes at the top, under any lines that start with ANSWER:. Those lines are the owner's answers. The board writes one above everything else each time a question is answered, so keep every one of them. update_card replaces the whole of each field you pass, so send the notes back complete, ANSWER lines included. Leave tags out of the call and the card keeps the tags it has. On a long card, call claim_card again every 10 minutes so the claim doesn't lapse.
 6. When you need a decision from the owner, call ask_ceo on the card with your session_id: a one-line question, 2 to 4 options that are each a complete action, and which one you recommend. Put your reasoning in the notes and leave the card in Doing. Keep your claim: don't call release_card. The card is waiting on the owner, and the board shows your session on it as needs input until they answer. Then go on to the next card. Don't write the question into the notes.
-7. When a card is done and you've checked the result yourself, write what changed and where in its notes (commit, branch, files), move it to Done (the last lane), and call release_card. If you give up on a card without finishing it, call release_card too, so nothing says you're still on it.
+7. When a card is done and you've checked the result yourself, write what changed and where in its notes (commit, branch, files), move it to the done lane, and call release_card. If you give up on a card without finishing it, call release_card too, so nothing says you're still on it.
 
 When you can't go on. A tool call was refused, a tool you need isn't there, or a command keeps failing. The owner is looking at the board, not at your terminal, so a STATUS line that says blocked isn't enough, and neither is stopping. Call ask_ceo on the card: one line that says what you need, and options that are each a complete action the owner can settle from the board. They may be nowhere near the terminal, and a session that runs without prompts has nothing there for them to allow. So put first, and recommend, a way to finish with the tools you already have, like "Do it another way: write the result into this card's notes instead of the file". When there's no such way, recommend "Skip this card". You can also offer "I've allowed it in the terminal, try again", but never as the one you recommend, and only once per card: if you tried again and were refused again, leave it out of your next question. Then treat it like any question: STATUS says what you're stuck on, the card stays in Doing and stays claimed, and you wait for the answer as below. Don't get around a refusal with another tool that does the same thing.
 
@@ -57,7 +57,7 @@ ${feedCommand(origin, base)} --require agent
 
 Each line it prints is a change the owner made to an agent card. Handle it right away:
 - hello: every open agent card. Pick up any you don't know about.
-- added or tagged: new work. Treat it like a card in the first lane.
+- added or tagged: new work. Treat it like a card in the to do lane.
 - answered: with an answer field, claim the card again and act on the answer. Without one, reread the card.
 - edited or moved: the owner changed course. Reread the card before you go on.
 - deleted: stop working on it.

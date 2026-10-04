@@ -36,7 +36,7 @@ export const BOARD_TOOLS = {
     inputSchema: z.object({
       cards: z.array(z.object({
         title: z.string().describe("Short task title, sentence case"),
-        lane: z.string().optional().describe("Lane name or id; defaults to the first lane"),
+        lane: z.string().optional().describe("Lane name or id; defaults to the to do lane"),
         notes: z.string().optional(),
         due: z.string().optional().describe("YYYY-MM-DD, only if the user gave a date"),
         tags: z.array(z.string()).optional().describe(TAGS_HINT),

@@ -72,7 +72,7 @@ check("setLaneSort: the stored order doesn't change", kept.cards.map((c) => c.id
 check("setLaneSort: other lanes stay in manual order", ids(kept, "done"), ["x", "y"]);
 const added = addCard(kept, { title: "Aardvark", laneId: "todo" });
 check("a card added to a sorted lane falls into place", ids(added.board, "todo")[0], added.card.id);
-check("the text board agents read is in the same order, and says so", describeBoard(added.board).split("\n").slice(0, 3).map((l) => l.replace(/\[c\w+\]/, "[new]").slice(0, 52)), ["To do (lane id todo, 6 cards, sorted by title)", "  - [new] Aardvark", "  - [e] audit (due 2026-10-01)"]);
+check("the text board agents read is in the same order, and says so", describeBoard(added.board).split("\n").slice(0, 3).map((l) => l.replace(/\[c\w+\]/, "[new]").slice(0, 68)), ["To do (lane id todo, the to do lane, 6 cards, sorted by title)", "  - [new] Aardvark", "  - [e] audit (due 2026-10-01)"]);
 const manual = setLaneSort(kept, "todo", null);
 check("manual order: the sort is gone, not set to nothing", "sort" in manual.lanes.find((l) => l.id === "todo"), false);
 check("manual order: back to the stored order", ids(manual, "todo"), ["a", "b", "c", "d", "e"]);

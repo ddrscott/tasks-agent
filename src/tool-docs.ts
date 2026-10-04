@@ -55,7 +55,7 @@ export const TOOL_DOCS = {
     destructive: true,
   },
   add_lane: {
-    description: "Add a new lane (column) to the right of the others.",
+    description: "Add a new, ordinary lane (column) to the right of the others. It doesn't become the done lane.",
     about: "Add a lane.",
   },
   rename_lane: {

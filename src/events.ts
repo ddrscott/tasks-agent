@@ -11,6 +11,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
+import { doneLaneId } from "./lanes";
 import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
 
 // The tags live in shared.ts, where the app can reach them too.
@@ -57,8 +58,8 @@ export function agentEvents(before: Board, after: Board): TaskEvent[] {
 
 /** Every open #agent or #gauntlet card (anything not in the done lane), sent first on each connect so nothing is missed while offline. */
 export function agentQueue(b: Board): TaskEvent {
-  const done = b.lanes[b.lanes.length - 1]?.id;
-  return { type: "hello", cards: b.cards.filter((c) => forAgent(c) && (c.laneId !== done || b.lanes.length === 1)).map((c) => ref(b, c)) };
+  const done = doneLaneId(b.lanes);
+  return { type: "hello", cards: b.cards.filter((c) => forAgent(c) && c.laneId !== done).map((c) => ref(b, c)) };
 }
 
 export class TaskEvents extends DurableObject<Env> {

@@ -438,7 +438,7 @@ export class Presence extends DurableObject<Env> {
   }
 
   /**
-   * Cards that just reached the last lane or were deleted (endedCards in presence-shared.ts; the
+   * Cards that just reached the done lane or were deleted (endedCards in presence-shared.ts; the
    * board calls this from TodoAgent.mutate and from undo and redo). Their claims are over: nothing
    * is working on a card that's done or gone. A session that reports through hooks keeps its row
    * as its hooks left it. One that only claims gets the line from afterEnded, and goes idle if

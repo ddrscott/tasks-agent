@@ -57,22 +57,24 @@ const lanes = [{ id: "todo", name: "To do" }, { id: "doing", name: "Doing" }, { 
 const card = (id, laneId, title = id) => ({ id, laneId, title });
 const b0 = { lanes, cards: [card("a", "doing", "Fix login"), card("b", "todo"), card("z", "done")] };
 const moved = { lanes, cards: [card("a", "done", "Fix login"), card("b", "todo"), card("z", "done")] };
-check("a card moved to the last lane has ended, and one already there hasn't", endedCards(b0, moved, "agent"),
+check("a card moved to the done lane has ended, and one already there hasn't", endedCards(b0, moved, "agent"),
   [{ cardId: "a", title: "Fix login", how: "done", lane: "Done", by: "agent" }]);
 check("a card moved between other lanes hasn't ended",
   endedCards(b0, { lanes, cards: [card("a", "todo"), card("b", "doing"), card("z", "done")] }, "you"), []);
-check("moving a card back out of the last lane ends nothing", endedCards(moved, b0, "you"), []);
+check("moving a card back out of the done lane ends nothing", endedCards(moved, b0, "you"), []);
 check("a deleted card has ended", endedCards(b0, { lanes, cards: [card("b", "todo"), card("z", "done")] }, "you"),
   [{ cardId: "a", title: "Fix login", how: "deleted", lane: "", by: "you" }]);
-check("a card added straight to the last lane has ended", endedCards(b0, { lanes, cards: [...b0.cards, card("n", "done")] }, "you").map((e) => e.cardId), ["n"]);
-check("a lane that becomes the last one ends its cards",
-  endedCards(b0, { lanes: [lanes[0], lanes[2], lanes[1]], cards: b0.cards }, "you").map((e) => [e.cardId, e.lane]), [["a", "Doing"]]);
+check("a card added straight to the done lane has ended", endedCards(b0, { lanes, cards: [...b0.cards, card("n", "done")] }, "you").map((e) => e.cardId), ["n"]);
+check("moving the lanes around ends nothing: Done is done wherever it sits",
+  endedCards(b0, { lanes: [lanes[0], lanes[2], lanes[1]], cards: b0.cards }, "you"), []);
+check("a lane that's made the done lane ends its cards",
+  endedCards(b0, { lanes: [lanes[0], { ...lanes[1], role: "done" }, lanes[2]], cards: b0.cards }, "you").map((e) => [e.cardId, e.lane]), [["a", "Doing"]]);
 check("renaming a card ends nothing", endedCards(b0, { lanes, cards: [card("a", "doing", "Fix sign-in"), card("b", "todo"), card("z", "done")] }, "you"), []);
 check("a board with one lane has no done lane",
   endedCards({ lanes: [lanes[0]], cards: [] }, { lanes: [lanes[0]], cards: [card("a", "todo")] }, "you"), []);
 check("the same board ends nothing", endedCards(b0, b0, "you"), []);
 
-check("an agent that moved its only card to the last lane is idle and finished it",
+check("an agent that moved its only card to the done lane is idle and finished it",
   afterEnded(told, { title: "Fix login", how: "done", lane: "Done", by: "agent" }, 0),
   { project: "shop-api", machine: "mini", agent: "cursor", state: "idle", last: 'finished "Fix login"' });
 check("when the person moved it, the line says so instead of crediting the session",

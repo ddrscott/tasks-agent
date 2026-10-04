@@ -7,6 +7,8 @@
 // server still moves, deletes, and undoes by id without ever reading the text.
 
 import { isSealed, kidOf, SEALED_TOKEN_RE, type SealInfo } from "./sealed";
+import { doneLaneId, LANE_ROLES, laneRoles, stampRoles, todoLaneId, type LaneRole } from "./lanes";
+export { doneLaneId, LANE_ROLES, laneRoles, roleOf, todoLaneId, type LaneRole } from "./lanes";
 
 export { isSealed, type SealInfo };
 
@@ -57,7 +59,8 @@ export const MAX_ATTACHMENTS_PER_CARD = 20;
 export const MAX_TAGS_PER_CARD = 10;
 
 /** `sort` is the order the lane keeps itself in (see `shownCards`). Without it, the lane is in manual order: the order of `Board.cards`. */
-export type Lane = { id: string; name: string; sort?: SortBy };
+/** `role` marks a special lane: to do, doing, or done (lanes.ts). Position on the board means nothing. */
+export type Lane = { id: string; name: string; sort?: SortBy; role?: LaneRole };
 
 export type Board = {
   lanes: Lane[];
@@ -79,9 +82,9 @@ export const THEME_IDS = [
 export function newBoard(): Board {
   return {
     lanes: [
-      { id: "todo", name: "To do" },
-      { id: "doing", name: "Doing" },
-      { id: "done", name: "Done" },
+      { id: "todo", name: "To do", role: "todo" },
+      { id: "doing", name: "Doing", role: "doing" },
+      { id: "done", name: "Done", role: "done" },
     ],
     cards: [],
     theme: "auto",
@@ -215,8 +218,7 @@ export const needsAgent = (b: Board) => !b.sealed && b.cards.length > 0 && !agen
 
 /** Whether this card is waiting for an agent that isn't there: tagged for one, not done, on a board `needsAgent` is true for. */
 export function waitsForAgent(b: Board, c: Card): boolean {
-  const done = b.lanes.length > 1 ? b.lanes[b.lanes.length - 1]?.id : undefined;
-  return needsAgent(b) && forAgent(c) && c.laneId !== done;
+  return needsAgent(b) && forAgent(c) && c.laneId !== doneLaneId(b.lanes);
 }
 
 /** A board coming back from undo, redo, or a reset keeps what isn't undoable: the theme, the passphrase envelope, and whether an agent ever connected. */
@@ -236,7 +238,8 @@ export function addCard(
 ): { board: Board; card: Card } {
   const title = tidy(input.title, 200);
   if (!title) throw new Error("A card needs a title");
-  const lane = input.laneId ? requireLane(b, input.laneId) : b.lanes[0];
+  // No lane named: the card goes to the to do lane.
+  const lane = input.laneId ? requireLane(b, input.laneId) : b.lanes.find((l) => l.id === todoLaneId(b.lanes));
   if (!lane) throw new Error("Add a lane first");
   const t = now();
   const card: Card = withTags({
@@ -483,7 +486,8 @@ export function addLane(b: Board, name: string): { board: Board; lane: Lane } {
   if (!isSealed(n) && findLane(b, n)) throw new Error(`There is already a lane called "${n}"`);
   if (b.lanes.length >= 8) throw new Error("Boards are limited to 8 lanes");
   const lane = { id: shortId("l", new Set(b.lanes.map((l) => l.id))), name: n };
-  return { board: { ...b, lanes: [...b.lanes, lane] }, lane };
+  // Roles are written down first, so a new lane at the end doesn't become the done lane by landing last.
+  return { board: { ...b, lanes: [...stampRoles(b.lanes), lane] }, lane };
 }
 
 export function renameLane(b: Board, ref: string, name: string): Board {
@@ -492,24 +496,41 @@ export function renameLane(b: Board, ref: string, name: string): Board {
   if (!n) throw new Error("A lane needs a name");
   const clash = isSealed(n) ? undefined : findLane(b, n);
   if (clash && clash.id !== lane.id) throw new Error(`There is already a lane called "${n}"`);
-  return { ...b, lanes: b.lanes.map((l) => (l.id === lane.id ? { ...l, name: n } : l)) };
+  // A lane keeps its role under a new name: "Done" renamed to "Shipped" is still the done lane.
+  return { ...b, lanes: stampRoles(b.lanes).map((l) => (l.id === lane.id ? { ...l, name: n } : l)) };
 }
 
-/** Delete a lane and every card in it. */
+/**
+ * Make a lane the to do, doing, or done lane, or pass null to make it an ordinary lane. A role
+ * has one lane and a lane has one role, so whoever held the role before gives it up.
+ */
+export function setLaneRole(b: Board, ref: string, role: LaneRole | null): Board {
+  const lane = requireLane(b, ref);
+  if (role !== null && !LANE_ROLES.some((r) => r.role === role)) throw new Error(`Unknown lane role ${String(role)}`);
+  return { ...b, lanes: stampRoles(b.lanes).map((l) => {
+    if (l.id !== lane.id && l.role !== role) return l;
+    const { role: _was, ...rest } = l;
+    return l.id === lane.id && role ? { ...rest, role } : rest;
+  }) };
+}
+
+/** Delete a lane and every card in it. A special lane takes its role with it: delete the done lane and the board has none until another lane is given the role. */
 export function deleteLane(b: Board, ref: string): Board {
   const lane = requireLane(b, ref);
   if (b.lanes.length === 1) throw new Error("A board needs at least one lane");
   return {
     ...b,
-    lanes: b.lanes.filter((l) => l.id !== lane.id),
+    lanes: stampRoles(b.lanes).filter((l) => l.id !== lane.id),
     cards: b.cards.filter((c) => c.laneId !== lane.id),
   };
 }
 
 export function moveLane(b: Board, ref: string, index: number): Board {
   const lane = requireLane(b, ref);
-  const lanes = b.lanes.filter((l) => l.id !== lane.id);
-  lanes.splice(Math.max(0, Math.min(index, lanes.length)), 0, lane);
+  // Roles are written down first: where a lane sits says nothing about what it's for.
+  const stamped = stampRoles(b.lanes);
+  const lanes = stamped.filter((l) => l.id !== lane.id);
+  lanes.splice(Math.max(0, Math.min(index, lanes.length)), 0, stamped.find((l) => l.id === lane.id)!);
   return { ...b, lanes };
 }
 
@@ -571,9 +592,11 @@ export function describeCard(b: Board, id: string): string | null {
 
 /** Plain-text board for the model's context. With `tag`, only the cards carrying it. */
 export function describeBoard(b: Board, tag?: string): string {
+  const roles = laneRoles(b.lanes);
   return b.lanes
     .map((l) => {
       const cards = shownCards(b, l.id).filter((c) => !tag || hasTag(c, tag));
+      const role = LANE_ROLES.find((r) => roles[r.role] === l.id);
       const sorted = l.sort ? `, sorted by ${SORTS.find((o) => o.by === l.sort)?.say ?? l.sort}` : "";
       const lines = cards.map(
         (c) =>
@@ -581,7 +604,7 @@ export function describeBoard(b: Board, tag?: string): string {
           `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${previewNotes(c.notes)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
-      return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards${sorted})\n${lines.join("\n") || "  (empty)"}`;
+      return `${l.name} (lane id ${l.id}${role ? `, ${role.say}` : ""}, ${cards.length} ${tag ? `#${tag} ` : ""}cards${sorted})\n${lines.join("\n") || "  (empty)"}`;
     })
     .join("\n");
 }
