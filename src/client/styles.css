@@ -603,6 +603,10 @@ dialog::backdrop { background: rgb(0 0 0 / .45); backdrop-filter: blur(2px); }
 dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } }
 .dialog-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* The heading and the X that closes the dialog. The X sits in the corner, pulled into the padding so it lines up with the fields' edge. */
+.dialog-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; margin: -6px -8px -6px 0; }
+.dialog-x { color: var(--muted); }
+.dialog-x:hover:not(:disabled) { color: var(--ink); }
 .dialog-body label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 .dialog-body .title-input { font-size: 18px; font-weight: 600; font-family: var(--font-display); }
 .dialog-body textarea { field-sizing: content; flex: none; min-height: 110px; max-height: 55dvh; resize: vertical; }

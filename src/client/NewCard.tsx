@@ -117,7 +117,10 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}
     >
       <div className="dialog-body">
-        <h2 className="h">NEW_CARD</h2>
+        <div className="dialog-top">
+          <h2 className="h">NEW_CARD</h2>
+          <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={onClose}><IconClose /></button>
+        </div>
         <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} placeholder="What needs doing?" autoFocus />
         <label>
           Notes
@@ -165,7 +168,6 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
         </div>
       </div>
       <div className="dialog-foot">
-        <button className="btn" onClick={onClose}><IconClose />{addedId ? "Close" : "Cancel"}</button>
         <span className="spacer" />
         <button className="btn primary" disabled={(!title.trim() && !addedId) || busy} onClick={() => void add()}>
           {addedId ? <><IconClip />Try the upload again</> : <><IconPlus />{busy ? "Adding…" : "Add card"}</>}

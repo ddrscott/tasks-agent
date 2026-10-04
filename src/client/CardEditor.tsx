@@ -25,7 +25,7 @@ type Props = {
   onClose(): void;
 };
 
-/** Edit a card. Changes save when the dialog closes, however it closes. */
+/** Edit a card. Changes save when the dialog closes, however it closes: Save, the X, Esc, or a click outside. */
 export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
@@ -87,6 +87,10 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
       onClick={(e) => { if (e.target === ref.current) close(); }}
     >
       <div className="dialog-body">
+        <div className="dialog-top">
+          <h2 className="h">CARD</h2>
+          <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={close}><IconClose /></button>
+        </div>
         <TitleInput value={title} onChange={setTitle} onEnter={close} />
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={close} />
@@ -155,7 +159,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
             {isDone ? <><IconUndo />Reopen</> : <><IconCheck />Mark done</>}
           </button>
         )}
-        <button className="btn primary" onClick={close}><IconClose />Close</button>
+        <button className="btn primary" onClick={close}>Save</button>
       </div>
     </dialog>
   );
