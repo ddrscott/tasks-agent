@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { faceLine, statusLine, hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortBy } from "../shared";
+import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
@@ -23,6 +23,8 @@ export type Actions = {
   setLaneManual(id: string, ids: string[]): Promise<unknown>;
   /** Keep the lane sorted by `by` from now on; null goes back to manual order. */
   setLaneSort(id: string, by: SortBy | null): Promise<unknown>;
+  /** Make a lane the to do, doing, or done lane; null for an ordinary lane. */
+  setLaneRole(id: string, role: LaneRole | null): Promise<unknown>;
 };
 
 type Props = {
@@ -81,7 +83,8 @@ export function BoardView(p: Props) {
   const { board } = p;
   const [drag, setDrag] = useState<{ id: string; cards: Card[] } | null>(null);
   const cards = drag?.cards ?? board.cards;
-  const doneLane = board.lanes[board.lanes.length - 1]?.id;
+  // Done is a role a lane holds (lanes.ts), not the last place on the board.
+  const doneLane = doneLaneId(board.lanes);
 
   // Where the finger or mouse is while a card is held. dnd-kit reports movement with the board's
   // scrolling folded in, so the screen position is tracked here. Null for a keyboard drag.
@@ -214,9 +217,9 @@ export function BoardView(p: Props) {
     void p.actions.moveCard(id, lane, index);
   }
 
-  /** Done means "in the last lane": send the card there, or back to the top of the first lane. */
+  /** Done means "in the done lane": send the card there, or back to the top of the to do lane. */
   function toggleDone(card: Card, fromKeyboard = false) {
-    const target = card.laneId === doneLane ? board.lanes[0].id : doneLane;
+    const target = card.laneId === doneLane ? todoLaneId(board.lanes) : doneLane;
     if (!target || target === card.laneId) return;
     void p.actions.moveCard(card.id, target, card.laneId === doneLane ? 0 : Number.MAX_SAFE_INTEGER);
     // The card remounts in its new lane, which drops keyboard focus; follow it there.
@@ -248,7 +251,7 @@ export function BoardView(p: Props) {
           <LaneView
             key={lane.id} lane={lane} index={i} lanes={board.lanes}
             cards={drag ? cards.filter((c) => c.laneId === lane.id) : shownCards(board, lane.id)}
-            isDone={lane.id === doneLane && board.lanes.length > 1}
+            isDone={lane.id === doneLane} role={roleOf(board.lanes, lane.id)} hasDone={!!doneLane}
             highlight={!!active && active.laneId === lane.id}
             {...p} onToggle={toggleDone}
           />
@@ -263,7 +266,7 @@ export function BoardView(p: Props) {
 }
 
 function LaneView(props: Props & {
-  lane: Lane; index: number; lanes: Lane[]; cards: Card[]; isDone: boolean; highlight: boolean; onToggle(c: Card): void;
+  lane: Lane; index: number; lanes: Lane[]; cards: Card[]; isDone: boolean; role: LaneRole | undefined; hasDone: boolean; highlight: boolean; onToggle(c: Card): void;
 }) {
   const { lane, cards, actions } = props;
   const { setNodeRef } = useDroppable({ id: LANE_PREFIX + lane.id });
@@ -291,6 +294,13 @@ function LaneView(props: Props & {
     void actions.setLaneSort(lane.id, by).then(() => props.toast(by ? `${lane.name} stays sorted by ${say}` : `${lane.name} is in manual order`, true));
   }
   const sortedBy = SORTS.find((o) => o.by === lane.sort);
+
+  // To do, doing, and done are roles; one lane each. Handing one over takes it from the lane that had it.
+  function setRole(role: LaneRole | null) {
+    setMenu(false);
+    const say = role ? `${lane.name} is now ${LANE_ROLES.find((r) => r.role === role)!.say}` : `${lane.name} is an ordinary lane now`;
+    void actions.setLaneRole(lane.id, role).then(() => props.toast(say, true));
+  }
 
   return (
     <section
@@ -335,6 +345,20 @@ function LaneView(props: Props & {
                   ))}
                   <button role="menuitemradio" aria-checked={!sortedBy} onClick={() => sort(null, "")}>Manual order</button>
                 </div>
+                {/* Which lane new cards land in, which holds work in progress, and which means finished. Where a lane sits has no say. */}
+                <div className="menu-group" role="group" aria-label="This lane is">
+                  <div className="menu-label">This lane is</div>
+                  {/* One row, so the menu stays short. Tap the lit one to make this an ordinary lane again. */}
+                  <div className="menu-roles">
+                    {LANE_ROLES.map((r) => (
+                      <button
+                        key={r.role} role="menuitemcheckbox" aria-checked={props.role === r.role}
+                        title={props.role === r.role ? `Tap to make ${lane.name} an ordinary lane` : `Make ${lane.name} ${r.say}`}
+                        onClick={() => setRole(props.role === r.role ? null : r.role)}
+                      >{r.label}</button>
+                    ))}
+                  </div>
+                </div>
                 {cards.length > 0 && (
                   <button
                     className={`danger${armed === "clear" ? " armed" : ""}`} role="menuitem"
@@ -371,7 +395,7 @@ function LaneView(props: Props & {
         <div className="cards" ref={setNodeRef}>
           {cards.map((c) => (
             <SortableCard
-              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.lanes.length > 1}
+              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.hasDone}
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
@@ -425,7 +449,7 @@ export function CardFace(p: {
       {p.onToggle && !p.overlay && (
         <button
           className="done-btn" tabIndex={-1}
-          title={p.isDone ? "Reopen: move back to the first lane (x)" : "Mark done (x)"} aria-label={p.isDone ? "Reopen" : "Mark done"}
+          title={p.isDone ? "Reopen: move back to the to do lane (x)" : "Mark done (x)"} aria-label={p.isDone ? "Reopen" : "Mark done"}
           onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); p.onToggle?.(card); }}

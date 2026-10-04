@@ -28,7 +28,7 @@ type Props = {
   onMoveNow(laneId: string): void;
   onDelete(): void;
   onRemoveAttachment(id: string): void;
-  /** Move to the done lane, or back out of it. Missing when the board has one lane. */
+  /** Move to the done lane, or back out of it. Missing when the board has no done lane. */
   onToggleDone?(): void;
   isDone: boolean;
   onClose(): void;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { agentConnected, AGENT_TAG, hasTag, type Board } from "../shared";
+import { agentConnected, AGENT_TAG, doneLaneId, hasTag, todoLaneId, type Board } from "../shared";
 import { QuickStart, SAMPLE_INTENT } from "./Connect";
 import type { NewCardInput } from "./NewCard";
 
@@ -37,7 +37,7 @@ When I answer, write a short plan for that one in these notes: 3 to 6 lines that
 };
 
 const openSample = (b: Board) => {
-  const done = b.lanes.length > 1 ? b.lanes[b.lanes.length - 1]?.id : undefined;
+  const done = doneLaneId(b.lanes);
   return b.cards.some((c) => c.title === SAMPLE.title && hasTag(c, AGENT_TAG) && c.laneId !== done);
 };
 
@@ -52,7 +52,7 @@ export function FirstRun({ board, onConnect, add, say }: {
   say(text: string, undo?: boolean): void;
 }) {
   const hasSample = openSample(board);
-  const lane = board.lanes[0];
+  const lane = board.lanes.find((l) => l.id === todoLaneId(board.lanes));
 
   function addSample() {
     if (!lane || hasSample) return;

@@ -82,9 +82,9 @@ export function seedBoard(theme: string): Board {
     // Agents have been at this board for a while, so nothing on it says "No agent connected yet".
     agentSeenAt: iso(2900 * MIN),
     lanes: [
-      { id: "todo", name: "To do" },
-      { id: "doing", name: "Doing" },
-      { id: "done", name: "Done" },
+      { id: "todo", name: "To do", role: "todo" },
+      { id: "doing", name: "Doing", role: "doing" },
+      { id: "done", name: "Done", role: "done" },
     ],
     cards: [
       card({

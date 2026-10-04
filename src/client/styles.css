@@ -860,6 +860,9 @@ a.att-name:hover { color: var(--accent-text); }
 .sess-id { color: var(--muted); margin-left: auto; }
 
 .menu { min-width: 220px; max-width: min(300px, calc(100vw - 32px)); padding: 6px; display: flex; flex-direction: column; }
+/* A lane's menu is the long one. On a short screen it scrolls instead of running off the bottom. */
+.lane-head .menu { max-height: calc(100dvh - 200px); overflow-y: auto; overscroll-behavior: contain; }
+.lane-head .menu > * { flex: none; }
 .menu .who { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }
 .menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
 .menu button:hover { background: var(--surface-2); }
@@ -871,6 +874,12 @@ a.att-name:hover { color: var(--accent-text); }
 .menu [role="menuitemradio"]::before { content: "$ "; font-family: var(--font-mono); color: var(--accent); visibility: hidden; }
 .menu [role="menuitemradio"][aria-checked="true"]::before { visibility: visible; }
 .lane-sort { margin-left: 4px; font: 11px var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* Which special lane this is: three toggles in a row, the lit one outlined in the accent. */
+.menu-roles { display: flex; align-items: center; gap: 6px; padding: 4px 10px 6px; }
+.menu .menu-roles button { flex: none; padding: 5px 9px; border: var(--border-w) solid var(--line); font: 12px var(--font-mono); color: var(--muted); }
+.menu .menu-roles button[aria-checked="true"] { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
+/* Two groups in a row share one rule between them. */
+.menu-group + .menu-group { border-top: 0; margin-top: -4px; }
 .menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
 .toast {
@@ -1279,6 +1288,8 @@ a.att-name:hover { color: var(--accent-text); }
   .lane-name { padding: 8px 4px; }
   .quick-add .btn, .attachments-head .btn { height: 40px; }
   .menu button { padding: 11px 10px; font-size: 14px; }
+  .menu .menu-roles button { padding: 10px 11px; font-size: 13px; }
+  .lane-head .menu { max-height: calc(100dvh - 310px); }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
   .btn.notes-full-btn { width: 40px; height: 40px; margin: -8px -10px -8px -6px; }
   .move-row { display: flex; }

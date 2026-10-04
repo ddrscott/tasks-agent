@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, splitTitleTags, tagsByUse, tidyTags, type Board, type Card } from "../shared";
+import { clean, doneLaneId, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -324,6 +324,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     clearLane: (id) => agent.stub.clearLane(id),
     setLaneManual: (id, ids) => agent.stub.setLaneManual(id, ids),
     setLaneSort: (id, by) => agent.stub.setLaneSort(id, by),
+    setLaneRole: (id, role) => agent.stub.setLaneRole(id, role),
   }), [agent, out, laneClash]);
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
@@ -369,7 +370,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       if (isRedo && !typing) { e.preventDefault(); void redo(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInput.current?.focus(); searchInput.current?.select(); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "n" && boardRef.current?.lanes[0]) { e.preventDefault(); setQuickAddLane(boardRef.current.lanes[0].id); }
+      if (e.key === "n" && boardRef.current?.lanes[0]) { e.preventDefault(); setQuickAddLane(todoLaneId(boardRef.current.lanes)); }
       if (e.key === "/") { e.preventDefault(); setChat(true); }
       if (e.key === "t") { e.preventDefault(); setThemeOpen((o) => !o); }
     };
@@ -419,8 +420,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   }
   if (!board || !raw) return <div className="splash">opening your board</div>;
 
-  const doneLane = board.lanes[board.lanes.length - 1]?.id;
-  const open = board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1);
+  const doneLane = doneLaneId(board.lanes);
+  const open = board.cards.filter((c) => c.laneId !== doneLane);
   const today = localToday();
   const dueToday = open.filter((c) => c.due === today).length;
   const overdue = open.filter((c) => c.due && c.due < today).length;
@@ -479,7 +480,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                     <div className="who">{me.email}</div>
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
-                    <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(board.lanes[0]?.id ?? null); }}>New card <kbd>n</kbd></button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setEncOpen(true); }}>{board.sealed ? "Encryption" : "Encrypt with a passphrase…"}</button>
@@ -538,10 +539,10 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true));
           }}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS)); }}
-          isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
-          onToggleDone={board.lanes.length > 1 ? () => {
+          isDone={editingCard.laneId === doneLane}
+          onToggleDone={doneLane ? () => {
             const reopen = editingCard.laneId === doneLane;
-            const target = reopen ? board.lanes[0].id : doneLane;
+            const target = reopen ? todoLaneId(board.lanes)! : doneLane;
             void agent.stub.moveCard(editingCard.id, target, reopen ? 0 : Number.MAX_SAFE_INTEGER)
               .then(() => say(reopen ? `Reopened "${editingCard.title}"` : `Done: "${editingCard.title}"`, true));
           } : undefined}

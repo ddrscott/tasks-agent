@@ -69,8 +69,8 @@ const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 6000, fini
 /** The card the agent is on and its next step. `step` is null while it waits on an answer. */
 type Spot = { beat: Beat; card: Card; step: Step | null };
 
-/** The last lane is Done, when there's more than one. */
-const doneLaneOf = (b: Board) => (b.lanes.length > 1 ? b.lanes[b.lanes.length - 1].id : null);
+/** The done lane, wherever it sits (lanes.ts). */
+const doneLaneOf = (b: Board) => ops.doneLaneId(b.lanes);
 
 /** Where the agent is, worked out from one world and nothing else. */
 function whereIsIt(w: World): Spot | null {
@@ -105,7 +105,9 @@ function advance(w: World, { beat, card, step }: Spot): World {
   // No answer means the visitor took the question off the card, so the agent goes with its own pick.
   const went = short(card.answer?.answer ?? beat.ask.options[beat.ask.recommended ?? 0]);
   if (step === "pickup") {
-    const doing = card.laneId === b.lanes[0].id && b.lanes.length > 2 ? b.lanes[1].id : card.laneId;
+    // Picked up from the to do lane, the card goes to the doing lane, wherever those sit.
+    const roles = ops.laneRoles(b.lanes);
+    const doing = card.laneId === roles.todo && roles.doing ? roles.doing : card.laneId;
     return to("picked", status(doing === card.laneId ? b : ops.moveCard(b, id, doing), beat.pickup));
   }
   if (step === "ask") return to("asked", ops.askCard(b, id, beat.ask));
@@ -243,6 +245,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     clearLane: (id) => act("Clear lane", (b) => ops.deleteCards(b, ops.laneCards(b, id).map((c) => c.id))),
     setLaneManual: (id, ids) => act("Manual order", (b) => ops.setLaneSort(ops.orderLane(b, id, ids), id, null)),
     setLaneSort: (id, by) => act(by ? "Sort lane" : "Manual order", (b) => ops.setLaneSort(b, id, by)),
+    setLaneRole: (id, role) => act("Lane role", (b) => ops.setLaneRole(b, id, role)),
   }), [act]);
 
   const addFullCard = useCallback(async (input: NewCardInput) => {
@@ -308,9 +311,9 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   // The script ran out. `looped` is whether the visitor saw it through: a question answered and the card finished.
   const over = !spot;
   const looped = Object.values(saved.current.at).includes("done");
-  const doneLane = board.lanes[board.lanes.length - 1]?.id;
+  const doneLane = doneLaneOf(board);
   // A card that's finished or gone isn't being worked on, so nothing holds it, the lead's card included.
-  const live = new Set(board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1).map((c) => c.id));
+  const live = new Set(board.cards.filter((c) => c.laneId !== doneLane).map((c) => c.id));
   const presence = demoPresence(scene, Date.now(), startedAt, (id) => live.has(id));
 
   // Keyboard: n new card, t theme, / assistant, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
@@ -323,7 +326,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       if (isRedo && !typing) { e.preventDefault(); redo(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInput.current?.focus(); searchInput.current?.select(); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "n" && saved.current.board.lanes[0]) { e.preventDefault(); setQuickAddLane(saved.current.board.lanes[0].id); }
+      if (e.key === "n" && saved.current.board.lanes[0]) { e.preventDefault(); setQuickAddLane(ops.todoLaneId(saved.current.board.lanes)); }
       if (e.key === "t") { e.preventDefault(); setThemeOpen((o) => !o); }
       if (e.key === "/") { e.preventDefault(); setAssistantOpen(true); }
     };
@@ -338,7 +341,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const search = useCallback(async (query: string) => localSearch(saved.current.board, query), []);
   const knownTags = useMemo(() => ops.tagsByUse(board), [board]);
 
-  const open = board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1);
+  const open = board.cards.filter((c) => c.laneId !== doneLane);
   const today = localToday();
   const dueToday = open.filter((c) => c.due === today).length;
   const overdue = open.filter((c) => c.due && c.due < today).length;
@@ -456,10 +459,10 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
             void move(editingCard.id, laneId).then(() => say(`Moved "${editingCard.title}" to ${to}`, true));
           }}
           onDelete={() => { const t = editingCard.title; void act("Delete card", (b) => ops.deleteCards(b, [editingCard.id])).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS)); }}
-          isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
-          onToggleDone={board.lanes.length > 1 ? () => {
+          isDone={editingCard.laneId === doneLane}
+          onToggleDone={doneLane ? () => {
             const reopen = editingCard.laneId === doneLane;
-            void move(editingCard.id, reopen ? board.lanes[0].id : doneLane, reopen ? 0 : undefined)
+            void move(editingCard.id, reopen ? ops.todoLaneId(board.lanes)! : doneLane, reopen ? 0 : undefined)
               .then(() => say(reopen ? `Reopened "${editingCard.title}"` : `Done: "${editingCard.title}"`, true));
           } : undefined}
           onRemoveAttachment={() => {}}
