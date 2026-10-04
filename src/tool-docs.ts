@@ -81,7 +81,8 @@ export const TOOL_DOCS = {
     description:
       "Wait for the owner to answer questions you asked with ask_ceo. Pass the ids of the cards you asked on. It holds for up to 30 seconds " +
       "(seconds changes that) and returns as soon as one is answered, with that card in full. If nothing is answered in that time it says so: " +
-      "call it again to keep waiting. Use this instead of sleeping or calling get_board over and over.",
+      "call it again to keep waiting. Each call counts as hearing from your session, so the board doesn't mark you stale and your claims hold while you wait; " +
+      "pass session_id to be sure. Use this instead of sleeping or calling get_board over and over.",
     about: "Wait for your answer. It holds for up to 30 seconds and returns the moment you answer one of the agent's questions.",
   },
   claim_card: {

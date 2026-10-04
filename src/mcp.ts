@@ -45,8 +45,8 @@ Several agent sessions can share this board. Before you start work on a card, ca
 a session id (get_started hands you one; without it, make one up once and keep it), what you are
 (agent), your hostname if you know it (machine), and the name of the folder you're in (project). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
-release_card when you finish a card or give up on it. Pass the same session id to ask_ceo:
-the board shows that session as waiting on the owner until they answer.
+release_card when you finish a card or give up on it. Pass the same session id to ask_ceo and
+wait_for_answer: the board shows that session as waiting on the owner until they answer.
 
 When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
 options instead of writing the question into the notes. They answer with one tap, and get_board
@@ -199,12 +199,18 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: z.object({
         ids: z.array(z.string()).min(1).max(5).describe("The cards you asked on, like c1a2b"),
         seconds: z.number().int().min(1).max(45).optional().describe(`How long to hold at most. Default ${WAIT_SECONDS}`),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, so the board knows you're still here"),
       }),
       annotations: { readOnlyHint: true },
-    }, async (input: { ids: string[]; seconds?: number }) => {
+    }, async (input: { ids: string[]; seconds?: number; session_id?: string }) => {
       const no = await locked();
       if (no) return no;
       const ids = [...new Set(input.ids)];
+      // Waiting is being alive. An agent polling here makes no other call, so each call counts as
+      // hearing from the session it names and from the sessions holding these cards. Without this
+      // a waiting agent went stale after 5 minutes and lost its cards after 15.
+      const here = () => presence.touch({ sessionIds: input.session_id ? [input.session_id] : [], cardIds: ids });
+      await here();
       const total = (input.seconds ?? WAIT_SECONDS) * 1000;
       const every = Math.max(WAIT_POLL_MS, Math.ceil((total * ids.length) / WAIT_MAX_READS));
       const until = Date.now() + total;
@@ -227,6 +233,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
           return text(ready.join("\n\n") + rest);
         }
         if (Date.now() + every > until || req.signal.aborted) {
+          // Once more on the way out, so a 30-second hold reads as heard from at both ends.
+          await here();
           return text(`Nothing is answered yet on ${waiting.map((id) => `[${id}]`).join(", ")}. Call wait_for_answer again to keep waiting.`);
         }
         await sleep(every);
