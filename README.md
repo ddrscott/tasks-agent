@@ -1589,6 +1589,13 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   race, so a dev server (`DEV_LOGIN_CODES=1`, and only then) takes `&hold=<ms>` on the socket
   address and waits that long in exactly that gap; `check:members` removes and demotes a
   member inside it.
+- **A call can't straddle one either.** A frame whose 2-second memory is spent reads the
+  member's access before it runs (`memberMessage`), and a removal can land while that read is
+  out. The answer that comes back, "a writer", is from before it. So the frame looks at the
+  epoch again after the read, asks again if it moved, and runs only on an answer that began
+  under the current one; before this, that one write went through. A dev server takes
+  `"devHold": <ms>` on the frame and waits in that gap, and `check:members` removes a writer
+  inside it: the card doesn't land and the socket closes as removed.
 - **Every push needs a current check.** The board, and "who deleted it", go to a member's
   socket only on an access check that began under the current epoch (`pushFresh` in
   `src/member-rules.ts`). A socket whose check is from an older epoch, for any reason, is

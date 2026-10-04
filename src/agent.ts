@@ -367,7 +367,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       return;
     }
     if (typeof message !== "string") return;
-    let f: { type?: unknown; id?: unknown; method?: unknown; args?: unknown };
+    let f: { type?: unknown; id?: unknown; method?: unknown; args?: unknown; devHold?: unknown };
     try { f = JSON.parse(message) as typeof f; } catch { return; }
     if (!f || typeof f !== "object") return;
     if (f.type === "cf_agent_use_chat_request" && typeof f.id === "string") {
@@ -378,8 +378,18 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const reply = (r: { success: true; result: unknown } | { success: false; error: string }) =>
       sendTo(ws, JSON.stringify({ type: "rpc", id: f.id, done: true, ...r }));
     const fresh = was.ep === this.epoch && Date.now() - was.at < ACCESS_CACHE_MS;
-    const m = fresh ? was : await this.refresh(ws, was);
+    let m = fresh ? was : await this.refresh(ws, was);
+    // Dev servers only (DEV_LOGIN_CODES=1): wait here, between the access read and its use, so
+    // `check:members` can land a removal in the gap. Local D1 answers too fast to race otherwise.
+    const hold = !fresh && this.env.DEV_LOGIN_CODES === "1" ? Number(f.devHold) || 0 : 0;
+    if (hold > 0) await new Promise((r) => setTimeout(r, Math.min(hold, 5000)));
+    // Membership changed while that read was out, so its answer may be from before the change:
+    // a writer who has just been removed or demoted. The same rule as a connect (acceptMember)
+    // and a push (recheck): ask again until an answer comes back under the epoch it began in,
+    // and act on nothing older. Nothing is awaited between that answer and the call below.
+    for (let i = 0; m && m.ep !== this.epoch && i < 3; i++) m = await this.refresh(ws, m);
     if (!m) return;
+    if (m.ep !== this.epoch) return reply({ success: false, error: "The board's members are changing. Try again in a moment." });
     const needs = memberCallNeeds(f.method);
     if (!needs || !Array.isArray(f.args)) return reply({ success: false, error: OWNER_ONLY });
     if (needs === "writer" && m.effective !== "writer") return reply({ success: false, error: m.reason === "plan_lapsed" ? READ_ONLY_LAPSED : READ_ONLY });
