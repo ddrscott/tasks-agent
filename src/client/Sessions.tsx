@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { STALE_MS, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isStale, projectName, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -75,10 +75,15 @@ export function CardPresence({ cardId }: { cardId: string }) {
   const claim = claims.find((c) => c.cardId === cardId);
   const session = claim && sessions.find((s) => s.id === claim.sessionId);
   if (!claim || !session) return null;
+  return <PresenceLine session={session} agent={claim.agent} now={now} />;
+}
+
+/** A session in one line. Under a claimed card's title, and under a question its session is waiting on. */
+export function PresenceLine({ session, agent, now }: { session: Session; agent?: string; now: number }) {
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
-      <span className="sess-where">{claim.agent || session.agent || "agent"} · {session.machine}</span>
+      <span className="sess-where">{whoWhere(session, agent || session.agent)}</span>
       <span className="sess-seen">{ago(now - session.seenAt)}</span>
     </div>
   );
@@ -97,7 +102,9 @@ export function CardSession({ cardId }: { cardId: string }) {
   );
 }
 
-export const isStale =(s: Session, now: number) => now - s.seenAt > STALE_MS;
+// The rules for what's stale and what's waiting on you live with the shared shapes, so
+// `npm run check:presence` can run them without a browser.
+export { blockedSessions, isStale };
 
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -111,15 +118,6 @@ const RANK: Record<Session["state"], number> = { "needs-input": 0, working: 1, i
 /** Waiting on you first, then working, then idle; stale ones sink; newest first within each. */
 const order = (now: number) => (a: Session, b: Session) =>
   Number(isStale(a, now)) - Number(isStale(b, now)) || RANK[a.state] - RANK[b.state] || b.seenAt - a.seenAt;
-
-/**
- * The sessions that are stopped until you do something, longest wait first. They count in the top
- * bar's "need you" with the open questions (Ask.tsx). Stale ones are left out: a session that's
- * been quiet for 5 minutes is as likely closed as waiting, and Claude Code's "waiting for your
- * input" notice puts every finished session in this state after a minute.
- */
-export const blockedSessions = (sessions: Session[], now: number): Session[] =>
-  sessions.filter((s) => s.state === "needs-input" && !isStale(s, now)).sort((a, b) => a.seenAt - b.seenAt);
 
 /** One session's state, as the orange $ and a word. Shared with the line on a claimed card. */
 export function StateMark({ session, now }: { session: Session; now: number }) {
@@ -149,15 +147,17 @@ export function SessionRow({ session, now, cards }: { session: Session; now: num
     <li className={`sess-row${isStale(session, now) ? " stale" : ""}`}>
       <div className="sess-line">
         <StateMark session={session} now={now} />
-        <span className="sess-where">{session.agent ? `${session.agent} · ` : ""}{session.machine}</span>
+        <span className="sess-where">{whoWhere(session)}</span>
         <span className="sess-seen" title={new Date(session.seenAt).toLocaleString()}>{ago(now - session.seenAt)}</span>
       </div>
       {session.last && <div className="sess-last">{session.last}</div>}
-      {cards.map((t) => <div key={t} className="sess-card">card: {t}</div>)}
+      {/* "claimed "Fix login"" already names the card, so it isn't said twice. */}
+      {cards.filter((t) => !session.last.includes(`"${t}"`)).map((t) => <div key={t} className="sess-card">card: {t}</div>)}
       <div className="sess-links">
+        {/* No folder means it never reported through hooks (it only claims cards), so there's nothing to resume. */}
         {session.link
           ? <a href={session.link} target="_blank" rel="noopener noreferrer">open session</a>
-          : <ResumeButton session={session} />}
+          : session.cwd && <ResumeButton session={session} />}
         <span className="sess-id" title={session.id}>{session.id.slice(0, 8)}</span>
       </div>
     </li>
@@ -184,7 +184,7 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
   const summary = `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {
     const by = new Map<string, Session[]>();
-    for (const s of [...sessions].sort(order(now))) by.set(s.project, [...(by.get(s.project) ?? []), s]);
+    for (const s of [...sessions].sort(order(now))) by.set(projectName(s), [...(by.get(projectName(s)) ?? []), s]);
     // A project's place comes from its most urgent session.
     return [...by.entries()].sort((a, b) => order(now)(a[1][0], b[1][0]));
   }, [sessions, now]);
@@ -205,9 +205,9 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
             <h2 className="h">SESSIONS</h2>
             {groups.length === 0 && (
               <p className="sess-empty">
-                No Claude Code sessions are reporting in. A session reports through hooks you add once
-                on each machine. {connectLink("#sessions", "Set up the hooks")} and sessions show up here
-                within seconds.
+                No sessions are reporting in. A Claude Code session reports through hooks you add once
+                on each machine: {connectLink("#sessions", "set up the hooks")} and it shows up here
+                within seconds. Any other agent shows up when it claims a card.
               </p>
             )}
             {groups.map(([project, list]) => (
