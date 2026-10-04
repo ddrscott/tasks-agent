@@ -20,7 +20,7 @@ import { BASE } from "./base";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
-import { demoPresence, PLOT, seedBoard, withStatus, type Beat, type Scene } from "./demoData";
+import { allChecked, demoPresence, PLOT, seedBoard, withStatus, type Beat, type Scene } from "./demoData";
 import { Footer } from "./Footer";
 import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
@@ -101,7 +101,7 @@ function advance(w: World, { beat, card, step }: Spot): World {
   if (step === "ack") return to("working", status(b, beat.working(card.answer ? `got your answer ("${went}")` : `no answer, so I'm going with "${went}"`)));
   if (step === "finish") {
     const done = doneLaneOf(b);
-    const said = status(b, beat.done(went));
+    const said = ops.updateCard(b, id, { notes: allChecked(withStatus(card.notes, beat.done(went))) });
     return to("done", done && card.laneId !== done ? ops.moveCard(said, id, done) : said);
   }
   return w;
@@ -265,9 +265,11 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     const t = setInterval(() => tick((n) => n + 1), 10_000);
     return () => clearInterval(t);
   }, []);
+  // The lead session says needs input exactly while its card has a question open: the answer
+  // that closes the question is the same change that puts the session back to working.
   const scene: Scene = !spot ? { at: "idle" }
     : spot.step === "pickup" ? { at: "between" }
-    : { at: spot.step === "ask" ? "reading" : spot.step === "finish" ? "working" : "waiting", beat: spot.beat, card: spot.card };
+    : { at: spot.card.ask ? "waiting" : spot.step === "ack" ? "heard" : spot.step === "finish" ? "working" : "reading", beat: spot.beat, card: spot.card };
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
   const seeded = demoPresence(scene, Date.now(), startedAt);
   // A card that's finished or gone isn't being worked on.
