@@ -7,7 +7,8 @@ import { z } from "zod";
 import * as ops from "./shared";
 import type { Board } from "./shared";
 
-type Result = { board: Board; summary: string };
+/** `ids` are the cards a tool created, for callers that need to refer to them next (MCP agents). */
+type Result = { board: Board; summary: string; ids?: string[] };
 
 type BoardTool<S extends z.ZodType> = {
   description: string;
@@ -36,10 +37,15 @@ export const BOARD_TOOLS = {
         tags: z.array(z.string()).optional().describe(TAGS_HINT),
       })).min(1),
     }),
-    apply: (b, { cards }) => ({
-      board: cards.reduce((acc, c) => ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due, tags: c.tags }).board, b),
-      summary: `Added ${quoteList(cards.map((c) => c.title))}`,
-    }),
+    apply: (b, { cards }) => {
+      const ids: string[] = [];
+      const board = cards.reduce((acc, c) => {
+        const r = ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due, tags: c.tags });
+        ids.push(r.card.id);
+        return r.board;
+      }, b);
+      return { board, summary: `Added ${quoteList(cards.map((c) => c.title))}`, ids };
+    },
   }),
   move_cards: define({
     description: "Move cards to a lane, for example to Done when the user finished something.",
@@ -136,7 +142,7 @@ export function describeHits(r: SearchResult): string {
 }
 
 /** What every tool call returns: a summary plus the fresh board, so the caller never works from a stale picture. */
-export type ToolOutcome = { ok: true; summary: string; board: string } | { ok: false; summary: string };
+export type ToolOutcome = { ok: true; summary: string; board: string; ids?: string[] } | { ok: false; summary: string };
 
 function titlesOf(b: Board, ids: string[]): string[] {
   return ids.map((id) => b.cards.find((c) => c.id === id)?.title ?? id);

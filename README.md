@@ -251,7 +251,8 @@ agent) shows the server URL, setup steps for each client, connected apps, and to
   look at a screenshot, and text, Markdown, CSV, and JSON files up to 32 KB come back as
   text. `files: false` skips the contents. It reads R2 under the token owner's own prefix.
 - **What a write returns.** The summary of the change and one line of lane counts
-  (`Board now: To do 21 · Doing 0 · Done 3`). It used to be the whole board, which cost an
+  (`Board now: To do 21 · Doing 0 · Done 3`), and `add_cards` adds the new cards' ids in
+  the order given. It used to be the whole board, which cost an
   agent thousands of tokens a call. The in-app assistant still gets the full board.
 - **OAuth (most clients).** The client only needs the URL. It discovers the OAuth
   server, registers itself (Dynamic Client Registration, or a Client ID Metadata

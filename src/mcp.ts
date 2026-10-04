@@ -211,7 +211,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const r = (await agent.runTool(name, input, undefined, "agent")) as ToolOutcome;
         // The whole board after every write cost agents thousands of tokens a call. The lane counts
         // say the change landed; get_board and get_card are there for anything more.
-        return r.ok ? text(`${r.summary}\n\nBoard now: ${await agent.laneCounts()}`) : text(r.summary, true);
+        if (!r.ok) return text(r.summary, true);
+        // New cards come back with their ids, so the caller can claim, move, or link them without another lookup.
+        const made = r.ids?.length ? `\nNew card ids, in the order given: ${r.ids.join(", ")}` : "";
+        return text(`${r.summary}${made}\n\nBoard now: ${await agent.laneCounts()}`);
       });
     }
     return server;

@@ -334,12 +334,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     try {
       const args = t.inputSchema.parse(input);
       let summary = "";
+      let ids: string[] | undefined;
       const board = this.mutate(t.label, (b) => {
-        const r = (t.apply as (b: Board, i: typeof args) => { board: Board; summary: string })(b, args);
+        const r = (t.apply as (b: Board, i: typeof args) => { board: Board; summary: string; ids?: string[] })(b, args);
         summary = r.summary;
+        ids = r.ids;
         return r.board;
       }, group, actor);
-      return { ok: true, summary, board: ops.describeBoard(board) };
+      return { ok: true, summary, board: ops.describeBoard(board), ids };
     } catch (e) {
       return { ok: false, summary: (e as Error).message };
     }
