@@ -421,7 +421,9 @@ kbd {
   display: flex; gap: 16px; align-items: flex-start;
   padding: 20px 24px 24px;
   overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x proximity;
+  /* Lanes snap to their left edge. Without the padding counted in, a board wider than its space
+     (four lanes with the assistant open) snaps the first lane flush against the edge. */
+  scroll-snap-type: x proximity; scroll-padding: 0 24px;
 }
 /* // START_HERE: the three steps an empty board shows above its lanes. Numbered like the Connect
    page, with a full outline rather than a colored edge. */
