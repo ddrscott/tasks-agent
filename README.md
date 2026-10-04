@@ -932,6 +932,8 @@ npm run check:setup      # the Sessions installer against a temp HOME: fresh, ex
 npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
 npm run check:presence   # Sessions rules: what a claim, a refused claim, and a release say, and that one decision counts once
 npm run og               # re-render the share image and home-screen icon from scripts/og/
+npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
+npm run check:launch     # the launch copy against its character and word limits
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
@@ -998,6 +1000,36 @@ the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newe
   `[Unreleased]` above it, `version` in `package.json` is set to match, and the commit is tagged
   `vX.Y.Z`.
 - To check a deploy landed, compare the footer with `git rev-parse --short HEAD`.
+
+## // LAUNCH
+
+`docs/launch/` is the Product Hunt kit. Nothing in it deploys or posts anything.
+
+- `product-hunt.md`: the form's fields, the maker's first comment, ready answers, and the shorter
+  pitches for X, LinkedIn, and Hacker News. Limits and where they came from are at the top.
+- `checklist.md`: what to do before, on, and after launch day, in order.
+- `video.md`: a shot list for a short demo video.
+- `gallery/`: the gallery images and the 240x240 thumbnail.
+
+```sh
+npm run shots                                  # shoot the gallery from http://localhost:5190
+npm run shots -- https://askscottpierce.com    # or from the live site
+npm run shots -- http://localhost:5173 --only 03,06   # just some of them; `thumb` is the thumbnail
+npm run check:launch                           # count the copy against its limits
+```
+
+`scripts/shots.mjs` drives the Chrome in `/Applications` over the DevTools protocol (`CHROME=` to
+use another), so there's no dependency to install. It shoots the demo board, the Connect page,
+and the landing page at 1270x760 and 2x. Each shot waits for the thing it's a picture of (the
+card with answer buttons, the open "need you" list, the Sessions groups, the open card's STATUS
+line and session row, the Connect steps) and fails with the reason when it isn't there, so a
+change to the demo or a page that breaks a shot shows up as a failed run. From a dev server, the
+Connect shot swaps the local address for the hosted one in the text on screen. Look at the PNGs
+after every run.
+
+The copy's limits are checked from the `<!-- count: … -->` comment above each block
+(`scripts/check-launch.mjs`). Every claim in the copy has to be true of the app as built; when a
+feature changes, check `docs/launch/` the same way you'd check the landing page.
 
 ## // DEPLOY
 
