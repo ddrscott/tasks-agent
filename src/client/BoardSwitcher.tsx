@@ -50,14 +50,14 @@ export function BoardSwitcher({ boards, access, onSwitch, onOpen }: Props) {
       {open && (
         <Popover menu label="Boards" onClose={() => setOpen(false)}>
           <div className="menu board-menu">
-            <div className="menu-label">Boards</div>
+            <div className="menu-label h">BOARDS</div>
             <button role="menuitemradio" aria-checked={!access} onClick={() => pick(null)}>
               <span className="board-row">
                 <span className="board-row-name">My board</span>
                 <span className="board-row-sub">{boards?.own.email ?? "yours"}</span>
               </span>
             </button>
-            <div className="menu-label">Shared with me</div>
+            <div className="menu-label h">SHARED_WITH_ME</div>
             {rows.map((b) => (
               <button key={b.board} role="menuitemradio" aria-checked={access?.board === b.board} onClick={() => pick(b.board)}>
                 <span className="board-row">

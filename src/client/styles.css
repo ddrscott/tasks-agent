@@ -883,7 +883,9 @@ a.att-name:hover { color: var(--accent-text); }
 .menu .menu-roles button[aria-checked="true"] { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
 /* Two groups in a row share one rule between them. */
 .menu-group + .menu-group { border-top: 0; margin-top: -4px; }
-.menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+/* A section label inside a menu. It's a section header like any other, so it takes `.h` with it in the markup: // CAPS_WITH_UNDERSCORES, slashes in the accent. */
+.menu-label { padding: 8px 10px 4px; }
+.menu-label .role-chip { margin-left: 8px; vertical-align: middle; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50;

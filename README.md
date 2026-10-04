@@ -1891,6 +1891,10 @@ address or a guess, and nothing on screen offers a change the server would refus
   the whole workspace per board, so nothing from one leaks into the next. A board you can't
   open (removed, never shared, a made-up id) falls back to your own with a toast that says
   so. The list has accepted boards only; `GET /api/boards` doesn't list pending invites.
+  Its two section labels, `// BOARDS` and `// SHARED_WITH_ME`, and `// THIS_BOARD` in the
+  account menu on a shared board (with your role as a chip beside it), are section headers
+  like the dialogs': `.menu-label` with `.h`, so the slashes are the accent color. The lane
+  menu's `// SORT_BY` and `// THIS_LANE_IS` are the same.
 - **The line under the top bar** (`.member-line`) stays for as long as a shared board is open:
   a role chip, whose board it is, what you can do, and what would change that. A viewer:
   "View only. To change cards, ask the owner to make you a writer." A writer during a lapse:

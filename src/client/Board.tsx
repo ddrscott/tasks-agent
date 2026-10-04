@@ -373,7 +373,7 @@ function LaneView(props: Props & {
                 {props.index > 0 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
                 {props.index < props.lanes.length - 1 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
                 <div className="menu-group" role="group" aria-label="Sort by">
-                  <div className="menu-label">Sort by</div>
+                  <div className="menu-label h">SORT_BY</div>
                   {SORTS.map((o) => (
                     <button key={o.by} role="menuitemradio" aria-checked={lane.sort === o.by} onClick={() => sort(o.by, o.say)}>{o.label}</button>
                   ))}
@@ -381,7 +381,7 @@ function LaneView(props: Props & {
                 </div>
                 {/* Which lane new cards land in, which holds work in progress, and which means finished. Where a lane sits has no say. */}
                 <div className="menu-group" role="group" aria-label="This lane is">
-                  <div className="menu-label">This lane is</div>
+                  <div className="menu-label h">THIS_LANE_IS</div>
                   {/* One row, so the menu stays short. Tap the lit one to make this an ordinary lane again. */}
                   <div className="menu-roles">
                     {LANE_ROLES.map((r) => (

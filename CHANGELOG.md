@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manage subscription only shows when there's a subscription to manage. With Pro an admin gave and took back, Members offered it and it answered "No subscription to manage yet"
 - When your plan changes while your board is open (Pro bought, lapsed, or given or taken back by an admin), the account menu and the assistant's limit follow right away, without a reload
 - A viewer on a board whose owner's Pro plan lapsed is told the plan lapsed, instead of being told to ask for a writer role that wouldn't help
+- Section labels inside menus (the board switcher, the account menu on a shared board, the lane menu) look like the app's other section headers
 
 ## [0.2.0] - 2026-10-04
 

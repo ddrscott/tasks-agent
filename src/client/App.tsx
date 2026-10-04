@@ -818,7 +818,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
                         {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>}
                         {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>}
                         <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
-                        <div className="menu-label">This board · {roleWord(access)}</div>
+                        <div className="menu-label h">THIS_BOARD<span className="role-chip" data-role={access.effective}>{roleWord(access)}</span></div>
                         <button
                           className={`danger${leaveArmed ? " armed" : ""}`} role="menuitem"
                           onClick={() => { if (!leaveArmed) { setLeaveArmed(true); return; } setMenuOpen(false); void leave(); }}
