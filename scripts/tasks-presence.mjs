@@ -12,12 +12,18 @@
 // tasks-events.mjs uses. URL: TASKS_PRESENCE_URL, default https://askscottpierce.com/tasks/api/presence.
 // Machine name: TASKS_MACHINE, default this host's name.
 //
-// It never prints, never fails the hook, and gives up after 3 seconds. PostToolUse fires on
-// every tool call, so those are sent at most once every 30 seconds per session.
+// It never fails the hook and gives up after 3 seconds. PostToolUse fires on every tool call,
+// so those are sent at most once every 30 seconds per session.
+//
+// It prints on SessionStart only, where Claude Code adds a hook's output to the session's
+// context: the session id, and whether the event feed script is installed. That's how an agent
+// claims cards under the id this row has, without running a command to find it. The working
+// rules (get_started) look for these two lines by how they start.
 
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const URL_ = process.env.TASKS_PRESENCE_URL ?? "https://askscottpierce.com/tasks/api/presence";
 const ROUTINE_EVERY_MS = 30_000;
@@ -37,6 +43,13 @@ async function main() {
   if (!id || !tok) return;
 
   const event = String(h.hook_event_name ?? "");
+  if (event === "SessionStart") {
+    const feed = join(dirname(fileURLToPath(import.meta.url)), "tasks-events.mjs");
+    process.stdout.write(
+      `Tasks session id: ${id} (use it as session_id when you claim cards on the Tasks board)\n` +
+      (existsSync(feed) ? "Tasks event feed: installed\n" : ""),
+    );
+  }
   if (ROUTINE.has(event)) {
     const stamp = join(tmpdir(), `tasks-presence-${id.replace(/[^\w.-]/g, "_")}`);
     try { if (Date.now() - statSync(stamp).mtimeMs < ROUTINE_EVERY_MS) return; } catch { /* first one */ }

@@ -15,7 +15,8 @@ import type { User } from "./auth";
 import { describeSession } from "./presence";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
-import { workingRules } from "./agent-rules";
+import { WAIT_SECONDS, workingRules } from "./agent-rules";
+import { askState } from "./shared";
 
 export const MCP_PATH = "/tasks/mcp";
 
@@ -23,7 +24,7 @@ export const MCP_PATH = "/tasks/mcp";
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_started", "get_board", "get_card", "ask_ceo", "claim_card", "release_card"] as const;
+const BY_HAND = ["get_started", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -41,14 +42,28 @@ When you're asked to work the board, or its agent cards, on your own, call get_s
 and follow the rules it returns.
 
 Several agent sessions can share this board. Before you start work on a card, call claim_card with
-your session id (CLAUDE_CODE_SESSION_ID in Claude Code), what you are (agent), your hostname
-(machine), and the name of the folder you're in (project). If it's refused, another live session has
+a session id (get_started hands you one; without it, make one up once and keep it), what you are
+(agent), your hostname if you know it (machine), and the name of the folder you're in (project). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
 release_card when you finish a card or give up on it.
 
 When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
 options instead of writing the question into the notes. They answer with one tap, and get_board
-then shows the card as ANSWERED. Nothing calls you when that happens, so check get_board again.`;
+then shows the card as ANSWERED. Nothing calls you when that happens: call wait_for_answer with the
+card's id, which holds until the answer lands. If you can't go on with a card (a tool was refused, or
+something is missing), ask with ask_ceo too, so the owner sees it on the board.`;
+
+/** How often wait_for_answer looks at the board while it holds. */
+const WAIT_POLL_MS = 2000;
+/** The most board reads one wait_for_answer call makes, to stay far inside a Worker's subrequest limit. */
+const WAIT_MAX_READS = 30;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** An id for a session that has none of its own: tasks- and 8 letters or digits. Nothing is stored until it claims. */
+function newSessionId(): string {
+  const abc = "abcdefghijkmnpqrstuvwxyz23456789";
+  return `tasks-${[...crypto.getRandomValues(new Uint8Array(8))].map((n) => abc[n % abc.length]).join("")}`;
+}
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
@@ -84,7 +99,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       description: doc("get_started"),
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
-    }, async () => (await locked()) ?? text(workingRules(new URL(req.url).origin)));
+    }, async () => (await locked()) ?? text(workingRules(new URL(req.url).origin, "/tasks", newSessionId())));
 
     server.registerTool("get_board", {
       title: "Get board",
@@ -163,12 +178,52 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       return r.ok ? text(`${r.summary}\n\nWaiting on the owner:\n${r.board}`) : text(r.summary, true);
     });
 
+    // Holding a request open is how every client gets to wait, with no shell and no feed. The MCP
+    // server stays stateless: the Worker rereads the cards on a timer until one changes or the time
+    // is up. Nothing is stored, and a client that hangs up ends the loop.
+    server.registerTool("wait_for_answer", {
+      title: "Wait for an answer",
+      description: doc("wait_for_answer"),
+      inputSchema: z.object({
+        ids: z.array(z.string()).min(1).max(5).describe("The cards you asked on, like c1a2b"),
+        seconds: z.number().int().min(1).max(45).optional().describe(`How long to hold at most. Default ${WAIT_SECONDS}`),
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { ids: string[]; seconds?: number }) => {
+      const no = await locked();
+      if (no) return no;
+      const ids = [...new Set(input.ids)];
+      const total = (input.seconds ?? WAIT_SECONDS) * 1000;
+      const every = Math.max(WAIT_POLL_MS, Math.ceil((total * ids.length) / WAIT_MAX_READS));
+      const until = Date.now() + total;
+      for (;;) {
+        const waiting: string[] = [];
+        const ready: string[] = [];
+        for (const id of ids) {
+          const card = await agent.cardDetail(id);
+          const state = card ? askState(card.text) : null;
+          if (state === "asking") waiting.push(id);
+          else if (!card) ready.push(`[${id}] is gone: the owner deleted it, so stop working on it.`);
+          else if (state === "answered") ready.push(`ANSWERED. Claim it again with claim_card and act on the answer:\n${card.text}`);
+          else ready.push(`[${id}] has no open question and no answer. Call get_card to see where it stands.`);
+        }
+        if (ready.length) {
+          const rest = waiting.length ? `\n\nStill waiting on the owner: ${waiting.map((id) => `[${id}]`).join(", ")}` : "";
+          return text(ready.join("\n\n") + rest);
+        }
+        if (Date.now() + every > until || req.signal.aborted) {
+          return text(`Nothing is answered yet on ${waiting.map((id) => `[${id}]`).join(", ")}. Call wait_for_answer again to keep waiting.`);
+        }
+        await sleep(every);
+      }
+    });
+
     server.registerTool("claim_card", {
       title: "Claim card",
       description: doc("claim_card"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
-        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id. In Claude Code: the CLAUDE_CODE_SESSION_ID environment variable"),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id: the one get_started gave you, the same on every call"),
         agent: z.string().max(40).optional().describe("What you are, like claude-code, codex, or cursor"),
         machine: z.string().max(60).optional().describe("The hostname of the machine you run on"),
         project: z.string().max(80).optional().describe("The name of the folder you're working in, not the whole path"),
