@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A card's notes box starts smaller and grows with what you type up to a limit, so the lane, due date, tags, and files under it stay in view. The expand icon next to Notes gives the notes the whole dialog, and shrinks them back
 - To do, Doing, and Done are special because of what they are, not where they sit. Drag the lanes into any order, or rename them, and Done is still done: its cards stay struck through and out of the open count, Mark done still sends a card there, and agents' claims end there. Before, whichever lane was last counted as done
 - A lane added at the end no longer becomes the done lane, and deleting the done lane no longer turns the lane next to it into one
+- The working rules tell agents to put the card's id and the reason for a change in the git commit, so the repo explains itself if the card is later edited or deleted
 
 ## [0.2.0] - 2026-10-04
 
