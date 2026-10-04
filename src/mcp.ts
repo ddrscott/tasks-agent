@@ -15,6 +15,7 @@ import type { User } from "./auth";
 import { describeSession } from "./presence";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
+import { workingRules } from "./agent-rules";
 
 export const MCP_PATH = "/tasks/mcp";
 
@@ -22,7 +23,7 @@ export const MCP_PATH = "/tasks/mcp";
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_board", "get_card", "ask_ceo", "claim_card", "release_card"] as const;
+const BY_HAND = ["get_started", "get_board", "get_card", "ask_ceo", "claim_card", "release_card"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -36,14 +37,18 @@ done lane: move a card there when the user finished it rather than deleting it. 
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
 search_cards to see only those cards. The user can undo any change from the app.
 
+When you're asked to work the board, or its agent cards, on your own, call get_started first
+and follow the rules it returns.
+
 Several agent sessions can share this board. Before you start work on a card, call claim_card with
-your session id (CLAUDE_CODE_SESSION_ID in Claude Code). If it's refused, another live session has
+your session id (CLAUDE_CODE_SESSION_ID in Claude Code), what you are (agent), your hostname
+(machine), and the name of the folder you're in (project). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
 release_card when you finish a card or give up on it.
 
 When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
 options instead of writing the question into the notes. They answer with one tap, and get_board
-then shows the card as ANSWERED.`;
+then shows the card as ANSWERED. Nothing calls you when that happens, so check get_board again.`;
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
@@ -71,6 +76,15 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     // Every tool answers the same way on an end-to-end encrypted board: the server can't read it, so neither can an agent.
     const locked = async () => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
     const server = new McpServer({ name: "tasks", title: "Tasks", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+
+    // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
+    // an encrypted board like every other tool: there's nothing there for an agent to work.
+    server.registerTool("get_started", {
+      title: "Get started",
+      description: doc("get_started"),
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    }, async () => (await locked()) ?? text(workingRules(new URL(req.url).origin)));
 
     server.registerTool("get_board", {
       title: "Get board",
@@ -155,9 +169,9 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id. In Claude Code: the CLAUDE_CODE_SESSION_ID environment variable"),
-        agent: z.string().max(40).optional().describe("What you are, like lead"),
-        machine: z.string().max(60).optional().describe("The machine you run on, when you know it"),
-        project: z.string().max(80).optional().describe("The folder you're working in, when you know it"),
+        agent: z.string().max(40).optional().describe("What you are, like claude-code, codex, or cursor"),
+        machine: z.string().max(60).optional().describe("The hostname of the machine you run on"),
+        project: z.string().max(80).optional().describe("The name of the folder you're working in, not the whole path"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async (input: { id: string; session_id: string; agent?: string; machine?: string; project?: string }) => {

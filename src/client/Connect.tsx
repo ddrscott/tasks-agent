@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GrantInfo } from "../oauth";
 import type { TokenInfo } from "../tokens";
 import { TOOL_LIST } from "../tool-docs";
+import { feedCommand, fullPrompt, STARTER_LINE } from "../agent-rules";
 // The two scripts a machine needs, as text, so the page can hand them out. Someone using the
 // hosted app has no checkout to copy them from, and this way they're always the build's own.
 import eventsScript from "../../scripts/tasks-events.mjs?raw";
@@ -11,8 +12,9 @@ import { Footer } from "./Footer";
 import { useTitle } from "./title";
 import { IconCheck, IconTrash } from "./icons";
 
-// Everything about working the board with outside agents, at /tasks/connect: how to connect
-// one over MCP, the prompt that starts it on the board, the apps already connected with OAuth,
+// Everything about working the board with outside agents, at /tasks/connect: the four-step
+// quick start for Claude Code (QuickStart, which the empty board shows too), how to connect
+// any other client over MCP, the prompt that starts it on the board, the apps already connected with OAuth,
 // personal access tokens for clients that take a pasted token, the one command that sets up
 // the hooks behind // SESSIONS, and how the #agent tag, questions, claims, and the event feed
 // fit together.
@@ -36,6 +38,48 @@ type Client = {
 const needsToken = (c: Client) => !!c.code && c.code("", PLACEHOLDER).includes(PLACEHOLDER);
 
 const CLIENTS: Client[] = [
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    steps: [
+      <>The <a href="#quick">quick start</a> above does all of this in one command, with a token. This is the OAuth way, which leaves no token on disk. Run this once in a terminal:</>,
+      <>Start Claude Code, run <code>/mcp</code>, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser opens here; sign in and <b>Allow</b>.</>,
+      <>Add <code>#agent</code> to a card's title, or use its Tags field, and paste in the <a href="#prompt">starter prompt</a> below. To see this machine's sessions on the board, run the one command under <a href="#sessions">Sessions</a>.</>,
+    ],
+    code: (url) => claudeMcpAdd(url),
+    lang: "sh",
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    steps: [
+      <>Add this to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project).</>,
+      <>Under <b>Settings → MCP</b>, click <b>Connect</b> next to <b>tasks</b>, then sign in here and <b>Allow</b>.</>,
+      <>Add <code>#agent</code> to a card's title and paste the <a href="#prompt">starter prompt</a> into Cursor's agent.</>,
+    ],
+    code: (url) => JSON.stringify({ mcpServers: { tasks: { url } } }, null, 2),
+    lang: "json",
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    steps: [
+      <>Create an access token below, then run this in a terminal. It puts the token in <code>TASKS_TOKEN</code> for this shell, adds the board to <code>~/.codex/config.toml</code>, and starts Codex with the starter prompt.</>,
+      <>Codex reads the token from the environment each time it starts, so add the <code>export</code> to <code>~/.zshrc</code> or similar to keep it working in new terminals.</>,
+    ],
+    code: (url, token) => codexQuickCommand(url, token),
+    lang: "sh",
+  },
+  {
+    id: "vscode",
+    name: "VS Code",
+    steps: [
+      <>Add this to <code>.vscode/mcp.json</code>, or run <b>MCP: Open User Configuration</b> to use it in every workspace.</>,
+      <>Start the server when VS Code asks, then sign in here and <b>Allow</b>. The tools appear in Copilot's agent mode.</>,
+    ],
+    code: (url) => JSON.stringify({ servers: { tasks: { type: "http", url } } }, null, 2),
+    lang: "json",
+  },
   {
     id: "claude",
     name: "Claude",
@@ -66,45 +110,6 @@ const CLIENTS: Client[] = [
     ],
   },
   {
-    id: "claude-code",
-    name: "Claude Code",
-    steps: [
-      <>Run this once in a terminal:</>,
-      <>Start Claude Code, run <code>/mcp</code>, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser opens here; sign in and <b>Allow</b>.</>,
-      <>Prefer a token? Add <code>--header "Authorization: Bearer &lt;token&gt;"</code> to the command in step 1 and skip step 2.</>,
-      <>Tag a card <code>#agent</code> and paste in the <a href="#prompt">starter prompt</a> below. To see this machine's sessions on the board, run the one command under <a href="#sessions">Sessions</a>.</>,
-    ],
-    code: (url) => claudeMcpAdd(url),
-    lang: "sh",
-  },
-  {
-    id: "cursor",
-    name: "Cursor",
-    steps: [
-      <>Add this to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project).</>,
-      <>Under <b>Settings → MCP</b>, click <b>Connect</b> next to <b>tasks</b>, then sign in here and <b>Allow</b>.</>,
-    ],
-    code: (url) => JSON.stringify({ mcpServers: { tasks: { url } } }, null, 2),
-    lang: "json",
-  },
-  {
-    id: "vscode",
-    name: "VS Code",
-    steps: [
-      <>Add this to <code>.vscode/mcp.json</code>, or run <b>MCP: Open User Configuration</b> to use it in every workspace.</>,
-      <>Start the server when VS Code asks, then sign in here and <b>Allow</b>. The tools appear in Copilot's agent mode.</>,
-    ],
-    code: (url) => JSON.stringify({ servers: { tasks: { type: "http", url } } }, null, 2),
-    lang: "json",
-  },
-  {
-    id: "codex",
-    name: "Codex",
-    steps: [<>Add this to <code>~/.codex/config.toml</code>, create an access token below, and export it in your shell as <code>TASKS_TOKEN</code>.</>],
-    code: (url, token) => `[mcp_servers.tasks]\nurl = "${url}"\nbearer_token_env_var = "TASKS_TOKEN"\n\n# in ~/.zshrc or similar:\n# export TASKS_TOKEN="${token}"`,
-    lang: "toml",
-  },
-  {
     id: "other",
     name: "Anything else",
     steps: [
@@ -123,6 +128,9 @@ const HOME = "~/.config/tasks";
 const HOSTED = "https://askscottpierce.com";
 const elsewhere = (name: string, url: string) => (location.origin === HOSTED ? "" : `${name}=${url} `);
 
+// One argument for a POSIX shell. Single quotes keep `$`, `!`, and backticks from meaning anything.
+const shq = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
+
 const saveToken = (token: string) => `mkdir -p ${HOME} && echo '${token}' > ${HOME}/token && chmod 600 ${HOME}/token`;
 
 // The hooks for ~/.claude/settings.json. The two events that fire constantly run in the
@@ -139,52 +147,19 @@ function hooksJson(): string {
   return `{\n  "hooks": {\n${lines.join(",\n")}\n  }\n}`;
 }
 
-const eventsCommand = () =>
-  `${elsewhere("TASKS_URL", `${location.origin.replace(/^http/, "ws")}${BASE}/events`)}node ${HOME}/tasks-events.mjs`;
+const eventsCommand = () => feedCommand(location.origin, BASE);
 
 // The one-command Sessions setup. The Worker serves scripts/tasks-setup.mjs at /tasks/setup.mjs
 // with the two scripts inside it; the token rides in the environment, never in the URL.
 const setupUrl = () => `${location.origin}${BASE}/setup.mjs`;
 const setupCommand = (token: string) => `curl -fsSL ${setupUrl()} \\\n  | TASKS_TOKEN='${token}' \\\n    node --input-type=module -`;
 
-// What to paste into a freshly connected agent so it works the board the way the tools expect:
-// the tag, claims, the status line, questions, and Done. Each line follows what the server does
-// (src/mcp.ts, src/tool-docs.ts), so check it against them when a tool changes.
-const STARTER_PROMPT = `Work my Tasks board through the tasks MCP server. Only cards tagged agent are yours. Read other cards if you need context, but never move, edit, or delete them.
-
-Repeat until no agent card is left for you:
-
-1. Call get_board with tag "agent". Skip cards listed as claimed by another session, and cards showing ASKING: those are waiting on me.
-2. Pick a card. First choice is one in Doing that nobody has claimed: read its STATUS line and pick up where it left off, and if it shows ANSWERED, that's my decision, so act on it. Otherwise take the top card in the first lane.
-3. Call claim_card with the card's id and your session id before anything else. In Claude Code that's $CLAUDE_CODE_SESSION_ID. Anywhere else, make one up once, like agent-7f3k2q, and use it all session. If the claim is refused, another session has the card: take the next one.
-4. Call get_card for the full notes and attached files, then move_cards to put it in Doing.
-5. Do the work. Keep the first line of the card's notes current: STATUS: <what's happening> (<date and time>). update_card replaces all of the notes and all of the tags, so send back everything you're keeping, including the agent tag. On a long card, call claim_card again every 10 minutes so the claim doesn't lapse.
-6. When you need a decision from me, call ask_ceo on the card: a one-line question, 2 to 4 options that are each a complete action, and which one you recommend. Put your reasoning in the notes, leave the card in Doing, call release_card, and go on to the next card. Don't wait for me, and don't write the question into the notes.
-7. When a card is done and you've checked the result yourself, write what changed and where in its notes (commit, branch, files), move it to Done (the last lane), and call release_card.
-
-When nothing is left, tell me what you finished and which cards are waiting on me.`;
-
-// The same, for Claude Code on a machine that ran the Sessions setup: it also listens to the
-// event feed, so an answer or a new card wakes it instead of waiting for the next get_board.
-const feedPrompt = () => `${STARTER_PROMPT.replace(/\n\nWhen nothing is left, .*$/, "")}
-
-Before step 1, start this under the Monitor tool with the longest timeout, and start it again whenever it expires:
-
-${eventsCommand()} --require agent
-
-Each line it prints is a change I made to an agent card. Handle it right away:
-- hello: every open agent card. Pick up any you don't know about.
-- added or tagged: new work. Treat it like a card in the first lane.
-- answered: with an answer field, claim the card again and act on the answer. Without one, reread the card.
-- edited or moved: I changed course. Reread the card before you go on.
-- deleted: stop working on it.
-- offline: tell me the feed is down.
-
-When nothing is left, tell me what you finished and which cards are waiting on me, then wait for the next event instead of stopping.`;
-
+// What to paste into a freshly connected agent. The rules themselves are in agent-rules.ts and
+// the server hands them out through get_started, so the short prompt only has to say "call it".
+// The full text is the same rules, for reading and for a client that should have them up front.
 const PROMPTS = [
-  { id: "any", name: "Any agent" },
-  { id: "feed", name: "Claude Code + event feed" },
+  { id: "short", name: "One line" },
+  { id: "full", name: "The full rules" },
 ] as const;
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -205,6 +180,165 @@ function ago(ms: number | null): string {
 
 /** The one-line Claude Code setup. The signed-out landing page shows the same command. */
 export const claudeMcpAdd = (url: string) => `claude mcp add --transport http tasks ${url}`;
+
+/**
+ * The quick start's one command: connect Claude Code with a token and start it on the board.
+ * Flags checked against `claude mcp add --help`, `claude mcp remove --help`, and `claude --help` (2.1).
+ * - `claude mcp add` refuses a name that's already there, so the entry for this folder is removed
+ *   first. That fails quietly when there isn't one. The new entry is local scope, which wins over
+ *   a `tasks` in user or project scope.
+ * - The prompt goes before --allowedTools, which takes a list and would swallow it.
+ * - Everything is single-quoted and the prompt is one plain line, so nothing is left for the shell to expand.
+ */
+export const quickStartCommand = (url: string, token: string) =>
+  `claude mcp remove tasks -s local >/dev/null 2>&1; ${claudeMcpAdd(url)} --header ${shq(`Authorization: Bearer ${token}`)} && claude ${shq(STARTER_LINE)} --allowedTools mcp__tasks`;
+
+/** The same shape for Codex (`codex mcp add --help`, 0.150): it reads the token from the environment, and adding again replaces the entry. */
+export const codexQuickCommand = (url: string, token: string) =>
+  `export TASKS_TOKEN=${shq(token)} && codex mcp add tasks --url ${url} --bearer-token-env-var TASKS_TOKEN && codex ${shq(STARTER_LINE)}`;
+
+export const QUICK_TOKEN_NAME = "Claude Code quick start";
+/** Set by the Connect page's "Add a sample agent card", read by the board (FirstRun.tsx) when it opens. */
+export const SAMPLE_INTENT = "tasks-add-sample";
+
+/**
+ * Copy text that isn't known yet. Safari only lets a page write to the clipboard during the
+ * click, so the clipboard is handed a promise there and then; other browsers get writeText once
+ * the text is in. False means neither worked and the text has to be copied from the page.
+ */
+async function copyLater(text: Promise<string>): Promise<boolean> {
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })]);
+      return true;
+    }
+  } catch { /* try the plain way */ }
+  try {
+    await navigator.clipboard.writeText(await text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A quick start token nobody ever used is a command that was copied and never run. Clear those out so they don't eat the 10. */
+async function mintQuickToken(): Promise<{ token: string; info: TokenInfo; dropped: string[] }> {
+  const dropped: string[] = [];
+  const { tokens } = await call<{ tokens: TokenInfo[] }>("/api/tokens");
+  for (const t of tokens) {
+    if (t.name !== QUICK_TOKEN_NAME || t.lastUsedAt) continue;
+    await call(`/api/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+    dropped.push(t.id);
+  }
+  const r = await call<{ token: string; info: TokenInfo }>("/api/tokens", { method: "POST", body: JSON.stringify({ name: QUICK_TOKEN_NAME }) });
+  return { ...r, dropped };
+}
+
+type Quick = { command: string; copied: boolean } | null;
+
+/**
+ * // QUICK_START: sign in, add a sample card, copy one command, paste it. The empty board shows
+ * it (FirstRun.tsx) and so does the top of the Connect page. `sample` is how step 2 is done from
+ * where this is drawn: the board adds the card, the Connect page goes to the board to add it.
+ */
+export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, lede }: {
+  signedIn: boolean;
+  hasSample: boolean;
+  onAddSample(): void;
+  /** The Connect page lists tokens, so it's told about the new one and the unused ones it replaced. */
+  onMinted?(info: TokenInfo, dropped: string[]): void;
+  /** On the board: open the Connect page without leaving the app. */
+  onConnect?(): void;
+  lede: string;
+}) {
+  const [quick, setQuick] = useState<Quick>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = `${location.origin}${BASE}/mcp`;
+  // On a phone the block scrolls inside the board, so the command is brought into view when it appears.
+  const shown = useRef<HTMLDivElement>(null);
+  const made = !!quick;
+  useEffect(() => { if (made) shown.current?.scrollIntoView({ block: "nearest" }); }, [made]);
+
+  async function copy() {
+    setError(null);
+    if (quick) {
+      const copied = await copyLater(Promise.resolve(quick.command));
+      setQuick({ ...quick, copied });
+      return;
+    }
+    setBusy(true);
+    const minted = mintQuickToken();
+    const command = minted.then((r) => quickStartCommand(url, r.token));
+    const copied = await copyLater(command);
+    try {
+      const r = await minted;
+      setQuick({ command: await command, copied });
+      onMinted?.(r.info, r.dropped);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const connectLink = (hash: string, text: string) => (
+    <a href={`${BASE}/connect${hash}`} onClick={onConnect && ((e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onConnect(); })}>{text}</a>
+  );
+
+  return (
+    <>
+      <p className="first-run-lede">{lede}</p>
+      <ol className="quick-steps">
+        <li className={signedIn ? "done" : undefined}>
+          <b>Sign in</b>
+          {signedIn
+            ? <span>Done. You're signed in.</span>
+            : <><span>Your email and a code. No password.</span><a className="btn primary" href={signInHref("#quick")}>Sign in</a></>}
+        </li>
+        <li className={hasSample ? "done" : undefined}>
+          <b>Add a sample agent card</b>
+          <span>A real card tagged <code>#agent</code>. It has the agent look around a folder, suggest a small fix, and ask you which one before it changes anything.</span>
+          <button className={`btn${signedIn && !hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || hasSample} onClick={onAddSample}>
+            {hasSample ? <><IconCheck />Added</> : "Add a sample agent card"}
+          </button>
+        </li>
+        <li>
+          <b>Copy the command</b>
+          <span>One line for Claude Code. It connects this board with a new access token and starts Claude on your <code>#agent</code> cards.</span>
+          <button className={`btn${hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || busy} onClick={() => void copy()}>
+            {busy ? "Making it…" : quick?.copied ? <><IconCheck />Copied. Copy again</> : "Copy the command"}
+          </button>
+        </li>
+        <li>
+          <b>Paste it in a terminal</b>
+          <span>In any project folder. Claude Code claims the card and asks its question on the card. Answer with one tap on the board, and it carries on.</span>
+        </li>
+      </ol>
+      {error && (
+        <div className="login-error" role="alert">
+          {error} {/tokens/.test(error) && connectLink("#apps", "See your tokens")}
+        </div>
+      )}
+      {quick && (
+        <div className="quick-cmd" role="status" ref={shown}>
+          <Snippet lang="sh" code={quick.command} live wrap />
+          <p>
+            {quick.copied ? "Copied. " : "Your browser kept the clipboard to itself, so copy it from here. "}
+            This is the only time this token is shown. It can read and change everything on your board.
+          </p>
+        </div>
+      )}
+      <p className="first-run-foot">
+        <b>What the command does:</b> it adds an MCP server named <code>tasks</code>, with a new access
+        token, to Claude Code's config for the folder you run it in (replacing one of that name). Then
+        it starts Claude with a one-line prompt, allowed to use the board's tools without asking each
+        time. The token is shown once, in the command; revoke it under {connectLink("#apps", "Connected apps")}.
+        OAuth is the other way, with no token on disk: {connectLink("#add", "the full steps")}, with Cursor and Codex too.
+      </p>
+    </>
+  );
+}
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -260,10 +394,10 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [client, setClient] = useState(() => {
-    try { return localStorage.getItem("todo-connect-client") ?? "claude"; } catch { return "claude"; }
+    try { return localStorage.getItem("todo-connect-client") ?? "claude-code"; } catch { return "claude-code"; }
   });
   const [grants, setGrants] = useState<GrantInfo[] | null>(null);
-  const [prompt, setPrompt] = useState<(typeof PROMPTS)[number]["id"]>("any");
+  const [prompt, setPrompt] = useState<(typeof PROMPTS)[number]["id"]>("short");
 
   useEffect(() => {
     if (!signedIn) return;
@@ -322,7 +456,13 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
 
   const active = CLIENTS.find((c) => c.id === client) ?? CLIENTS[0];
   const token = fresh?.token ?? PLACEHOLDER;
-  const promptText = prompt === "feed" ? feedPrompt() : STARTER_PROMPT;
+  const promptText = prompt === "full" ? fullPrompt(location.origin, BASE) : STARTER_LINE;
+
+  // Step 2 of the quick start, from here: the board adds the card when it opens (FirstRun.tsx).
+  function addSample() {
+    try { sessionStorage.setItem(SAMPLE_INTENT, "1"); } catch { /* private window: the board has the button too */ }
+    onBack();
+  }
 
   return (
     <div className="connect">
@@ -337,26 +477,35 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
       <main className="connect-body">
         <section className="connect-intro">
           <h2 className="h">CONNECT_AN_AGENT</h2>
-          <p className="lede">Let Claude, ChatGPT, Glean, and other AI agents work your board.</p>
+          <p className="lede">Put Claude Code, Cursor, or Codex to work on your board.</p>
           <p>
-            Agents connect over <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">MCP</a>. They
-            get the same tools as the built-in assistant, so their changes show up live in this tab
-            and <kbd>⌘Z</kbd> undoes them. Most agents need only the URL: they send you back here to
-            sign in and allow access.
-          </p>
-          <p>
-            Three steps: copy the URL, add it to your agent, and paste in
-            the <a href="#prompt">starter prompt</a>. After that, <a href="#sessions">see your Claude Code
-            sessions on the board</a> and read <a href="#working">how the <code>#agent</code> tag, questions,
-            and claims work</a>.
+            Coding agents connect over <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">MCP</a>,
+            and so do Claude, ChatGPT, Glean, and any other MCP client. They get the same tools as the
+            built-in assistant, so their changes show up live on the board and <kbd>⌘Z</kbd> undoes them.
           </p>
           {!signedIn && (
             <p>
               You're not signed in. Everything here is readable without an account;
-              you'll <a href={signInHref()}>sign in</a> when your agent asks for access.
+              you'll <a href={signInHref()}>sign in</a> to copy a command or when your agent asks for access.
             </p>
           )}
         </section>
+
+        <section className="first-run quick-start" id="quick" aria-labelledby="quick-h">
+          <h2 className="h" id="quick-h">QUICK_START</h2>
+          <QuickStart
+            signedIn={signedIn} hasSample={false} onAddSample={addSample}
+            lede="Claude Code working a card on your board, in four steps."
+            onMinted={(info, dropped) => setTokens((t) => [info, ...(t ?? []).filter((x) => !dropped.includes(x.id))])}
+          />
+        </section>
+
+        <p className="connect-rest">
+          Not on Claude Code, or want OAuth instead of a token? <a href="#add">Add the URL to your agent</a> and
+          paste in the <a href="#prompt">starter prompt</a>. After that, <a href="#sessions">see your Claude Code
+          sessions on the board</a> and read <a href="#working">how the <code>#agent</code> tag, questions,
+          and claims work</a>.
+        </p>
 
         <section className="connect-step">
           <div className="step-num">01</div>
@@ -370,7 +519,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
           </div>
         </section>
 
-        <section className="connect-step">
+        <section className="connect-step" id="add">
           <div className="step-num">02</div>
           <div className="step-main">
             <h2 className="h">ADD_IT_TO_YOUR_AGENT</h2>
@@ -399,9 +548,11 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
           <div className="step-main">
             <h2 className="h">START_IT_WITH_THIS_PROMPT</h2>
             <p>
-              Put <code>#agent</code> on a card you want done, then paste this into the agent you just
-              connected. It tells the agent which cards are its own, to claim one before starting, to keep
-              a status line on it, to ask you instead of guessing, and to move it to Done.
+              Add <code>#agent</code> to the title of a card you want done, or use its Tags field, then
+              paste this into the agent you just connected. The one line has the agent
+              call <code>get_started</code>, and the server answers with the working rules: which cards
+              are its own, to claim one before starting, to keep a status line on it, to ask you instead
+              of guessing, to come back for your answer, and to move the card to Done.
             </p>
             <div className="client-tabs" role="tablist" aria-label="Prompt">
               {PROMPTS.map((p) => (
@@ -409,13 +560,22 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
               ))}
             </div>
             <Snippet lang="prompt" code={promptText} wrap />
-            {prompt === "feed" && (
+            {prompt === "full" ? (
               <p className="muted">
-                This one also listens for your changes, so answering a question or adding a card wakes the
-                agent right away. Run the one command under <a href="#sessions">Sessions</a> first: it
-                installs the feed script and your token.
+                The same rules <code>get_started</code> returns, word for word, for reading or for pasting whole.
+              </p>
+            ) : (
+              <p className="muted">
+                The rules live on the server, so this line never goes stale. Read them under <b>The full rules</b>.
               </p>
             )}
+            <p className="muted">
+              <b>Getting your answer back to it.</b> Nothing calls an agent when you answer. The rules have
+              it check the board every 20 seconds or so for 10 minutes while a question is open. After
+              that, or with an agent that can't wait, tell it <i>“check the board”</i>. Claude Code can do
+              better: run the one command under <a href="#sessions">Sessions</a> and it listens to the
+              event feed, so your answer wakes it right away. The same prompt works either way.
+            </p>
           </div>
         </section>
 
@@ -573,18 +733,17 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
               <li>
                 <b>Start it with the prompt.</b>
                 <p>
-                  The <a href="#prompt">starter prompt</a> covers everything below in words an agent follows.
-                  Paste it in at the start of a session.
+                  The <a href="#prompt">starter prompt</a> has the agent read the rules for everything below
+                  from the server. Paste it in at the start of a session.
                 </p>
                 <div className="step-actions">
-                  <CopyButton text={STARTER_PROMPT} label="Copy starter prompt" />
-                  <CopyButton text={feedPrompt()} label="Copy the Claude Code + event feed one" />
+                  <CopyButton text={STARTER_LINE} label="Copy starter prompt" />
                 </div>
               </li>
               <li>
                 <b>Tag its cards <code>#agent</code>.</b>
                 <p>
-                  Put <code>#agent</code> on a card you want an agent to take. The agent lists them
+                  Add <code>#agent</code> to the end of a card's title, or use its Tags field. The agent lists them
                   with <code>get_board</code> and <code>tag: "agent"</code>, and leaves every other card alone.
                   With more than one project, add a second tag for each, like <code>#receptionist</code>.
                 </p>
@@ -601,7 +760,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
                 <b>One card, one session.</b>
                 <p>
                   An agent calls <code>claim_card</code> before it starts a card, so two sessions never work the
-                  same one. A claimed card shows the session's state under its title. A claim lapses 15
+                  same one, and says what it is, its machine, and its folder. A claimed card shows the session's state under its title. A claim lapses 15
                   minutes after its session goes quiet. The server tells every agent about claims and
                   questions when it connects, so you don't have to.
                 </p>
@@ -613,7 +772,8 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
                   an <code>#agent</code> card, so an agent on your machine can act on it without polling.
                   The <a href="#sessions">Sessions setup</a> installs it
                   as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. Run it under Claude
-                  Code's Monitor tool; the Claude Code starter prompt does that for you. Changes an agent
+                  Code's Monitor tool; the rules tell Claude Code to do that when the script is there.
+                  Without it, an agent checks the board again for your answer. Changes an agent
                   makes are left out, so it never wakes itself.
                 </p>
                 <Snippet lang="sh" code={eventsCommand()} />

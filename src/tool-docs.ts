@@ -14,6 +14,12 @@ type ToolDoc = {
 };
 
 export const TOOL_DOCS = {
+  get_started: {
+    description:
+      "Read the rules for working this board on your own: which cards are yours, how to claim one, the STATUS line, asking the owner, " +
+      "coming back for the answer, and finishing. Call it once, before your first card, whenever you're asked to work the board.",
+    about: "Read the working rules: which cards are its own, claiming, the status line, asking you, and finishing. The starter prompt has the agent call this first.",
+  },
   get_board: {
     description: "Show every lane and card on the board, with ids, due dates, tags, the start of each card's notes, and the names of its files. Pass tag to list only the cards carrying it. Call get_card for a card's full notes and attachments.",
     about: "Read every lane and card: ids, due dates, tags, and the start of each card's notes. Can list just the cards with one tag.",
@@ -40,7 +46,7 @@ export const TOOL_DOCS = {
     about: "Move cards between lanes, for example to Done.",
   },
   update_card: {
-    description: "Change a card's title, notes, due date, or tags. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
+    description: "Change a card's title, notes, due date, or tags. A field you leave out stays as it is. notes replaces all of the notes, so send back what you're keeping, including any ANSWER: lines. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
     about: "Change a card's title, notes, due date, or tags.",
   },
   delete_cards: {
@@ -72,6 +78,7 @@ export const TOOL_DOCS = {
   claim_card: {
     description:
       "Claim a card for your session before you work on it, so two agents never take the same one. " +
+      "Pass agent, machine, and project too: the board shows them on the card, and says unknown without them. " +
       "Refused while another live session holds the card; that answer names the holder. " +
       "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours. " +
       "Pass agent, machine, and project when you know them: that's how the owner tells your session from the others.",
