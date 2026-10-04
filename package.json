@@ -13,6 +13,8 @@
     "check:sort": "node scripts/check-sort.mjs",
     "check:events": "node scripts/check-events.mjs",
     "og": "node scripts/og/render.mjs",
+    "shots": "node scripts/shots.mjs",
+    "check:launch": "node scripts/check-launch.mjs",
     "check:nudge": "node scripts/check-nudge.mjs",
     "check:setup": "node scripts/check-setup.mjs",
     "db:migrate:local": "wrangler d1 migrations apply todo-agent-auth --local",
