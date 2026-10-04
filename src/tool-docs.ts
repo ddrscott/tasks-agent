@@ -14,6 +14,12 @@ type ToolDoc = {
 };
 
 export const TOOL_DOCS = {
+  get_started: {
+    description:
+      "Read the rules for working this board on your own: which cards are yours, how to claim one, the STATUS line, asking the owner, " +
+      "coming back for the answer, and finishing. Call it once, before your first card, whenever you're asked to work the board.",
+    about: "Read the working rules: which cards are its own, claiming, the status line, asking you, and finishing. The starter prompt has the agent call this first.",
+  },
   get_board: {
     description: "Show every lane and card on the board, with ids, due dates, tags, the start of each card's notes, and the names of its files. Pass tag to list only the cards carrying it. Call get_card for a card's full notes and attachments.",
     about: "Read every lane and card: ids, due dates, tags, and the start of each card's notes. Can list just the cards with one tag.",
@@ -40,7 +46,7 @@ export const TOOL_DOCS = {
     about: "Move cards between lanes, for example to Done.",
   },
   update_card: {
-    description: "Change a card's title, notes, due date, or tags. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
+    description: "Change a card's title, notes, due date, or tags. A field you leave out stays as it is. notes replaces all of the notes, so send back what you're keeping, including any ANSWER: lines. Pass due: null to clear a due date. tags replaces the whole list, so include the ones to keep; [] removes them all.",
     about: "Change a card's title, notes, due date, or tags.",
   },
   delete_cards: {
@@ -65,19 +71,30 @@ export const TOOL_DOCS = {
     description:
       "Ask the board's owner to decide something, as a multiple-choice question on a card. The card gets #needs-ceo and " +
       "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
-      "the notes. The answer comes back in the `answered` event and shows in get_board as ANSWERED. Keep the question to " +
-      "one line, make the options complete actions, and put the reasoning in the card's notes. Don't wait on it: move on to other work.",
+      "the notes, and when you can't go on with a card: say what you need. The answer shows in get_board as ANSWERED. Keep the question to " +
+      "one line, make the options complete actions, and put the reasoning in the card's notes. Pass session_id, the one you claimed the card with: " +
+      "the board then shows your session as needs input, with the question, until the owner answers. Keep your claim on the card while you wait, " +
+      "move on to other work, and call wait_for_answer when none is left.",
     about: "Ask you a multiple-choice question on a card. You answer with one tap.",
+  },
+  wait_for_answer: {
+    description:
+      "Wait for the owner to answer questions you asked with ask_ceo. Pass the ids of the cards you asked on. It holds for up to 30 seconds " +
+      "(seconds changes that) and returns as soon as one is answered, with that card in full. If nothing is answered in that time it says so: " +
+      "call it again to keep waiting. Each call counts as hearing from your session, so the board doesn't mark you stale and your claims hold while you wait; " +
+      "pass session_id to be sure. Use this instead of sleeping or calling get_board over and over.",
+    about: "Wait for your answer. It holds for up to 30 seconds and returns the moment you answer one of the agent's questions.",
   },
   claim_card: {
     description:
       "Claim a card for your session before you work on it, so two agents never take the same one. " +
+      "Pass agent, machine, and project too: the board shows them on the card and in the Sessions list, and leaves them off without them. " +
       "Refused while another live session holds the card; that answer names the holder. " +
       "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours.",
     about: "Claim a card for one agent session, so two agents never take the same one.",
   },
   release_card: {
-    description: "Give up your claim on a card, when you finish it or stop working on it. Only the session holding the claim can release it.",
+    description: "Give up your claim on a card, when you finish it or stop working on it. Don't release a card you asked a question on: it's waiting on the owner, and releasing it takes your session off the card. Only the session holding the claim can release it.",
     about: "Give a claimed card back.",
   },
 } satisfies Record<string, ToolDoc>;

@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
-import { Attachments } from "./Attachments";
+import { NoAgentLine } from "./AgentNudge";
+import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
+import { MODAL, useModal } from "./modal";
 import { Markdown, toggleTask } from "./Markdown";
 import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
@@ -17,6 +19,8 @@ type Props = {
   knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload and decrypted to view. */
   vault: Vault | null;
+  /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
+  filesNote?: string;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
   onMove(laneId: string): void;
   /** A tap on a Move to button: move right away and say so, with Undo. */
@@ -35,7 +39,7 @@ type Props = {
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
@@ -53,15 +57,17 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
   // title is the better place to land: it says which card this is, and it's what gets edited
   // most. On a touch screen a focused text field pops the keyboard over a card someone may
   // only want to read, so focus goes to the dialog itself there.
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    dialog.showModal();
-    const field = dialog.querySelector<HTMLTextAreaElement>(".title-input");
-    if (!field || matchMedia("(hover: none) and (pointer: coarse)").matches) { dialog.focus(); return; }
-    field.focus();
-    field.setSelectionRange(field.value.length, field.value.length);
-  }, []);
+  // Closing gives focus back to the card it was opened from: the same element when it's still on
+  // the board, or the card where it was redrawn after a move.
+  useModal(ref, {
+    focus: (dialog) => {
+      const field = dialog.querySelector<HTMLTextAreaElement>(".title-input");
+      if (!field || matchMedia("(hover: none) and (pointer: coarse)").matches) { dialog.focus(); return; }
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    },
+    fallback: () => document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(card.id)}"]`),
+  });
 
   // CSS `field-sizing: content` grows the notes to fit. Where it's missing (Firefox), size it by hand;
   // min-height and max-height in the stylesheet still clamp the result.
@@ -124,7 +130,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
 
   return (
     <dialog
-      ref={ref} className="card-dialog" aria-label="Edit card" tabIndex={-1}
+      ref={ref} className="card-dialog" {...MODAL} aria-label={`Edit card: ${title.trim() || "no title"}`} tabIndex={-1}
       {...guard.dialogProps}
       // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !edited()) onClose(); }}
@@ -136,6 +142,8 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
         <CardSession cardId={card.id} />
+        {/* Save and close first, like answering a question: the link leaves the board. */}
+        <NoAgentLine card={card} before={save} />
         {lanes.length > 1 && (
           <div className="move-row" role="group" aria-label="Move to lane">
             <span className="move-label">Move to</span>
@@ -203,7 +211,9 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
           </label>
         </div>
         <TagField value={tags} onChange={setTags} known={knownTags} onEnter={save} />
-        <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+        {filesNote ? <NoFiles note={filesNote} /> : (
+          <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+        )}
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </div>

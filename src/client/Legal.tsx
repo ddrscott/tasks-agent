@@ -1,16 +1,18 @@
 import { BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 
 // Privacy policy and terms at /tasks/privacy and /tasks/terms. Public (no sign-in),
 // because Google and Microsoft link to them from their sign-in screens. Keep them
 // in step with what the app actually stores; README → // PRIVACY_AND_TERMS.
 
-const UPDATED = "September 29, 2026";
+const UPDATED = "October 4, 2026";
 const CONTACT = "hey@askscottpierce.com";
 
 export type LegalPage = "privacy" | "terms";
 
 export function Legal({ page, onBack }: { page: LegalPage; onBack(): void }) {
+  useTitle(page === "privacy" ? "Privacy" : "Terms");
   return (
     <div className="connect">
       <header className="topbar">
@@ -43,12 +45,12 @@ function Privacy() {
         <h3 className="subhead">What we store</h3>
         <ul>
           <li><b>Your email address</b>, to sign you in and to tell your board apart from everyone else's. If you sign in with Google or Microsoft, we receive your verified email from them and keep only that.</li>
-          <li><b>Your board</b>: lanes, cards, notes, and due dates, plus the last 30 changes so you can undo them, and a search index of your card titles and notes.</li>
+          <li><b>Your board</b>: lanes, cards, notes, tags, and due dates, plus the last 30 changes so you can undo them. Questions an agent asks on a card, and your answers, are kept on the card. We also keep a search index of your card titles and notes, and the time an agent first connected to the board, so it can stop telling you none has.</li>
           <li><b>Files you attach</b> to cards, up to 250 MB per account. When you remove a file or delete its card, we delete the file once undo can no longer bring it back, usually within a day or two and at most a few weeks later.</li>
           <li><b>Your assistant chat</b>: up to the last 120 messages, and a daily count of how many you've sent.</li>
-          <li><b>Sign-in records</b>: one-time sign-in codes (kept 10 minutes) and sessions (30 days). We store only scrambled versions (hashes) of these, not the codes themselves.</li>
-          <li><b>Connected agents</b>: access tokens you create and apps you allow to reach your board. Tokens are stored only as hashes.</li>
-          <li><b>Claude Code sessions</b>, only if you install the reporting hook: for each running session, its id, the folder it runs in, the machine's name, whether it's working, idle, or waiting on you, and one line about its last action (a tool and file name, or Claude's notification text). Never prompts, tool output, commands, or transcripts. Each session overwrites its own record, and records are deleted when the session ends or after 24 hours. An encrypted board keeps none.</li>
+          <li><b>Sign-in records</b>: one-time sign-in codes (kept 10 minutes) and sessions (30 days). We store only scrambled versions (hashes) of these, not the codes themselves. To stop code guessing, we also count sign-in code tries by email address and by IP address, and clear those counts after a day.</li>
+          <li><b>Connected agents</b>: access tokens you create, including the one made each time you press Copy the command in the quick start, and apps you allow to reach your board. Tokens are stored only as hashes, with a name, when each was made, and when it was last used. They stay until you revoke them on the Connect page, except a quick start token that was never used, which is removed when you copy the command again.</li>
+          <li><b>Agent sessions and claims</b>. When an agent claims a card, or asks you a question on one and says which session is asking, we keep one record for that session: its id, and what the agent tells us about itself (what kind of agent it is, the machine's name, and the name of the folder it's working in), whether it's working or idle, when it started and when we last heard from it, and one line about its last action, which names the card, like <code>claimed "Fix the login bug"</code>. We also keep which session holds which card and since when. While a question that session asked on the card is open, we keep a copy of the question with that, so the board can say which session is waiting on you. The copy is removed when you answer or the question is taken back. This happens for any agent you connect, with nothing else installed. If you also install the Claude Code reporting hooks, the record adds the folder's path, whether the session is stopped at a prompt in its terminal, and a link back to the session if you set one (the optional <code>X-Tasks-Link</code> header), and the last-action line becomes a tool and file name, a short description of a shell command (never the command itself), or Claude's notification text. Never prompts, tool output, commands, or transcripts. Each session overwrites its own record. Records are deleted when the session ends or 24 hours after they last changed, and a claim ends when its card is done or deleted, or 15 minutes after its session was last heard from. An encrypted board keeps none.</li>
           <li><b>Subscription status</b>, if you upgrade: your Stripe customer ID and whether the subscription is active. We never see or store your card details.</li>
           <li><b>Your theme</b>, and a few display preferences kept in your own browser.</li>
         </ul>
@@ -56,8 +58,8 @@ function Privacy() {
 
       <section>
         <h3 className="subhead">End-to-end encryption</h3>
-        <p>If you turn on encryption with a passphrase (user menu → Encrypt with a passphrase), your browser encrypts your lane names, cards, notes, due dates, attached files and their names, and assistant messages before they're sent. We store only the encrypted form and can't read it, and neither can Cloudflare, the cloud assistant, or connected agents. Your passphrase never leaves your browser, so we can't recover a board if you forget it.</p>
-        <p>What stays readable to us on an encrypted board: your email, how many lanes, cards, and files you have and their sizes, when things were created or changed, your theme, and the sign-in, subscription, and usage records above. Turning encryption on erases the plain-text board, undo history, chat, and search index from the live database, but copies of what you stored <i>before</i> turning it on can remain in Cloudflare's storage backups for up to 30 days.</p>
+        <p>If you turn on encryption with a passphrase (user menu → Encrypt with a passphrase), your browser encrypts your lane names, cards, notes, tags, due dates, attached files and their names, and assistant messages before they're sent. We store only the encrypted form and can't read it, and neither can Cloudflare, the cloud assistant, or connected agents. Your passphrase never leaves your browser, so we can't recover a board if you forget it.</p>
+        <p>What stays readable to us on an encrypted board: your email, how many lanes, cards, and files you have and their sizes, when things were created or changed, your theme, and the sign-in, subscription, and usage records above. Turning encryption on erases the plain-text board, undo history, chat, search index, and agent session records from the live database, but copies of what you stored <i>before</i> turning it on can remain in Cloudflare's storage backups for up to 30 days.</p>
       </section>
 
       <section>

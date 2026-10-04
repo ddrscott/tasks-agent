@@ -4,9 +4,10 @@
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
 import { useEffect, useRef, useState } from "react";
-import { cleanTag, type Lane } from "../shared";
-import { formatBytes, uploadFile } from "./Attachments";
+import { cleanTag, splitTitleTags, type Lane } from "../shared";
+import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
+import { MODAL, useModal } from "./modal";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
@@ -22,12 +23,14 @@ type Props = {
   knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload. */
   vault: Vault | null;
+  /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
+  filesNote?: string;
   /** Adds the card and resolves to its id. */
   onAdd(input: NewCardInput): Promise<string>;
   onClose(): void;
 };
 
-export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -42,14 +45,13 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
   const [addedId, setAddedId] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
+  // showModal() would put focus on the X. The title is where typing starts.
+  useModal(ref, { focus: (dialog) => dialog.querySelector<HTMLTextAreaElement>(".title-input")?.focus() });
 
   // Dropping files on the dialog or pasting a screenshot queues them, the same as in the card editor.
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || filesNote) return;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
     const onOver = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setOver(true); } };
     const onLeave = (e: DragEvent) => { if (!el.contains(e.relatedTarget as Node | null)) setOver(false); };
@@ -73,12 +75,26 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
       el.removeEventListener("drop", onDrop);
       el.removeEventListener("paste", onPaste);
     };
-  }, []);
+  }, [filesNote]);
 
   const dirty = !!(title.trim() || notes.trim() || due || tags.trim() || files.length);
   // The X and Esc ask before throwing away what was typed or queued. Once the card is added
   // there's nothing left to lose but a retry, so they just close.
   const guard = useDiscardGuard(() => dirty && !addedId, onClose);
+
+  // "Write a haiku #agent" in the title: the #agent moves down into the Tags field, where it can be
+  // seen and taken back out. It happens on leaving the title, and again on Add card in case Enter
+  // was hit straight from the title.
+  function moveTitleTags() {
+    const have = [...new Set(tags.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
+    const split = splitTitleTags(title, have);
+    if (split.title !== title) {
+      setTitle(split.title);
+      const fresh = split.tags.slice(have.length);
+      if (fresh.length) setTags(`${tags.trim() ? `${tags.trimEnd()} ` : ""}${fresh.join(" ")} `);
+    }
+    return split;
+  }
 
   async function add() {
     if ((!title.trim() && !addedId) || busy) return;
@@ -87,10 +103,11 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
     let id = addedId;
     try {
       if (!id) {
+        const split = moveTitleTags();
         id = await onAdd({
           laneId: lanes.some((l) => l.id === lane) ? lane : laneId,
-          title, notes, due: due || null,
-          tags: [...new Set(tags.split(/[\s,]+/).map(cleanTag).filter(Boolean))],
+          title: split.title, notes, due: due || null,
+          tags: split.tags,
         });
         setAddedId(id);
       }
@@ -115,7 +132,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
 
   return (
     <dialog
-      ref={ref} className="card-dialog" aria-label="New card"
+      ref={ref} className="card-dialog" {...MODAL} aria-label="New card"
       {...guard.dialogProps}
       // A stray click outside shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}
@@ -125,7 +142,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
           <h2 className="h">NEW_CARD</h2>
           <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={guard.requestClose}><IconClose /></button>
         </div>
-        <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} placeholder="What needs doing?" autoFocus />
+        <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} onBlur={() => { if (!busy && !addedId) moveTitleTags(); }} placeholder="What needs doing?" autoFocus />
         <label>
           Notes
           <textarea
@@ -148,6 +165,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
         </div>
         <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} />
         {error && <div className="dialog-error" role="alert">{error}</div>}
+        {filesNote ? <NoFiles note={filesNote} /> : (
         <div className={`attachments${over ? " over" : ""}`}>
           <div className="attachments-head">
             <span>Attachments</span>
@@ -170,6 +188,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
             </ul>
           )}
         </div>
+        )}
       </div>
       {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">

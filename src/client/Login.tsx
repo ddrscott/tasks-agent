@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./base";
+import { PAGE_META, pageAt } from "../routes";
+import { api, BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
+import { Landing } from "./Landing";
 
 async function post(path: string, body: unknown) {
   const r = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -39,6 +42,9 @@ function loadTurnstile(): Promise<void> {
 const safeNext = (raw: string | null) => (raw && raw.startsWith("/tasks/") && !raw.startsWith("//") && !/[\\\s]/.test(raw) ? raw : null);
 
 export function Login({ onSignedIn }: { onSignedIn: () => void }) {
+  // The front page keeps the full default title. At /tasks/pricing it's the pricing page, signed
+  // out too, which is what the served HTML says (PAGE_META in src/routes.ts).
+  useTitle(pageAt(location.pathname, BASE) === "pricing" ? PAGE_META.pricing.name : undefined);
   // Where to go after signing in, e.g. back to an agent's OAuth consent screen.
   const [next] = useState(() => safeNext(new URLSearchParams(location.search).get("next")));
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -57,6 +63,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const codeRef = useRef<HTMLInputElement>(null);
+  // Focusing a field scrolls to it. On the landing page at phone width the form sits below the
+  // pitch and the picture, and /tasks/pricing is headed for another section, so leave it alone there.
+  const [focusEmail] = useState(() => !!next || (matchMedia("(min-width: 901px)").matches && pageAt(location.pathname, BASE) !== "pricing"));
 
   // The email link lands here as /?email=…&code=…; finish signing in automatically.
   // Google and Microsoft sign-in land here with ?login_error=… when they fail.
@@ -158,26 +167,16 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     if (digits.length === 6) void verify(email, digits);
   }
 
-  return (
-    <main className="login">
-      <div className="login-stack">
-      <div className="login-card">
-        <h1 className="wordmark">tasks<span>.</span></h1>
+  // Coming back from somewhere (an agent's OAuth consent screen), the page is just the form.
+  // Everyone else gets the landing page, with this same form in it.
+  const card = (
+      <div className="login-card" id="sign-in">
+        {next ? <h1 className="wordmark">tasks<span>.</span></h1> : <h2 className="h">SIGN_IN</h2>}
         {step === "email" ? (
           <>
-            {next?.startsWith("/tasks/oauth/") ? (
-              <p>Sign in to connect an agent to your Tasks.</p>
-            ) : (
-              <>
-                <p className="login-lede">A task board your AI agents work from.</p>
-                <ol className="login-proofs">
-                  <li>Agents read and change the board over MCP: Claude, ChatGPT, Claude Code, Cursor, and the rest.</li>
-                  <li>When an agent needs a decision, it asks on the card. You answer with one tap.</li>
-                  <li>You see what each Claude Code session is doing: working, waiting on you, or idle.</li>
-                </ol>
-                <p>Sign in with your email. There's no password to remember.</p>
-              </>
-            )}
+            {next?.startsWith("/tasks/oauth/")
+              ? <p>Sign in to connect an agent to your Tasks.</p>
+              : <p>{providers.length > 0 ? "Use an account you already have, or get a code by email." : "We email you a code."} There's no password to remember.</p>}
             {providers.length > 0 && (
               <>
                 <div className="sso">
@@ -193,7 +192,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
             <form onSubmit={send}>
               <label className="sr-only" htmlFor="email">Email</label>
               <input
-                id="email" className="field" type="email" required autoFocus autoComplete="email"
+                id="email" className="field" type="email" required autoFocus={focusEmail} autoComplete="email"
                 placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)}
               />
               <button className="btn primary" disabled={busy || !email || needsHuman}>
@@ -228,40 +227,13 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         {/* Stays mounted across both steps so "Resend code" gets a fresh token too. */}
         {turnstile && <div ref={tsBox} className="turnstile-box" />}
       </div>
-      {step === "email" && !next && <Security />}
-      </div>
+  );
+  if (!next) return <Landing signIn={card} />;
+  return (
+    <main className="login">
+      <div className="login-stack">{card}</div>
       <Footer />
     </main>
-  );
-}
-
-/**
- * What the sign-in page promises about security. It sits under the agent pitch, so it says
- * plainly that encryption and outside agents don't go together instead of selling "no outside
- * agent" as a feature. Keep it true: README → // END_TO_END_ENCRYPTION.
- */
-function Security() {
-  return (
-    <section className="login-security" aria-labelledby="security-h">
-      <h2 className="h" id="security-h">SECURITY</h2>
-      <ol>
-        <li><div>
-          <b>No passwords to leak.</b> Sign in with an emailed code, Google, or Microsoft. We keep only
-          hashes of codes and sessions.
-        </div></li>
-        <li><div>
-          <b>End-to-end encryption, if you want it.</b> Set a passphrase and the board is encrypted in
-          your browser: cards, notes, dates, files, chat. We store only ciphertext, in an open format
-          (JWE) that any JOSE library can read without Tasks.
-        </div></li>
-        <li><div>
-          <b>The trade-off.</b> An encrypted board is closed to outside agents and the cloud model,
-          because the server can't read it. A small model in your tab is the only assistant there.
-          You can turn encryption on or off later.
-        </div></li>
-      </ol>
-      <p className="sorry"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
-    </section>
   );
 }
 

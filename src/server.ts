@@ -2,23 +2,83 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { getAgentByName } from "agents";
 import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
-import { handleBilling } from "./billing";
+import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
+import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
 import { reportFrom } from "./presence";
+import { buildSetup } from "./setup";
 import { handleSso } from "./sso";
 import { handleTokens, tokenUser } from "./tokens";
+// The installer and the two scripts it puts on a machine, as text (// SESSIONS).
+import eventsScript from "../scripts/tasks-events.mjs?raw";
+import presenceScript from "../scripts/tasks-presence.mjs?raw";
+import setupScript from "../scripts/tasks-setup.mjs?raw";
 
 export { TodoAgent } from "./agent";
 export { TaskEvents } from "./events";
 export { Presence } from "./presence";
 
-// Everything lives under this path on askscottpierce.com. Static files are built
-// into dist/client/tasks/assets (see vite.config.ts), so only the API, the agent
-// connection, OAuth, and the MCP endpoint reach this Worker; run_worker_first in
-// wrangler.jsonc lists them.
+// Everything lives under this path on askscottpierce.com. The Worker answers all of it except
+// the hashed build output in /tasks/assets and the Needle model files, which the asset layer
+// serves on its own (run_worker_first in wrangler.jsonc). That's what lets an address that
+// isn't a page get a real 404.
 const BASE = "/tasks";
+
+/**
+ * The app's HTML. Every page is the same document, and the client draws the one the address
+ * names. `status` is 404 for an address that names nothing, so crawlers and link checkers hear
+ * the truth while a person still gets the not-found page with its links.
+ *
+ * The head is written per page on the way out (PAGE_META in src/routes.ts): link-preview
+ * fetchers don't run JavaScript, so the title a shared link shows has to be in this HTML.
+ */
+async function shell(req: Request, env: Env, page: Page | null): Promise<Response> {
+  // A bare request: a 404 must never come back as "304 Not Modified" from a conditional header.
+  const html = await env.ASSETS.fetch(new Request(new URL("/", req.url), { method: req.method === "HEAD" ? "HEAD" : "GET" }));
+  if (!html.ok) return html;
+  const headers = new Headers(html.headers);
+  // The same file is a different document at each address now, so its ETag and length no longer describe it.
+  headers.delete("ETag");
+  headers.delete("Content-Length");
+  if (page === null) headers.set("Cache-Control", "no-store");
+  const status = page === null ? 404 : 200;
+  if (!html.body) return new Response(null, { status, headers });
+  return new Response(withHead(html, pageHead(page)).body, { status, headers });
+}
+
+/**
+ * Write one page's head into index.html: <title>, the description, canonical, and the og: and
+ * twitter: copies of each. index.html holds the front page's own tags, so `/tasks/` only gets
+ * its title set (from the same constant the client uses). Every other page also loses the
+ * JSON-LD block, which describes the product on the front page and nowhere else. An address
+ * that names nothing gets `noindex` and no canonical or og:url: there's no page to point at.
+ */
+function withHead(html: Response, head: PageHead): Response {
+  const content = (value: string | null) => ({
+    element(el: Element) {
+      if (value === null) el.remove(); else el.setAttribute("content", value);
+    },
+  });
+  let rw = new HTMLRewriter()
+    .on("title", { element(el) { el.setInnerContent(head.title); } })
+    .on('meta[property="og:title"]', content(head.title))
+    .on('meta[name="twitter:title"]', content(head.title));
+  if (head.landing) return rw.transform(html);
+  rw = rw
+    .on('link[rel="canonical"]', { element(el) { if (head.url) el.setAttribute("href", head.url); else el.remove(); } })
+    .on('meta[property="og:url"]', content(head.url))
+    .on('script[type="application/ld+json"]', { element(el) { el.remove(); } });
+  if (head.description !== null) {
+    rw = rw
+      .on('meta[name="description"]', content(head.description))
+      .on('meta[property="og:description"]', content(head.description))
+      .on('meta[name="twitter:description"]', content(head.description));
+  }
+  if (!head.index) rw = rw.on('meta[name="robots"]', content("noindex"));
+  return rw.transform(html);
+}
 
 /**
  * A browser request sent from another origin. The session cookie is SameSite=Lax, which
@@ -43,7 +103,7 @@ const NO_ORIGIN_CHECK = new Set(["/api/stripe/webhook"]);
 const app: ExportedHandler<Env> = {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
-    if (!path.startsWith(`${BASE}/`)) return new Response("Not found", { status: 404 });
+    if (path !== BASE && !path.startsWith(`${BASE}/`)) return new Response("Not found", { status: 404 });
     const sub = path.slice(BASE.length);
 
     if (sub.startsWith("/api/")) {
@@ -54,7 +114,7 @@ const app: ExportedHandler<Env> = {
       if (sub === "/api/presence" && req.method === "POST") return handlePresenceReport(req, env);
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
-        ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
+        ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 
@@ -88,7 +148,19 @@ const app: ExportedHandler<Env> = {
       return env.Presence.get(env.Presence.idFromName(user.id)).fetch(new Request(req.url, { headers }));
     }
 
-    return env.ASSETS.fetch(req);
+    // The one-command Sessions setup: `curl … /tasks/setup.mjs | TASKS_TOKEN=… node --input-type=module -`.
+    // Public and the same for everyone. The token travels in the caller's environment, never in this URL.
+    if (sub === "/setup.mjs") {
+      const body = buildSetup(setupScript, { "tasks-presence.mjs": presenceScript, "tasks-events.mjs": eventsScript }, new URL(req.url).origin);
+      return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+    }
+
+    // A page (src/routes.ts lists them) gets the app. Anything else is a file in public/tasks,
+    // like og.png, or it's nothing, and nothing is a 404 that still draws the not-found page.
+    const page = pageAt(path, BASE);
+    if (page) return shell(req, env, page);
+    const file = await env.ASSETS.fetch(req);
+    return file.status === 404 ? shell(req, env, null) : file;
   },
 };
 

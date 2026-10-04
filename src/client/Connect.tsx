@@ -1,19 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GrantInfo } from "../oauth";
 import type { TokenInfo } from "../tokens";
 import { TOOL_LIST } from "../tool-docs";
+import { feedCommand, fullPrompt, STARTER_LINE } from "../agent-rules";
 // The two scripts a machine needs, as text, so the page can hand them out. Someone using the
 // hosted app has no checkout to copy them from, and this way they're always the build's own.
 import eventsScript from "../../scripts/tasks-events.mjs?raw";
 import presenceScript from "../../scripts/tasks-presence.mjs?raw";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 import { IconCheck, IconTrash } from "./icons";
 
-// Everything about working the board with outside agents, at /tasks/connect: how to connect
-// one over MCP, the apps already connected with OAuth, personal access tokens for clients
-// that take a pasted token, the hooks that feed // SESSIONS, and how the #agent tag,
-// questions, claims, and the event feed fit together.
+// Everything about working the board with outside agents, at /tasks/connect: the four-step
+// quick start for Claude Code (QuickStart, which the empty board shows too), how to connect
+// any other client over MCP, the prompt that starts it on the board, the apps already connected with OAuth,
+// personal access tokens for clients that take a pasted token, the one command that sets up
+// the hooks behind // SESSIONS, and how the #agent tag, questions, claims, and the event feed
+// fit together.
+//
+// The page is public. Signed out, everything that explains is there; the parts that read or
+// change an account (connected apps, tokens) become a "Sign in to create a token" link.
 
 const PLACEHOLDER = "<YOUR_TOKEN>";
 
@@ -31,6 +38,48 @@ type Client = {
 const needsToken = (c: Client) => !!c.code && c.code("", PLACEHOLDER).includes(PLACEHOLDER);
 
 const CLIENTS: Client[] = [
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    steps: [
+      <>The <a href="#quick">quick start</a> above does all of this in one command, with a token. This is the OAuth way, which leaves no token on disk. Run this once in a terminal:</>,
+      <>Start Claude Code, run <code>/mcp</code>, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser opens here; sign in and <b>Allow</b>.</>,
+      <>Add <code>#agent</code> to a card's title, or use its Tags field, and paste in the <a href="#prompt">starter prompt</a> below. To see this machine's sessions on the board, run the one command under <a href="#sessions">Sessions</a>.</>,
+    ],
+    code: (url) => claudeMcpAdd(url),
+    lang: "sh",
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    steps: [
+      <>Add this to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project).</>,
+      <>Under <b>Settings → MCP</b>, click <b>Connect</b> next to <b>tasks</b>, then sign in here and <b>Allow</b>.</>,
+      <>Add <code>#agent</code> to a card's title and paste the <a href="#prompt">starter prompt</a> into Cursor's agent.</>,
+    ],
+    code: (url) => JSON.stringify({ mcpServers: { tasks: { url } } }, null, 2),
+    lang: "json",
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    steps: [
+      <>Create an access token below, then run this in a terminal. It puts the token in <code>TASKS_TOKEN</code> for this shell, adds the board to <code>~/.codex/config.toml</code>, and starts Codex with the starter prompt.</>,
+      <>Codex reads the token from the environment each time it starts, so add the <code>export</code> to <code>~/.zshrc</code> or similar to keep it working in new terminals.</>,
+    ],
+    code: (url, token) => codexQuickCommand(url, token),
+    lang: "sh",
+  },
+  {
+    id: "vscode",
+    name: "VS Code",
+    steps: [
+      <>Add this to <code>.vscode/mcp.json</code>, or run <b>MCP: Open User Configuration</b> to use it in every workspace.</>,
+      <>Start the server when VS Code asks, then sign in here and <b>Allow</b>. The tools appear in Copilot's agent mode.</>,
+    ],
+    code: (url) => JSON.stringify({ servers: { tasks: { type: "http", url } } }, null, 2),
+    lang: "json",
+  },
   {
     id: "claude",
     name: "Claude",
@@ -61,45 +110,6 @@ const CLIENTS: Client[] = [
     ],
   },
   {
-    id: "claude-code",
-    name: "Claude Code",
-    steps: [
-      <>Run this once in a terminal:</>,
-      <>Start Claude Code, run <code>/mcp</code>, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser opens here; sign in and <b>Allow</b>.</>,
-      <>Prefer a token? Add <code>--header "Authorization: Bearer &lt;token&gt;"</code> to the command in step 1 and skip step 2.</>,
-      <>To see this machine's sessions on the board, add the hooks under <a href="#sessions">Sessions</a> below.</>,
-    ],
-    code: (url) => `claude mcp add --transport http tasks ${url}`,
-    lang: "sh",
-  },
-  {
-    id: "cursor",
-    name: "Cursor",
-    steps: [
-      <>Add this to <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code> in a project).</>,
-      <>Under <b>Settings → MCP</b>, click <b>Connect</b> next to <b>tasks</b>, then sign in here and <b>Allow</b>.</>,
-    ],
-    code: (url) => JSON.stringify({ mcpServers: { tasks: { url } } }, null, 2),
-    lang: "json",
-  },
-  {
-    id: "vscode",
-    name: "VS Code",
-    steps: [
-      <>Add this to <code>.vscode/mcp.json</code>, or run <b>MCP: Open User Configuration</b> to use it in every workspace.</>,
-      <>Start the server when VS Code asks, then sign in here and <b>Allow</b>. The tools appear in Copilot's agent mode.</>,
-    ],
-    code: (url) => JSON.stringify({ servers: { tasks: { type: "http", url } } }, null, 2),
-    lang: "json",
-  },
-  {
-    id: "codex",
-    name: "Codex",
-    steps: [<>Add this to <code>~/.codex/config.toml</code>, create an access token below, and export it in your shell as <code>TASKS_TOKEN</code>.</>],
-    code: (url, token) => `[mcp_servers.tasks]\nurl = "${url}"\nbearer_token_env_var = "TASKS_TOKEN"\n\n# in ~/.zshrc or similar:\n# export TASKS_TOKEN="${token}"`,
-    lang: "toml",
-  },
-  {
     id: "other",
     name: "Anything else",
     steps: [
@@ -118,6 +128,9 @@ const HOME = "~/.config/tasks";
 const HOSTED = "https://askscottpierce.com";
 const elsewhere = (name: string, url: string) => (location.origin === HOSTED ? "" : `${name}=${url} `);
 
+// One argument for a POSIX shell. Single quotes keep `$`, `!`, and backticks from meaning anything.
+const shq = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
+
 const saveToken = (token: string) => `mkdir -p ${HOME} && echo '${token}' > ${HOME}/token && chmod 600 ${HOME}/token`;
 
 // The hooks for ~/.claude/settings.json. The two events that fire constantly run in the
@@ -134,8 +147,20 @@ function hooksJson(): string {
   return `{\n  "hooks": {\n${lines.join(",\n")}\n  }\n}`;
 }
 
-const eventsCommand = () =>
-  `${elsewhere("TASKS_URL", `${location.origin.replace(/^http/, "ws")}${BASE}/events`)}node ${HOME}/tasks-events.mjs`;
+const eventsCommand = () => feedCommand(location.origin, BASE);
+
+// The one-command Sessions setup. The Worker serves scripts/tasks-setup.mjs at /tasks/setup.mjs
+// with the two scripts inside it; the token rides in the environment, never in the URL.
+const setupUrl = () => `${location.origin}${BASE}/setup.mjs`;
+const setupCommand = (token: string) => `curl -fsSL ${setupUrl()} \\\n  | TASKS_TOKEN='${token}' \\\n    node --input-type=module -`;
+
+// What to paste into a freshly connected agent. The rules themselves are in agent-rules.ts and
+// the server hands them out through get_started, so the short prompt only has to say "call it".
+// The full text is the same rules, for reading and for a client that should have them up front.
+const PROMPTS = [
+  { id: "short", name: "One line" },
+  { id: "full", name: "The full rules" },
+] as const;
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(api(path), { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
@@ -153,7 +178,175 @@ function ago(ms: number | null): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+/** The one-line Claude Code setup. The signed-out landing page shows the same command. */
+export const claudeMcpAdd = (url: string) => `claude mcp add --transport http tasks ${url}`;
+
+/**
+ * The quick start's one command: connect Claude Code with a token and start it on the board.
+ * Flags checked against `claude mcp add --help`, `claude mcp remove --help`, and `claude --help` (2.1).
+ * - `claude mcp add` refuses a name that's already there, so the entry for this folder is removed
+ *   first. That fails quietly when there isn't one. The new entry is local scope, which wins over
+ *   a `tasks` in user or project scope.
+ * - The prompt goes before --allowedTools, which takes a list and would swallow it.
+ * - Everything is single-quoted and the prompt is one plain line, so nothing is left for the shell to expand.
+ */
+export const quickStartCommand = (url: string, token: string) =>
+  `claude mcp remove tasks -s local >/dev/null 2>&1; ${claudeMcpAdd(url)} --header ${shq(`Authorization: Bearer ${token}`)} && claude ${shq(STARTER_LINE)} --allowedTools mcp__tasks`;
+
+/** The same shape for Codex (`codex mcp add --help`, 0.150): it reads the token from the environment, and adding again replaces the entry. */
+export const codexQuickCommand = (url: string, token: string) =>
+  `export TASKS_TOKEN=${shq(token)} && codex mcp add tasks --url ${url} --bearer-token-env-var TASKS_TOKEN && codex ${shq(STARTER_LINE)}`;
+
+export const QUICK_TOKEN_NAME = "Claude Code quick start";
+/** Set by the Connect page's "Add a sample agent card", read by the board (FirstRun.tsx) when it opens. */
+export const SAMPLE_INTENT = "tasks-add-sample";
+
+/**
+ * Copy text that isn't known yet. Safari only lets a page write to the clipboard during the
+ * click, so the clipboard is handed a promise there and then; other browsers get writeText once
+ * the text is in. False means neither worked and the text has to be copied from the page.
+ */
+async function copyLater(text: Promise<string>): Promise<boolean> {
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })]);
+      return true;
+    }
+  } catch { /* try the plain way */ }
+  try {
+    await navigator.clipboard.writeText(await text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A quick start token nobody ever used is a command that was copied and never run. Clear those out so they don't eat the 10. */
+async function mintQuickToken(): Promise<{ token: string; info: TokenInfo; dropped: string[] }> {
+  const dropped: string[] = [];
+  const { tokens } = await call<{ tokens: TokenInfo[] }>("/api/tokens");
+  for (const t of tokens) {
+    if (t.name !== QUICK_TOKEN_NAME || t.lastUsedAt) continue;
+    await call(`/api/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+    dropped.push(t.id);
+  }
+  const r = await call<{ token: string; info: TokenInfo }>("/api/tokens", { method: "POST", body: JSON.stringify({ name: QUICK_TOKEN_NAME }) });
+  return { ...r, dropped };
+}
+
+type Quick = { command: string; copied: boolean } | null;
+
+/**
+ * // QUICK_START: sign in, add a sample card, copy one command, paste it. The empty board shows
+ * it (FirstRun.tsx) and so does the top of the Connect page. `sample` is how step 2 is done from
+ * where this is drawn: the board adds the card, the Connect page goes to the board to add it.
+ */
+export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, onCopied, lede }: {
+  signedIn: boolean;
+  hasSample: boolean;
+  onAddSample(): void;
+  /** The Connect page lists tokens, so it's told about the new one and the unused ones it replaced. */
+  onMinted?(info: TokenInfo, dropped: string[]): void;
+  /** On the board: open the Connect page without leaving the app. */
+  onConnect?(): void;
+  /** Told each time the command lands on the clipboard, so the board can fold the steps away. */
+  onCopied?(): void;
+  lede: string;
+}) {
+  const [quick, setQuick] = useState<Quick>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = `${location.origin}${BASE}/mcp`;
+  // On a phone the block scrolls inside the board, so the command is brought into view when it appears.
+  const shown = useRef<HTMLDivElement>(null);
+  const made = !!quick;
+  useEffect(() => { if (made) shown.current?.scrollIntoView({ block: "nearest" }); }, [made]);
+
+  async function copy() {
+    setError(null);
+    if (quick) {
+      const copied = await copyLater(Promise.resolve(quick.command));
+      setQuick({ ...quick, copied });
+      if (copied) onCopied?.();
+      return;
+    }
+    setBusy(true);
+    const minted = mintQuickToken();
+    const command = minted.then((r) => quickStartCommand(url, r.token));
+    const copied = await copyLater(command);
+    try {
+      const r = await minted;
+      setQuick({ command: await command, copied });
+      onMinted?.(r.info, r.dropped);
+      if (copied) onCopied?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const connectLink = (hash: string, text: string) => (
+    <a href={`${BASE}/connect${hash}`} onClick={onConnect && ((e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); onConnect(); })}>{text}</a>
+  );
+
+  return (
+    <>
+      <p className="first-run-lede">{lede}</p>
+      <ol className="quick-steps">
+        <li className={signedIn ? "done" : undefined}>
+          <b>Sign in</b>
+          {signedIn
+            ? <span>Done. You're signed in.</span>
+            : <><span>Your email and a code. No password.</span><a className="btn primary" href={signInHref("#quick")}>Sign in</a></>}
+        </li>
+        <li className={hasSample ? "done" : undefined}>
+          <b>Add a sample agent card</b>
+          <span>A real card tagged <code>#agent</code>. The agent reads the folder you start it in, asks which small improvement to plan, and writes that plan on the card. It changes no files.</span>
+          <button className={`btn${signedIn && !hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || hasSample} onClick={onAddSample}>
+            {hasSample ? <><IconCheck />Added</> : "Add a sample agent card"}
+          </button>
+        </li>
+        <li>
+          <b>Copy the command</b>
+          <span>One line for Claude Code. It connects this board with a new access token and starts Claude on your <code>#agent</code> cards, with the board's tools approved ahead of time.</span>
+          <button className={`btn${hasSample ? " primary" : ""}`} type="button" disabled={!signedIn || busy} onClick={() => void copy()}>
+            {busy ? "Making it…" : quick?.copied ? <><IconCheck />Copied. Copy again</> : "Copy the command"}
+          </button>
+        </li>
+        <li>
+          <b>Paste it in a terminal</b>
+          <span>In any folder. If Claude Code asks whether you trust it, pick Yes (Enter alone exits), then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
+        </li>
+      </ol>
+      {error && (
+        <div className="login-error" role="alert">
+          {error} {/tokens/.test(error) && connectLink("#apps", "See your tokens")}
+        </div>
+      )}
+      {quick && (
+        <div className="quick-cmd" role="status" ref={shown}>
+          <Snippet lang="sh" code={quick.command} live wrap />
+          <p>
+            {quick.copied ? "Copied. " : "Your browser kept the clipboard to itself, so copy it from here. "}
+            This is the only time this token is shown. It can read and change everything on your board.
+          </p>
+        </div>
+      )}
+      <p className="first-run-foot">
+        <b>What the command does:</b> it adds an MCP server named <code>tasks</code>, with a new access
+        token, to Claude Code's config for the folder you run it in (replacing one of that name). Then
+        it starts Claude with a one-line prompt, allowed to use the board's tools without asking each
+        time. That includes deleting cards and lanes; Undo on the board takes back anything an agent
+        does. The command doesn't approve writing files or running commands: for anything that changes
+        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command. It's on the command line, so your shell history keeps it too; revoke it any time under {connectLink("#apps", "Connected apps")}.
+        OAuth is the other way, with no token on disk: {connectLink("#add", "the full steps")}, with Cursor and Codex too.
+      </p>
+    </>
+  );
+}
+
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -165,17 +358,21 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
   );
 }
 
-function Snippet({ lang, code }: { lang: string; code: string }) {
+/** `live` marks a command that's ready to run as it stands: an orange `$` in front. `wrap` is for prose, like a prompt. */
+function Snippet({ lang, code, live, wrap }: { lang: string; code: string; live?: boolean; wrap?: boolean }) {
   return (
     <div className="snippet">
       <div className="snippet-head">
         <span className="mono">{lang}</span>
         <CopyButton text={code} />
       </div>
-      <pre>{code}</pre>
+      <pre className={[live && "live", wrap && "wrap"].filter(Boolean).join(" ") || undefined}>{code}</pre>
     </div>
   );
 }
+
+/** Where a signed-out visitor goes to sign in; they come back to this section afterwards. */
+const signInHref = (hash = "") => `${BASE}/?next=${encodeURIComponent(`${BASE}/connect${hash}`)}`;
 
 /** Saves one of the bundled scripts as a file. The browser puts it in Downloads; the step says where it goes. */
 function DownloadButton({ name, text }: { name: string; text: string }) {
@@ -194,22 +391,25 @@ function DownloadButton({ name, text }: { name: string; text: string }) {
   );
 }
 
-export function Connect({ onBack }: { onBack(): void }) {
+export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): void }) {
+  useTitle("Connect an agent");
   const url = `${location.origin}${BASE}/mcp`;
   const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
   const [name, setName] = useState("");
-  const [fresh, setFresh] = useState<{ token: string; name: string } | null>(null);
+  const [fresh, setFresh] = useState<{ token: string; name: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [client, setClient] = useState(() => {
-    try { return localStorage.getItem("todo-connect-client") ?? "claude"; } catch { return "claude"; }
+    try { return localStorage.getItem("todo-connect-client") ?? "claude-code"; } catch { return "claude-code"; }
   });
   const [grants, setGrants] = useState<GrantInfo[] | null>(null);
+  const [prompt, setPrompt] = useState<(typeof PROMPTS)[number]["id"]>("short");
 
   useEffect(() => {
+    if (!signedIn) return;
     call<{ tokens: TokenInfo[] }>("/api/tokens").then((r) => setTokens(r.tokens)).catch((e: Error) => setError(e.message));
     call<{ grants: GrantInfo[] }>("/api/grants").then((r) => setGrants(r.grants)).catch((e: Error) => setError(e.message));
-  }, []);
+  }, [signedIn]);
 
   // Links like /tasks/connect#sessions land on their section. The page is drawn after the
   // browser looked for the anchor, so it has to be scrolled to here.
@@ -232,15 +432,16 @@ export function Connect({ onBack }: { onBack(): void }) {
     try { localStorage.setItem("todo-connect-client", id); } catch {}
   }
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
+  // `named` is the Sessions section's own button, which doesn't ask for a name.
+  async function create(e: React.FormEvent | null, named = name) {
+    e?.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const r = await call<{ token: string; info: TokenInfo }>("/api/tokens", { method: "POST", body: JSON.stringify({ name }) });
-      setFresh({ token: r.token, name: r.info.name });
+      const r = await call<{ token: string; info: TokenInfo }>("/api/tokens", { method: "POST", body: JSON.stringify({ name: named }) });
+      setFresh({ token: r.token, name: r.info.name, id: r.info.id });
       setTokens((t) => [r.info, ...(t ?? [])]);
-      setName("");
+      if (e) setName("");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -253,7 +454,7 @@ export function Connect({ onBack }: { onBack(): void }) {
     try {
       await call(`/api/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
       setTokens((all) => all?.filter((x) => x.id !== t.id) ?? null);
-      if (fresh?.name === t.name) setFresh(null);
+      if (fresh?.id === t.id) setFresh(null);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -261,30 +462,56 @@ export function Connect({ onBack }: { onBack(): void }) {
 
   const active = CLIENTS.find((c) => c.id === client) ?? CLIENTS[0];
   const token = fresh?.token ?? PLACEHOLDER;
+  const promptText = prompt === "full" ? fullPrompt(location.origin, BASE) : STARTER_LINE;
+
+  // Step 2 of the quick start, from here: the board adds the card when it opens (FirstRun.tsx).
+  function addSample() {
+    try { sessionStorage.setItem(SAMPLE_INTENT, "1"); } catch { /* private window: the board has the button too */ }
+    onBack();
+  }
 
   return (
     <div className="connect">
       <header className="topbar">
         <h1 className="wordmark">tasks<span>.</span></h1>
         <span className="spacer" />
-        <a className="btn" href={`${BASE}/`} onClick={(e) => { e.preventDefault(); onBack(); }}>← Back to board</a>
+        {/* Signed out, back is the front page: someone who came from it or from the demo has a way out besides signing in. */}
+        <a className="btn" href={`${BASE}/`} onClick={(e) => { e.preventDefault(); onBack(); }}>{signedIn ? "← Back to board" : "← Back to Tasks"}</a>
+        {!signedIn && <a className="btn primary" href={signInHref()}>Sign in</a>}
       </header>
 
       <main className="connect-body">
         <section className="connect-intro">
           <h2 className="h">CONNECT_AN_AGENT</h2>
-          <p className="lede">Let Claude, ChatGPT, Glean, and other AI agents work your board.</p>
+          <p className="lede">Put Claude Code, Cursor, or Codex to work on your board.</p>
           <p>
-            Agents connect over <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">MCP</a>. They
-            get the same tools as the built-in assistant, so their changes show up live in this tab
-            and <kbd>⌘Z</kbd> undoes them. Most agents need only the URL: they send you back here to
-            sign in and allow access.
+            Coding agents connect over <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">MCP</a>,
+            and so do Claude, ChatGPT, Glean, and any other MCP client. They get the same tools as the
+            built-in assistant, so their changes show up live on the board and <kbd>⌘Z</kbd> undoes them.
           </p>
-          <p>
-            Once one is connected: <a href="#sessions">see your Claude Code sessions on the board</a>, and
-            read <a href="#working">how the <code>#agent</code> tag, questions, and claims work</a>.
-          </p>
+          {!signedIn && (
+            <p>
+              You're not signed in. Everything here is readable without an account;
+              you'll <a href={signInHref()}>sign in</a> to copy a command or when your agent asks for access.
+            </p>
+          )}
         </section>
+
+        <section className="first-run quick-start" id="quick" aria-labelledby="quick-h">
+          <h2 className="h" id="quick-h">QUICK_START</h2>
+          <QuickStart
+            signedIn={signedIn} hasSample={false} onAddSample={addSample}
+            lede="Claude Code working a card on your board, in four steps."
+            onMinted={(info, dropped) => setTokens((t) => [info, ...(t ?? []).filter((x) => !dropped.includes(x.id))])}
+          />
+        </section>
+
+        <p className="connect-rest">
+          Not on Claude Code, or want OAuth instead of a token? <a href="#add">Add the URL to your agent</a> and
+          paste in the <a href="#prompt">starter prompt</a>. After that, <a href="#sessions">see your Claude Code
+          sessions on the board</a> and read <a href="#working">how the <code>#agent</code> tag, questions,
+          and claims work</a>.
+        </p>
 
         <section className="connect-step">
           <div className="step-num">01</div>
@@ -298,7 +525,7 @@ export function Connect({ onBack }: { onBack(): void }) {
           </div>
         </section>
 
-        <section className="connect-step">
+        <section className="connect-step" id="add">
           <div className="step-num">02</div>
           <div className="step-main">
             <h2 className="h">ADD_IT_TO_YOUR_AGENT</h2>
@@ -322,10 +549,57 @@ export function Connect({ onBack }: { onBack(): void }) {
           </div>
         </section>
 
-        <section className="connect-step">
+        <section className="connect-step" id="prompt">
           <div className="step-num">03</div>
           <div className="step-main">
+            <h2 className="h">START_IT_WITH_THIS_PROMPT</h2>
+            <p>
+              Add <code>#agent</code> to the title of a card you want done, or use its Tags field, then
+              paste this into the agent you just connected. The one line has the agent
+              call <code>get_started</code>, and the server answers with the working rules: which cards
+              are its own, to claim one before starting, to keep a status line on it, to ask you instead
+              of guessing or when it's stuck, to wait for your answer, and to move the card to Done.
+            </p>
+            <div className="client-tabs" role="tablist" aria-label="Prompt">
+              {PROMPTS.map((p) => (
+                <button key={p.id} role="tab" aria-selected={p.id === prompt} onClick={() => setPrompt(p.id)}>{p.name}</button>
+              ))}
+            </div>
+            <Snippet lang="prompt" code={promptText} wrap />
+            {prompt === "full" ? (
+              <p className="muted">
+                The same rules <code>get_started</code> returns, word for word, for reading or for pasting whole.
+              </p>
+            ) : (
+              <p className="muted">
+                The rules live on the server, so this line never goes stale. Read them under <b>The full rules</b>.
+              </p>
+            )}
+            <p className="muted">
+              <b>Getting your answer back to it.</b> While a question is open, the rules have the agent
+              call <code>wait_for_answer</code>, which holds until you answer and hands it the card, for
+              up to 10 minutes. That works in any MCP client, with no shell. After 10 minutes it stops
+              and says so: tell it <i>“check the board”</i>. With the <a href="#sessions">Sessions</a> setup
+              on a machine, Claude Code can also listen to the event feed, which tells it about new
+              cards and edits as well as answers. The same prompt works either way.
+            </p>
+          </div>
+        </section>
+
+        <section className="connect-step" id="apps">
+          <div className="step-num">04</div>
+          <div className="step-main">
             <h2 className="h">CONNECTED_APPS</h2>
+            {!signedIn ? (
+              <>
+                <p className="muted">
+                  Apps you allow show up here, and you can disconnect them at any time. Most agents sign you
+                  in themselves and never need a token. For the ones that take a pasted token, like Codex,
+                  and for the Sessions setup below, you create one here.
+                </p>
+                <div className="step-actions"><a className="btn primary" href={signInHref("#apps")}>Sign in to create a token</a></div>
+              </>
+            ) : <>
             {grants && grants.length > 0 ? (
               <table className="token-table">
                 <thead><tr><th>App</th><th>Connected</th><th /></tr></thead>
@@ -360,7 +634,7 @@ export function Connect({ onBack }: { onBack(): void }) {
                   <code className="mono-box live">{fresh.token}</code>
                   <CopyButton text={fresh.token} />
                 </div>
-                <p>Copy it now. This is the only time <b>{fresh.name}</b>'s token is shown. Snippets above that need a token already include it.</p>
+                <p>Copy it now. This is the only time <b>{fresh.name}</b>'s token is shown. Snippets on this page that need a token already include it.</p>
               </div>
             )}
 
@@ -381,11 +655,12 @@ export function Connect({ onBack }: { onBack(): void }) {
                 </tbody>
               </table>
             )}
+            </>}
           </div>
         </section>
 
         <section className="connect-step" id="sessions">
-          <div className="step-num">04</div>
+          <div className="step-num">05</div>
           <div className="step-main">
             <h2 className="h">SESSIONS</h2>
             <p>
@@ -393,24 +668,61 @@ export function Connect({ onBack }: { onBack(): void }) {
               machine: working, needs input, or idle. Sessions report through Claude Code hooks, so each
               machine needs this once.
             </p>
-            <div className="client-panel">
-              <ol>
-                <li>
-                  Create an access token above and save it on the machine. The hook reads it from this file:
-                  <Snippet lang="sh" code={saveToken(token)} />
-                </li>
-                <li>
-                  Download the hook script and move it to <code>{HOME}/tasks-presence.mjs</code>. It's one file
-                  and needs Node 22 or later, nothing else.
-                  <div className="step-actions"><DownloadButton name="tasks-presence.mjs" text={presenceScript} /></div>
-                </li>
-                <li>
-                  Add this to <code>~/.claude/settings.json</code>. If the file already has hooks, merge these in.
-                  <Snippet lang="json" code={hooksJson()} />
-                </li>
-                <li>Start a Claude Code session. It shows up under <b>Sessions</b> within a few seconds.</li>
-              </ol>
-            </div>
+            <Snippet lang="sh" code={setupCommand(token)} live={!!fresh} />
+            {fresh ? (
+              <p className="muted">
+                Your new token (<b>{fresh.name}</b>) is filled in. Copy the command now: the token isn't
+                shown again once you leave this page.
+              </p>
+            ) : signedIn ? (
+              <div className="setup-token">
+                <p className="muted">The command needs a token where it says <code>{PLACEHOLDER}</code>. Create one and it fills in.</p>
+                <button className="btn primary" type="button" disabled={busy} onClick={() => void create(null, "Sessions setup")}>
+                  {busy ? "Creating…" : "Create a token"}
+                </button>
+              </div>
+            ) : (
+              <div className="setup-token">
+                <p className="muted">The command needs a token where it says <code>{PLACEHOLDER}</code>.</p>
+                <a className="btn primary" href={signInHref("#sessions")}>Sign in to create a token</a>
+              </div>
+            )}
+            {error && signedIn && !fresh && <div className="login-error" role="alert">{error}</div>}
+            <p>
+              <b>What it changes:</b> it saves the token to <code>{HOME}/token</code> (mode 600),
+              puts <code>tasks-presence.mjs</code> and <code>tasks-events.mjs</code> next to it, and adds
+              seven hooks to <code>~/.claude/settings.json</code> after saving a backup beside it. Hooks and
+              settings already there are kept, and running it again changes nothing.
+            </p>
+            <p className="muted">
+              Needs Node 22 or later and nothing else. <a href={setupUrl()} target="_blank" rel="noreferrer">Read the
+              script</a> before you run it, or add <code>--dry-run</code> to the end to see what it would do.
+              Then start a Claude Code session: it shows up under <b>Sessions</b> within a few seconds.
+            </p>
+            <details className="by-hand">
+              <summary>Do it by hand</summary>
+              <div className="client-panel">
+                <ol>
+                  <li>
+                    Create an access token above and save it on the machine. The hook reads it from this file:
+                    <Snippet lang="sh" code={saveToken(token)} />
+                  </li>
+                  <li>
+                    Download the hook script and move it to <code>{HOME}/tasks-presence.mjs</code>. It's one file
+                    and needs Node 22 or later, nothing else. The event feed script goes in the same folder.
+                    <div className="step-actions">
+                      <DownloadButton name="tasks-presence.mjs" text={presenceScript} />
+                      <DownloadButton name="tasks-events.mjs" text={eventsScript} />
+                    </div>
+                  </li>
+                  <li>
+                    Add this to <code>~/.claude/settings.json</code>. If the file already has hooks, merge these in.
+                    <Snippet lang="json" code={hooksJson()} />
+                  </li>
+                  <li>Start a Claude Code session. It shows up under <b>Sessions</b> within a few seconds.</li>
+                </ol>
+              </div>
+            </details>
             <p className="muted">
               What the hook sends: the session id, the folder, the tool's name, the file it touched, a Bash
               call's description, and Claude's notification text. Prompts, tool output, and Bash commands
@@ -421,15 +733,25 @@ export function Connect({ onBack }: { onBack(): void }) {
         </section>
 
         <section className="connect-step" id="working">
-          <div className="step-num">05</div>
+          <div className="step-num">06</div>
           <div className="step-main">
             <h2 className="h">WORKING_WITH_AN_AGENT</h2>
             <ul className="connect-notes">
               <li>
+                <b>Start it with the prompt.</b>
+                <p>
+                  The <a href="#prompt">starter prompt</a> has the agent read the rules for everything below
+                  from the server. Paste it in at the start of a session.
+                </p>
+                <div className="step-actions">
+                  <CopyButton text={STARTER_LINE} label="Copy starter prompt" />
+                </div>
+              </li>
+              <li>
                 <b>Tag its cards <code>#agent</code>.</b>
                 <p>
-                  Put <code>#agent</code> on a card you want an agent to take, and tell the agent to work the
-                  cards with that tag. It lists them with <code>get_board</code> and <code>tag: "agent"</code>.
+                  Add <code>#agent</code> to the end of a card's title, or use its Tags field. The agent lists them
+                  with <code>get_board</code> and <code>tag: "agent"</code>, and leaves every other card alone.
                   With more than one project, add a second tag for each, like <code>#receptionist</code>.
                 </p>
               </li>
@@ -438,14 +760,16 @@ export function Connect({ onBack }: { onBack(): void }) {
                 <p>
                   When an agent needs a decision it calls <code>ask_ceo</code>. The card gets <code>#needs-ceo</code> and
                   shows the question with a button for each option, and the top bar counts what's waiting on
-                  you. One tap answers it. The answer is kept on the card.
+you. One tap answers it. The answer is kept on the card. An agent that can't go on, say
+                  because a tool was refused, asks the same way instead of stopping quietly.
                 </p>
               </li>
               <li>
                 <b>One card, one session.</b>
                 <p>
                   An agent calls <code>claim_card</code> before it starts a card, so two sessions never work the
-                  same one. A claimed card shows the session's state under its title. A claim lapses 15
+                  same one, and says what it is and its folder. The server hands each agent a session id to
+                  claim with; a Claude Code session with the Sessions hooks uses its own, so it's one row. A claimed card shows the session's state under its title. A claim lapses 15
                   minutes after its session goes quiet. The server tells every agent about claims and
                   questions when it connects, so you don't have to.
                 </p>
@@ -455,12 +779,14 @@ export function Connect({ onBack }: { onBack(): void }) {
                 <p>
                   The event feed prints one line of JSON each time you add, edit, move, answer, or delete
                   an <code>#agent</code> card, so an agent on your machine can act on it without polling.
-                  Download the script, move it to <code>{HOME}/tasks-events.mjs</code>, and run it under
-                  Claude Code's Monitor tool. It uses the same token file as the hooks. Changes an agent
+                  The <a href="#sessions">Sessions setup</a> installs it
+                  as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. It runs under Claude
+                  Code's Monitor tool, and only when you ask: tell the agent to use the event feed, and
+                  Claude Code asks once in the terminal before it runs the script. Left alone, an agent
+                  never starts it, and waits for your answer with <code>wait_for_answer</code>. Changes an agent
                   makes are left out, so it never wakes itself.
                 </p>
                 <Snippet lang="sh" code={eventsCommand()} />
-                <div className="step-actions"><DownloadButton name="tasks-events.mjs" text={eventsScript} /></div>
               </li>
             </ul>
             <p className="muted">

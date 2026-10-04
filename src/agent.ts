@@ -8,6 +8,7 @@ import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type C
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type TaskEvent } from "./events";
+import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -130,7 +131,28 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
     if (actor === "you") this.publish(agentEvents(before, after));
+    this.endClaims(before, after, actor);
     return after;
+  }
+
+  /**
+   * A card that just reached the last lane, or was deleted, can't still be "working": tell
+   * Presence so its claim ends now instead of 15 minutes later (endedCards in presence-shared.ts).
+   * A question that was answered or taken back is told the same way, so the session that asked
+   * stops reading "needs input" (settledAsks).
+   * This is the one place the board talks to Presence about a change, and it only ever sends:
+   * nothing comes back into board state, so it adds no undo step, flashes no card, and publishes
+   * no agent event. An encrypted board keeps no presence, so there's nothing to tell.
+   */
+  private endClaims(before: Board, after: Board, by: Actor) {
+    if (after.sealed) return;
+    const ended = endedCards(before, after, by);
+    // A question that was answered or taken back: the session that asked stops reading needs input.
+    const settled = settledAsks(before, after);
+    if (!ended.length && !settled.length) return;
+    const presence = this.env.Presence.get(this.env.Presence.idFromName(this.name));
+    if (settled.length) this.ctx.waitUntil(presence.settle(settled).catch((e: Error) => console.warn("settling questions failed", e.message)));
+    if (ended.length) this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
   }
 
   /** Tell any listening agent session (events.ts) about changes you made to #agent cards. */
@@ -287,8 +309,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private restore(board: Board) {
     const before = this.state;
     // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
-    this.setState({ ...board, theme: before.theme, themeChosen: before.themeChosen, sealed: before.sealed });
+    this.setState(ops.keepSettings(board, before));
     this.reindex(before, this.state);
+    // Undo and redo can finish or remove a card too (redoing a move to Done, undoing "Add card").
+    // The other direction brings nothing back: a claim that ended stays ended.
+    this.endClaims(before, this.state, "you");
     const kept = new Set(ops.attachmentIds(this.state));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
   }
@@ -353,6 +378,17 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
   }
 
+  /**
+   * An outside agent just made a call over MCP (mcp.ts). The first one is remembered on the
+   * board, which is what takes "No agent connected yet" off every open tab. It's a setting, not
+   * a change: no undo step, no event on the feed, and no card moves or flashes. Every call after
+   * the first returns without touching anything.
+   */
+  noteAgentSeen() {
+    const next = ops.markAgentSeen(this.state, new Date().toISOString());
+    if (next !== this.state) this.setState(next);
+  }
+
   /** Whether the board is end-to-end encrypted, for MCP. */
   isSealed(): boolean {
     return !!this.state.sealed;
@@ -365,11 +401,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */
-  cardDetail(id: string): { text: string; attachments: Attachment[] } | null {
+  cardDetail(id: string): { text: string; attachments: Attachment[]; done: boolean } | null {
     if (this.state.sealed) return null;
     const text = ops.describeCard(this.state, id);
     if (text === null) return null;
-    return { text, attachments: this.state.cards.find((c) => c.id === id)?.attachments ?? [] };
+    const card = this.state.cards.find((c) => c.id === id);
+    const lanes = this.state.lanes;
+    // Done is the last lane, the same rule that ends a claim (endedCards in presence-shared.ts).
+    return { text, attachments: card?.attachments ?? [], done: lanes.length > 1 && card?.laneId === lanes[lanes.length - 1].id };
   }
 
   /** Lane names and card counts, for what a write tool echoes over MCP. */
@@ -518,7 +557,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   async resetEncryptedBoard() {
     if (!this.state.sealed) throw new Error("This board isn't encrypted.");
-    await this.swapBoard({ ...ops.newBoard(), theme: this.state.theme, themeChosen: this.state.themeChosen });
+    // The agents that were connected still are, so the fresh board doesn't ask for one again.
+    const { sealed: _gone, ...settings } = this.state;
+    await this.swapBoard(ops.keepSettings(ops.newBoard(), settings));
     this.sql`DELETE FROM seal_meta`;
     this.index.clear();
   }
@@ -584,7 +625,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       }
       if (lanes.some((l) => !l.name) || cards.some((c) => !c.title)) throw new Error("A lane or card came back empty.");
     }
-    return { lanes, cards, theme: cur.theme, themeChosen: cur.themeChosen, ...(seal ? { sealed: seal } : {}) };
+    return ops.keepSettings({ lanes, cards, theme: cur.theme }, { ...cur, sealed: seal });
   }
 
   /**

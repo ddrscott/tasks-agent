@@ -15,6 +15,8 @@ import type { User } from "./auth";
 import { describeSession } from "./presence";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
+import { WAIT_SECONDS, workingRules } from "./agent-rules";
+import { askState } from "./shared";
 
 export const MCP_PATH = "/tasks/mcp";
 
@@ -22,7 +24,7 @@ export const MCP_PATH = "/tasks/mcp";
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_board", "get_card", "ask_ceo", "claim_card", "release_card"] as const;
+const BY_HAND = ["get_started", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -36,14 +38,33 @@ done lane: move a card there when the user finished it rather than deleting it. 
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
 search_cards to see only those cards. The user can undo any change from the app.
 
+When you're asked to work the board, or its agent cards, on your own, call get_started first
+and follow the rules it returns.
+
 Several agent sessions can share this board. Before you start work on a card, call claim_card with
-your session id (CLAUDE_CODE_SESSION_ID in Claude Code). If it's refused, another live session has
+a session id (get_started hands you one; without it, make one up once and keep it), what you are
+(agent), your hostname if you know it (machine), and the name of the folder you're in (project). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
-release_card when you finish a card or give up on it.
+release_card when you finish a card or give up on it. Pass the same session id to ask_ceo and
+wait_for_answer: the board shows that session as waiting on the owner until they answer.
 
 When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
 options instead of writing the question into the notes. They answer with one tap, and get_board
-then shows the card as ANSWERED.`;
+then shows the card as ANSWERED. Keep your claim on the card while you wait. Nothing calls you when
+the answer comes: call wait_for_answer with the card's id, which holds until the answer lands. If you can't go on with a card (a tool was refused, or
+something is missing), ask with ask_ceo too, so the owner sees it on the board.`;
+
+/** How often wait_for_answer looks at the board while it holds. */
+const WAIT_POLL_MS = 2000;
+/** The most board reads one wait_for_answer call makes, to stay far inside a Worker's subrequest limit. */
+const WAIT_MAX_READS = 30;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** An id for a session that has none of its own: tasks- and 8 letters or digits. Nothing is stored until it claims. */
+function newSessionId(): string {
+  const abc = "abcdefghijkmnpqrstuvwxyz23456789";
+  return `tasks-${[...crypto.getRandomValues(new Uint8Array(8))].map((n) => abc[n % abc.length]).join("")}`;
+}
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
@@ -71,6 +92,15 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     // Every tool answers the same way on an end-to-end encrypted board: the server can't read it, so neither can an agent.
     const locked = async () => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
     const server = new McpServer({ name: "tasks", title: "Tasks", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+
+    // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
+    // an encrypted board like every other tool: there's nothing there for an agent to work.
+    server.registerTool("get_started", {
+      title: "Get started",
+      description: doc("get_started"),
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    }, async () => (await locked()) ?? text(workingRules(new URL(req.url).origin, "/tasks", newSessionId())));
 
     server.registerTool("get_board", {
       title: "Get board",
@@ -140,13 +170,75 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         question: z.string().min(1).max(240).describe("One line, ending in a question mark"),
         options: z.array(z.string().min(1).max(140)).min(2).max(4).describe("2 to 4 answers to choose from. The owner can also type something else"),
         recommended: z.number().int().min(1).max(4).optional().describe("Which option you recommend, counting from 1"),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, the one you claimed the card with. The board shows that session as waiting on the owner"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    }, async (input: { id: string; question: string; options: string[]; recommended?: number }) => {
+    }, async (input: { id: string; question: string; options: string[]; recommended?: number; session_id?: string }) => {
       const no = await locked();
       if (no) return no;
-      const r = (await agent.askCeo({ ...input, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
-      return r.ok ? text(`${r.summary}\n\nWaiting on the owner:\n${r.board}`) : text(r.summary, true);
+      const { session_id, ...ask } = input;
+      const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
+      if (!r.ok) return text(r.summary, true);
+      // Presence is told who asked, so the card and Sessions say that session needs input until the
+      // owner answers. With no session_id it's whoever holds the card, which is the asker when the
+      // agent claimed first, as the rules have it.
+      const title = (await agent.cardTitle(input.id)) ?? undefined;
+      const asker = await presence.asked(user.id, { cardId: input.id, sessionId: session_id, question: input.question, title });
+      const shown = asker
+        ? `The board shows session ${asker} waiting on the owner. Keep your claim on this card: don't call release_card.`
+        : "No session is shown waiting on this: claim the card with claim_card and the board will say who asked.";
+      return text(`${r.summary}\n${shown}\n\nWaiting on the owner:\n${r.board}`);
+    });
+
+    // Holding a request open is how every client gets to wait, with no shell and no feed. The MCP
+    // server stays stateless: the Worker rereads the cards on a timer until one changes or the time
+    // is up. Nothing is stored, and a client that hangs up ends the loop.
+    server.registerTool("wait_for_answer", {
+      title: "Wait for an answer",
+      description: doc("wait_for_answer"),
+      inputSchema: z.object({
+        ids: z.array(z.string()).min(1).max(5).describe("The cards you asked on, like c1a2b"),
+        seconds: z.number().int().min(1).max(45).optional().describe(`How long to hold at most. Default ${WAIT_SECONDS}`),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, so the board knows you're still here"),
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { ids: string[]; seconds?: number; session_id?: string }) => {
+      const no = await locked();
+      if (no) return no;
+      const ids = [...new Set(input.ids)];
+      // Waiting is being alive. An agent polling here makes no other call, so each call counts as
+      // hearing from the session it names and from the sessions holding these cards. Without this
+      // a waiting agent went stale after 5 minutes and lost its cards after 15.
+      const here = () => presence.touch({ sessionIds: input.session_id ? [input.session_id] : [], cardIds: ids });
+      await here();
+      const total = (input.seconds ?? WAIT_SECONDS) * 1000;
+      const every = Math.max(WAIT_POLL_MS, Math.ceil((total * ids.length) / WAIT_MAX_READS));
+      const until = Date.now() + total;
+      for (;;) {
+        const waiting: string[] = [];
+        const ready: string[] = [];
+        for (const id of ids) {
+          const card = await agent.cardDetail(id);
+          const state = card ? askState(card.text) : null;
+          // A card the owner moved to the last lane is finished, question and all: its claim ended
+          // there too (Presence.finish), and the rules never pick up a card in that lane.
+          if (card && state === "asking" && card.done) ready.push(`[${id}] was moved to the last lane with its question still open: the owner finished it, so stop waiting on it.`);
+          else if (state === "asking") waiting.push(id);
+          else if (!card) ready.push(`[${id}] is gone: the owner deleted it, so stop working on it.`);
+          else if (state === "answered") ready.push(`ANSWERED. Call claim_card on it (that renews your claim, or takes it back if it lapsed) and act on the answer:\n${card.text}`);
+          else ready.push(`[${id}] has no open question and no answer. Call get_card to see where it stands.`);
+        }
+        if (ready.length) {
+          const rest = waiting.length ? `\n\nStill waiting on the owner: ${waiting.map((id) => `[${id}]`).join(", ")}` : "";
+          return text(ready.join("\n\n") + rest);
+        }
+        if (Date.now() + every > until || req.signal.aborted) {
+          // Once more on the way out, so a 30-second hold reads as heard from at both ends.
+          await here();
+          return text(`Nothing is answered yet on ${waiting.map((id) => `[${id}]`).join(", ")}. Call wait_for_answer again to keep waiting.`);
+        }
+        await sleep(every);
+      }
     });
 
     server.registerTool("claim_card", {
@@ -154,10 +246,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       description: doc("claim_card"),
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
-        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id. In Claude Code: the CLAUDE_CODE_SESSION_ID environment variable"),
-        agent: z.string().max(40).optional().describe("What you are, like lead"),
-        machine: z.string().max(60).optional().describe("The machine you run on, when you know it"),
-        project: z.string().max(80).optional().describe("The folder you're working in, when you know it"),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id: the one get_started gave you, the same on every call"),
+        agent: z.string().max(40).optional().describe("What you are, like claude-code, codex, or cursor"),
+        machine: z.string().max(60).optional().describe("The hostname of the machine you run on"),
+        project: z.string().max(80).optional().describe("The name of the folder you're working in, not the whole path"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async (input: { id: string; session_id: string; agent?: string; machine?: string; project?: string }) => {
@@ -165,7 +257,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       if (no) return no;
       const title = await agent.cardTitle(input.id);
       if (title === null) return text(`There is no card with id ${input.id}.`, true);
-      const r = await presence.claim(user.id, { cardId: input.id, sessionId: input.session_id, agent: input.agent, machine: input.machine, project: input.project });
+      const r = await presence.claim(user.id, { cardId: input.id, sessionId: input.session_id, title, agent: input.agent, machine: input.machine, project: input.project });
       if (r.ok) return text(`Claimed "${title}" [${input.id}] for session ${input.session_id}.`);
       return text(`"${title}" [${input.id}] is already claimed by ${describeSession(r.session, Date.now())}. Leave it and take another card.`, true);
     });
@@ -181,8 +273,11 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     }, async (input: { id: string; session_id: string }) => {
       const no = await locked();
       if (no) return no;
-      const released = await presence.release({ cardId: input.id, sessionId: input.session_id });
-      return text(released ? `Released [${input.id}].` : `Session ${input.session_id} doesn't hold a claim on [${input.id}].`);
+      const released = await presence.release({ cardId: input.id, sessionId: input.session_id, title: (await agent.cardTitle(input.id)) ?? undefined });
+      // Not an error: a claim ends by itself when its card reaches the last lane or is deleted
+      // (Presence.finish), so an agent that moves a card to Done and then releases lands here.
+      return text(released ? `Released [${input.id}].`
+        : `Session ${input.session_id} holds no claim on [${input.id}], so there's nothing to release. A claim ends by itself when its card reaches the last lane or is deleted.`);
     });
 
     server.registerTool(SEARCH_TOOL.name, {
@@ -221,5 +316,12 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     return server;
   }, { route: MCP_PATH });
 
-  return handler(req, env, ctx);
+  const res = await handler(req, env, ctx);
+  // An MCP request that went through means an agent is connected: the token was good and the
+  // client spoke the protocol. The handshake counts, so the app says so as soon as the agent is
+  // added, before it has touched a card. The board keeps the first time only (TodoAgent.noteAgentSeen).
+  if (req.method === "POST" && res.ok) {
+    ctx.waitUntil(Promise.resolve(agent.noteAgentSeen()).catch((e: Error) => console.warn("noting the agent failed", e.message)));
+  }
+  return res;
 }

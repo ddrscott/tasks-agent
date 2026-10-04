@@ -4,36 +4,37 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, tagsByUse, tidyTags, type Board, type Card } from "../shared";
+import { clean, splitTitleTags, tagsByUse, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
+import { Demo } from "./Demo";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
 import { FirstRun } from "./FirstRun";
+import { NoAgentProvider } from "./AgentNudge";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
+import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
+import { useTitle } from "./title";
+import { pageAt, type Page } from "../routes";
+import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string };
-type Page = "board" | "connect" | "privacy" | "terms";
-const PAGES: Page[] = ["connect", "privacy", "terms"];
-
-const pageFromPath = (): Page => {
-  const sub = location.pathname.replace(/\/+$/, "").slice(BASE.length + 1) as Page;
-  return PAGES.includes(sub) ? sub : "board";
-};
+// The pages are listed once, in src/routes.ts, for this and for the Worker's 404s.
+const pageFromPath = (): Page => pageAt(location.pathname, BASE) ?? "board";
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -53,8 +54,9 @@ export function App() {
   }, []);
 
   const load = useCallback(async () => {
+    // Signed out is a 200 with `null`, not a 401, so a visitor's console stays clean.
     const r = await fetch(api("/api/me"));
-    setMe(r.ok ? ((await r.json()) as Me) : null);
+    setMe(r.ok ? ((await r.json()) as Me | null) : null);
   }, []);
 
   useEffect(() => {
@@ -62,15 +64,22 @@ export function App() {
     void load();
   }, [load]);
 
+  if (isUnknownPath()) return <NotFound />;
   // The privacy policy and terms are public; everything else needs a session.
   if (page === "privacy" || page === "terms") return <Legal page={page} onBack={() => go("board")} />;
+  // The demo board runs in the tab with nobody signed in (Demo.tsx).
+  if (page === "demo") return <Demo signedIn={!!me} onHome={() => go("board")} onConnect={(hash) => go("connect", hash)} />;
   if (me === undefined) return <div className="splash">loading</div>;
+  // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
+  if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   if (me === null) return <Login onSignedIn={load} />;
-  if (page === "connect") return <Connect onBack={() => go("board")} />;
+  // /tasks/pricing is the front page at its pricing section, for someone signed in too.
+  if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
   return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 
 function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+  useTitle("Board");
   async function signOut() {
     await fetch(api("/api/auth/logout"), { method: "POST" });
     onSignOut();
@@ -89,8 +98,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [asksOpen, setAsksOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
+  // The assistant panel. Whoever opened or closed it gets it back that way ("todo-chat"). With no
+  // choice saved it waits for the board (receive, below): open beside a board that has cards,
+  // closed on an empty one, so a new account's first screen is // START_HERE and the lanes.
+  const chatSaved = useRef<string | null>(null);
   const [chatOpen, setChatOpen] = useState(() => {
-    try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
+    try { chatSaved.current = localStorage.getItem("todo-chat"); } catch { /* private window */ }
+    return chatSaved.current === "open" && innerWidth > 900;
   });
   const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
 
@@ -130,6 +144,13 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const receive = useCallback((next: Board) => {
     if (dragging.current) { pending.current = next; return; }
     const prev = boardRef.current;
+    // The first board decides the assistant panel when nobody has. An empty board keeps it closed,
+    // and that's saved, so it doesn't spring open later: it opens when the person opens it.
+    if (!prev && chatSaved.current === null && innerWidth > 900) {
+      chatSaved.current = next.cards.length ? "open" : "closed";
+      if (next.cards.length) setChatOpen(true);
+      else try { localStorage.setItem("todo-chat", "closed"); } catch { /* private window */ }
+    }
     // A new account (another sign-in email) starts on Auto. Until the user picks a theme
     // on it, keep the one this browser already uses instead of switching under them.
     const cached = readCachedTheme();
@@ -290,7 +311,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const knownTags = useMemo(() => (board ? tagsByUse(board) : []), [board]);
 
   const actions: Actions = useMemo(() => ({
-    addCard: async (laneId, title, top) => agent.stub.addCard(laneId, await out(clean(title, 200)), top),
+    // Quick add: "Write a haiku #agent" is the title plus a tag. It's split here, in the tab, before anything is sealed.
+    addCard: async (laneId, typed, top) => {
+      const { title, tags } = splitTitleTags(typed);
+      return agent.stub.addCard(laneId, await out(clean(title, 200)), top, tags.length ? { tags: await Promise.all(tags.map(out)) } : undefined);
+    },
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index),
     addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },
     renameLane: async (id, name) => { laneClash(name, id); return agent.stub.renameLane(id, await out(clean(name, 40))); },
@@ -404,6 +429,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   return (
     <AskContext.Provider value={answerAsk}>
+    <NoAgentProvider board={board} onConnect={onConnect}>
     <div className="app">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
@@ -434,7 +460,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <IconRedo />
               </button>
             </div>
-            <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
+            <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             {!board.sealed && (
               <SessionsButton
                 presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
@@ -471,7 +497,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
-        {board.cards.length === 0 && !board.sealed && <FirstRun onConnect={onConnect} />}
+        {/* // START_HERE decides for itself when to show (quickStartOpen in FirstRun.tsx). */}
+        {!board.sealed && <FirstRun board={board} onConnect={onConnect} add={addFullCard} say={say} />}
         <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}
@@ -542,6 +569,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         </div>
       )}
     </div>
+    </NoAgentProvider>
     </AskContext.Provider>
   );
 }

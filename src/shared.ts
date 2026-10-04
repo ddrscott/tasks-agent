@@ -31,7 +31,11 @@ export type Ask = {
 };
 
 /** The last answer given on a card. It stays until the next question, so an agent can read it back. */
-export type Answer = { question: string; answer: string; choice?: number; at: string };
+export type Answer = {
+  question: string; answer: string; choice?: number; at: string;
+  /** The card's STATUS line at the moment of the answer ("" for none), so the face can tell when the agent has written a newer one. Older answers don't have it. */
+  was?: string;
+};
 
 export const MAX_ASK_OPTIONS = 4;
 
@@ -61,6 +65,8 @@ export type Board = {
   theme: string;
   /** True once the user picks a theme on this account; until then a new account keeps the browser's. */
   themeChosen?: boolean;
+  /** When an outside agent first reached this board over MCP. Set once and kept: not undoable, like the theme. */
+  agentSeenAt?: string;
   /** Present when the board is end-to-end encrypted: the passphrase envelope for its key. */
   sealed?: SealInfo;
 };
@@ -137,6 +143,40 @@ export function tidyTags(tags: string[]): string[] {
   return out;
 }
 
+/**
+ * Pull trailing #tags off a title a person typed: "Write a haiku #agent" is the title "Write a haiku"
+ * with the tag agent. `have` is the tags the card already has; the tags come back as `have` plus the new ones.
+ *
+ * Only the end of the title is read, one word at a time, and it stops at the first word that isn't a
+ * tag, so a title meant literally stays as typed. A word is a tag when it:
+ *   - follows a space ("C#", "foo#bar", and a title that is only "#agent" are left alone),
+ *   - is # plus letters, digits, - or _ and nothing else, 32 at most (so cleanTag only lower-cases it),
+ *   - has a letter in it ("#123" is an issue number),
+ *   - isn't #needs-ceo, which ask_ceo sets,
+ *   - and still fits under the tag cap. Past the cap, the words left over stay in the title.
+ * A line that is nothing but tags stays a title. Sealed text is ciphertext and passes through.
+ * This is for titles typed in the app. Agents and the assistant pass `tags`, so their titles are never parsed.
+ */
+export function splitTitleTags(text: string, have: string[] = []): { title: string; tags: string[] } {
+  const asTyped = { title: text, tags: have };
+  if (isSealed(text)) return asTyped;
+  let title = text.trimEnd();
+  const found: string[] = [];
+  for (;;) {
+    const m = /^(.*\S)\s+#([\p{L}\p{N}_-]{1,32})$/su.exec(title);
+    if (!m || !/\p{L}/u.test(m[2])) break;
+    const tag = cleanTag(m[2]);
+    if (tag === NEEDS_CEO_TAG) break;
+    if (!have.includes(tag) && !found.includes(tag)) {
+      if (have.length + found.length >= MAX_TAGS_PER_CARD) break;
+      found.unshift(tag);
+    }
+    title = m[1];
+  }
+  if (title === text.trimEnd() || /^#[\p{L}\p{N}_-]+$/u.test(title)) return asTyped;
+  return { title, tags: [...have, ...found] };
+}
+
 /** Set a card's tags, leaving the field off when there are none. */
 function withTags(c: Card, tags: string[]): Card {
   const { tags: _, ...rest } = c;
@@ -144,6 +184,51 @@ function withTags(c: Card, tags: string[]): Card {
 }
 
 export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
+
+/** The tag that marks a card as an agent's work. */
+export const AGENT_TAG = "agent";
+/** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */
+export const GAUNTLET_TAG = "gauntlet";
+/** Whether a card is meant for an agent to pick up. */
+export const forAgent = (c: Card) => hasTag(c, AGENT_TAG) || hasTag(c, GAUNTLET_TAG);
+
+// ---------- has an agent ever connected? ----------
+//
+// The board remembers the first time an outside agent reached it over MCP (mcp.ts). Until then
+// the app says so: a line above the lanes, and a chip on each card that's waiting for an agent
+// (src/client/AgentNudge.tsx). Session hooks and the event feed don't count: neither can read
+// or change a card, so a board that only has those still has nothing to pick its cards up.
+
+/** Record that an agent reached the board. The first time wins; an encrypted board is closed to agents, so it records nothing. */
+export function markAgentSeen(b: Board, at: string): Board {
+  return b.sealed || b.agentSeenAt ? b : { ...b, agentSeenAt: at };
+}
+
+/**
+ * Whether an agent has ever connected. A question or an answer on a card counts as well: only an
+ * agent can ask one (ask_ceo), which covers boards that had agents before the timestamp existed.
+ */
+export const agentConnected = (b: Board) => !!b.agentSeenAt || b.cards.some((c) => !!c.ask || !!c.answer);
+
+/** Whether to say "No agent connected yet": there's a card, no agent has ever connected, and the board isn't encrypted. */
+export const needsAgent = (b: Board) => !b.sealed && b.cards.length > 0 && !agentConnected(b);
+
+/** Whether this card is waiting for an agent that isn't there: tagged for one, not done, on a board `needsAgent` is true for. */
+export function waitsForAgent(b: Board, c: Card): boolean {
+  const done = b.lanes.length > 1 ? b.lanes[b.lanes.length - 1]?.id : undefined;
+  return needsAgent(b) && forAgent(c) && c.laneId !== done;
+}
+
+/** A board coming back from undo, redo, or a reset keeps what isn't undoable: the theme, the passphrase envelope, and whether an agent ever connected. */
+export function keepSettings(board: Board, from: Board): Board {
+  const { theme: _t, themeChosen: _c, sealed: _s, agentSeenAt: _a, ...rest } = board;
+  return {
+    ...rest, theme: from.theme,
+    ...(from.themeChosen ? { themeChosen: true } : {}),
+    ...(from.agentSeenAt ? { agentSeenAt: from.agentSeenAt } : {}),
+    ...(from.sealed ? { sealed: from.sealed } : {}),
+  };
+}
 
 export function addCard(
   b: Board,
@@ -226,10 +311,53 @@ export function answerAsk(b: Board, id: string, input: { choice?: number; text?:
   const next: Card = {
     ...withTags(rest, (card.tags ?? []).filter((t) => t !== NEEDS_CEO_TAG)),
     notes: tidyNotes(card.notes ? `${line}\n\n${card.notes}` : line),
-    answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at },
+    answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at, was: statusLine(card.notes) ?? "" },
     updatedAt: at,
   };
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
+}
+
+/**
+ * The agent's STATUS line, without the label, when the notes open with one. The board's ANSWER:
+ * lines sit above it (answerAsk), so those and blank lines are skipped. Null when the first real
+ * line is anything else: notes a person wrote aren't a status.
+ */
+export function statusLine(notes: string): string | null {
+  for (const raw of notes.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("ANSWER:")) continue;
+    const m = /^STATUS:\s*(\S.*)$/.exec(line);
+    return m ? m[1].slice(0, 200) : null;
+  }
+  return null;
+}
+
+const STAMP = String.raw`\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?(?: ?(?:Z|UTC|GMT|[AaPp][Mm]|[+-]\d{2}:?\d{2}))?)?`;
+const LEADING_STAMP = new RegExp(`^(?:[\\[(]${STAMP}[\\])]\\s*[—–:·|,-]*|${STAMP}\\s*[—–:·|,-]+)\\s*`);
+
+/**
+ * A status line without the date or date and time it opens with. Agents often write
+ * `2026-10-04 — read the folder…`, and on a card's face, two short lines at most, the date takes
+ * the room the news needs. Only a date that's set off from the rest (a dash, a colon, brackets)
+ * is taken, so "2026-10-04 is the deadline" stays whole. The notes keep the line as written.
+ */
+export function withoutLeadingDate(line: string): string {
+  return line.replace(LEADING_STAMP, "") || line;
+}
+
+/**
+ * The one line of agent news a card's face shows under its title. Normally the STATUS line, without
+ * a date in front (withoutLeadingDate). But a
+ * STATUS written before the owner answered ("blocked, waiting on your pick") is stale the moment
+ * they tap, and stays until the agent rewrites it. So while the STATUS is still the one the card
+ * had when it was answered, the face says what was answered instead. Any new STATUS line takes over.
+ */
+export function faceLine(c: Pick<Card, "notes" | "answer">): { kind: "status" | "answered"; text: string } | null {
+  const status = statusLine(c.notes);
+  if (c.answer && c.answer.was !== undefined && (status ?? "") === c.answer.was) {
+    return { kind: "answered", text: `answered: ${c.answer.answer}`.slice(0, 200) };
+  }
+  return status ? { kind: "status", text: withoutLeadingDate(status) } : null;
 }
 
 /** A card's open question or last answer in one line, for agents. */
@@ -408,6 +536,17 @@ export function describeLaneCounts(b: Board): string {
   return b.lanes.map((l) => `${l.name} ${laneCards(b, l.id).length}`).join(" · ");
 }
 
+const ASKING = "Asking the owner: ";
+const ANSWERED = "Owner answered: ";
+/** How many lines describeCard writes before the question or answer. Titles and tags are one line each. */
+const CARD_HEAD_LINES = 5;
+
+/** Where a card's question stands, read back from describeCard's text (wait_for_answer in mcp.ts). */
+export function askState(described: string): "asking" | "answered" | "none" {
+  const line = described.split("\n")[CARD_HEAD_LINES] ?? "";
+  return line.startsWith(ASKING) ? "asking" : line.startsWith(ANSWERED) ? "answered" : "none";
+}
+
 /** Everything on one card, as plain text: the full notes, and each attachment with its id, type, and size. */
 export function describeCard(b: Board, id: string): string | null {
   const c = b.cards.find((x) => x.id === id);
@@ -421,8 +560,8 @@ export function describeCard(b: Board, id: string): string | null {
     `Due: ${c.due ?? "(none)"}`,
     `Created: ${c.createdAt}${c.updatedAt && c.updatedAt !== c.createdAt ? ` · updated: ${c.updatedAt}` : ""}`,
   ];
-  if (c.ask) lines.push(`Asking the owner: ${c.ask.question}`, ...c.ask.options.map((o, i) => `  ${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`));
-  if (c.answer) lines.push(`Owner answered: "${c.answer.answer}" to "${c.answer.question}"`);
+  if (c.ask) lines.push(`${ASKING}${c.ask.question}`, ...c.ask.options.map((o, i) => `  ${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`));
+  if (c.answer) lines.push(`${ANSWERED}"${c.answer.answer}" to "${c.answer.question}"`);
   lines.push(c.attachments?.length
     ? `Attachments (${c.attachments.length}):\n${c.attachments.map((a) => `  - [${a.id}] ${a.name} (${a.type}, ${kb(a.size)})`).join("\n")}`
     : "Attachments: (none)");

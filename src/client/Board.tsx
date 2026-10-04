@@ -5,10 +5,11 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortBy } from "../shared";
+import { faceLine, statusLine, hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
+import { AgentNudge, NoAgentChip } from "./AgentNudge";
 
 export type Actions = {
   addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
@@ -240,6 +241,8 @@ export function BoardView(p: Props) {
       onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
       onDragCancel={() => { setDrag(null); p.onDragging(false); }}
     >
+      {/* "No agent connected yet", until one is (AgentNudge.tsx). */}
+      <AgentNudge board={board} say={p.toast} />
       <div className="board">
         {board.lanes.map((lane, i) => (
           <LaneView
@@ -408,11 +411,13 @@ function SortableCard(p: {
   );
 }
 
-function CardFace(p: {
+/** Exported so the signed-out landing page can draw sample cards with the real markup. */
+export function CardFace(p: {
   card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null;
   onToggle?(c: Card): void; onTag?(tag: string): void;
 }) {
   const { card } = p;
+  const status = !p.isDone && !card.ask ? faceLine(card) : null;
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -430,6 +435,9 @@ function CardFace(p: {
         <div className="card-title">{card.title}</div>
         <CardPresence cardId={card.id} />
         {!p.overlay && <AskBlock card={card} compact />}
+        {/* What the agent last said it's doing, so nobody opens the card to find out. An open question says it better, and a done card is done. */}
+        {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
+        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : "Your answer. The agent hasn't written a new STATUS line yet."}>{status.text}</div>}
         <div className="card-meta">
           {card.tags?.map((t) => (
             <button
@@ -440,6 +448,7 @@ function CardFace(p: {
               onClick={(e) => { e.stopPropagation(); p.onTag?.(t); }}
             >#{t}</button>
           ))}
+          <NoAgentChip card={card} />
           {card.due && <DueChip due={card.due} done={p.isDone} />}
           {card.notes && <span className="chip" title={card.notes}><IconNotes />notes</span>}
           {!!card.attachments?.length && (
@@ -491,7 +500,7 @@ function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; set
   return (
     <div className="quick-add">
       <textarea
-        ref={ref} className="field" rows={2} placeholder={`What needs doing? (paste a list to add several)`} value={text} aria-label={`New card in ${lane.name}`}
+        ref={ref} className="field" rows={2} placeholder="What needs doing? End with #agent to tag it, or paste a list." value={text} aria-label={`New card in ${lane.name}`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }

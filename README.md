@@ -1,7 +1,7 @@
 # Tasks
 
-Live at **https://askscottpierce.com/tasks**. Tasks is a kanban-style task board with an assistant in the sidebar. Tell it "finished the dentist
-thing, add taxes for Friday" and the cards move while you watch. It runs entirely on
+Live at **https://askscottpierce.com/tasks**. Tasks is a kanban-style task board with an assistant in the sidebar. Tell it "finished the
+login test, add release notes for Friday" and the cards move while you watch. It runs entirely on
 Cloudflare, and you sign in with an emailed code.
 
 The point of the project is to show a simple task manager run by AI agents, where a small
@@ -25,11 +25,12 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
-| Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks |
+| Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks and by `claim_card` |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
 askscottpierce.com/tasks/assets/*  ──▶ static assets (no Worker hop)
+askscottpierce.com/tasks/<page>    ──▶ Worker ──▶ the app's HTML for a page in src/routes.ts, a 404 for anything else
 askscottpierce.com/tasks/api/*     ──▶ Worker ──▶ D1 (codes, sessions), EMAIL.send
 askscottpierce.com/tasks/agent     ──▶ Worker ──session──▶ your TodoAgent (Durable Object)
                                           board state ⇄ UI · chat ─▶ Workers AI + board tools
@@ -53,13 +54,146 @@ run ahead of whatever serves the zone.
   tools are defined once in `src/tools.ts` for both the assistant and MCP, with their
   descriptions in `src/tool-docs.ts`. The agent
   rejects state pushed directly from clients.
-- **First run.** The sign-in screen leads with what the board is for: agents work it over MCP,
-  they ask and you answer in one tap, and you see what each session is doing. `// SECURITY`
-  sits under that and says the trade-off plainly: an encrypted board is closed to outside
-  agents. A board with no cards shows `// START_HERE` above its lanes
-  (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
-  with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
-  never shows it.
+- **Signed out.** `/tasks/` is the landing page (`src/client/Landing.tsx`), with the sign-in
+  form (`src/client/Login.tsx`) in it. Above the fold at 1280x800: the headline, the form, a
+  "Try the demo board" link to `/tasks/demo`, and a picture of the product. On a phone the
+  order is headline, pitch, demo button, a slice of the picture (the top bar and the Doing
+  lane, no Sessions list), then the form, so the first screen shows the product and the form
+  is one short scroll or the Sign in link away. The form's email field takes focus on load
+  only on a wide screen, because focusing it scrolls to it. The picture is not
+  an image. It's `CardFace`, `AskBlock`, and the Sessions `SessionRow` fed sample data and marked
+  `inert`, so it follows the theme and changes when the real components do. Keep it showing a
+  question with a `REC` option, a claimed card, and a needs-input session. Its top bar counts
+  them by the app's own rules (`blockedSessions`), so "need you" and Sessions read what the real
+  bar would. Below the fold:
+  `// WHATS_DIFFERENT` (which says the encryption trade-off plainly: an encrypted board is
+  closed to outside agents), the `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the
+  same one the Connect page shows) with a link to the public Connect page,
+  `// CHECK_IT_YOURSELF`, and `// PRICING` (see `// BILLING`). Arriving with `?next=` (an
+  agent's OAuth consent) shows only the form.
+- **Proof on the landing page.** `// CHECK_IT_YOURSELF` (`Proof` in `Landing.tsx`) lists only
+  what a visitor can verify, each row with the link that proves it: the demo board, the public
+  repo, the changelog, the encryption format, the protocol, and what Sessions stores. Beside it
+  is who makes Tasks and why, in Scott's own words. The changelog numbers (how many changes since
+  the newest release, and in all) are counted from `CHANGELOG.md` when the build starts
+  (`counts` in `vite.config.ts`); never type one in. Nothing on the page claims users, stars,
+  logos, or quotes we don't have, and a row goes away if it stops being true. The copy holds to
+  the same rule: an agent in any MCP client holds in `wait_for_answer` and gets the answer
+  within a few seconds, so the page says that and doesn't name the event feed.
+- **Pricing has an address.** `/tasks/pricing` is the landing page scrolled to `// PRICING`,
+  signed in or out. Signed in, a "signed in as" card with a link to the board stands where the
+  form would (`SignedInCard`).
+- **Not found.** An address under `/tasks/` that isn't a page gets `src/client/NotFound.tsx`,
+  signed in or not, and the response is a real **404**. The pages are listed once, in
+  `src/routes.ts` (`PAGES`): `connect`, `privacy`, `terms`, `demo`, `pricing`, plus `/tasks/`
+  itself. The client uses the list to pick the page and the Worker uses it to pick the status,
+  so add a new page there, with a row in `PAGE_META` beside it for its title and description
+  (`// LINK_PREVIEWS_AND_TITLES`; a page without a row doesn't compile). To make that possible the Worker answers every
+  `/tasks` address (`run_worker_first` in `wrangler.jsonc`) except `/tasks/assets/*` and
+  `/tasks/needle/*`, which the asset layer serves by itself, and `not_found_handling` is
+  `none`: a page gets the app's HTML, a file in `public/tasks/` gets the file, and everything
+  else gets the app's HTML with a 404, marked `noindex`. A missing file under `/tasks/assets/` is a bare 404.
+- **Who's signed in.** `GET /tasks/api/me` answers 200 either way: the user, or `null` when
+  nobody is signed in. It isn't a 401, so a signed-out visit leaves the browser console clean.
+  Everything that needs a session still answers 401 without one.
+- **The assistant panel** opens the way you left it: the Assistant button saves `open` or
+  `closed` in this browser (`localStorage["todo-chat"]`). With nothing saved, the first board to
+  load decides (`receive` in `App.tsx`). A board with cards opens the panel, as it always has.
+  A board with no cards keeps it closed and saves that, so a new account's first screen is
+  `// START_HERE` and the lanes at full width, and the panel doesn't spring open on a later
+  visit: it opens when you open it (the Assistant button, or `/`). Under 900px wide it's always
+  closed to start, behind the Ask button.
+- **First run.** A board with no cards shows `// START_HERE` above its lanes
+  (`src/client/FirstRun.tsx`): four steps that end with Claude Code working a card. Sign in
+  (done), **Add a sample agent card**, **Copy the command**, paste it in a terminal. The steps
+  are `QuickStart` in `Connect.tsx`, and the Connect page shows them too (`// CONNECT_AN_AGENT`
+  has the command).
+  - The sample card (`SAMPLE` in `FirstRun.tsx`) is a real card tagged `#agent`. Its notes have
+    the agent read the folder it was started in, find 2 or 3 small improvements, ask which one
+    with `ask_ceo`, then write a plan for the answer into the card's notes as a `- [ ]`
+    checklist and move the card to Done. So the visitor sees a question land on the card,
+    answers it in one tap, and watches the card finish. Adding it is one change, so one undo
+    takes it back out.
+  - **It has to finish on what the command allows.** The copied command pre-approves the
+    board's tools and nothing else, and the visitor is looking at the browser, not the
+    terminal. So the card asks for no file write and no command that changes anything: only MCP
+    calls, listing the folder, and reading files in it, which Claude Code doesn't ask about.
+    (2.1.289 has no Glob tool. It lists with a read-only `ls`, which it runs without asking.
+    A card that said "no shell, not even ls" left the agent guessing at file names, and it
+    asked on the card how to go on.) An earlier sample had the agent make the
+    change, and it stopped at a Write approval nobody saw. In an empty or non-code folder the
+    card has it offer first steps instead. Checked with real `claude -p` runs (2.1.289,
+    `--allowedTools mcp__tasks`, no user settings) in an empty folder, a folder of two recipe
+    text files, and a small Python project: question on the card within 30 seconds, one tap,
+    Done 11 to 13 seconds later, no refused tool call. A `-p` run refuses what an interactive
+    session would stop and ask about, so no refusals there means no prompts here.
+  - The block stays up while that sample card is open and no agent has connected, so step 3 is
+    still there after step 2 (`quickStartOpen`). It goes away when an agent connects, when the
+    sample is deleted or done, or when the board has cards and none is the sample. An encrypted
+    board never shows it.
+  - **It folds once the command is copied.** With the sample on the board and the command on the
+    clipboard, steps 1 to 3 are done and the rest happens in a terminal, then on the card. So the
+    block folds to one line: "Copied. Paste it in a terminal, and pick Yes if Claude Code asks to
+    trust the folder (Enter alone exits). Your agent's question will show up on the sample
+    card.", with a **Show the steps** button that opens it again (and **Hide the
+    steps** to fold it back). That keeps the lanes and the sample card in view at 1280x800 and on
+    a phone, where the open block takes up to 55% of the screen and scrolls inside itself. The
+    steps stay mounted while folded, since they hold the command and its token is shown once. A
+    command the browser wouldn't put on the clipboard doesn't fold the block: it has to be copied
+    from there by hand. A reload brings the open block back, without the command.
+  - Its last line says how to tag your own cards: `#agent` at the end of the title, or the Tags field.
+- **No agent connected yet.** From the first card on, a board no agent has ever reached says
+  so (`src/client/AgentNudge.tsx`): one line above the lanes (not while `// START_HERE` is up,
+  so the board says it once; with no `#agent` card yet, the line says how to tag one), a `no agent connected` chip on
+  each open `#agent` or `#gauntlet` card, and the same in plain words in that card's editor,
+  each linking to `/tasks/connect`. The X hides the line for that browser tab's session; the
+  chips stay. The board remembers the first MCP request that got through (`agentSeenAt`, set
+  by `noteAgentSeen` in `src/agent.ts`), and when it lands every open tab drops all three
+  without a reload and says "An agent just connected". It's a setting like the theme: no undo
+  step, no event on the feed, no card flashes, and undo, redo, and a board reset keep it
+  (`keepSettings` in `src/shared.ts`). The handshake counts, so adding the server in a client
+  is enough. Session hooks and the event feed don't count, since neither can read or change a
+  card. A question or an answer on a card counts too, which covers boards that had agents
+  before the timestamp existed. An encrypted board never shows any of it and records nothing.
+  `npm run check:nudge` covers the rules.
+- **Demo board.** `/tasks/demo` is the real board UI for someone who hasn't signed up
+  (`src/client/Demo.tsx`). It renders before the sign-in check and never opens the agent or
+  presence sockets: the board is React state in the tab, changed through the same functions in
+  `src/shared.ts`, with undo and redo kept in memory. The seed board, its three sessions, and the
+  script one pretend agent follows are in `src/client/demoData.ts`. Answer its question and its
+  session goes back to working in the same moment; it then updates the card's `STATUS:` line,
+  ticks the checklist, moves the card to Done, picks up the next card, and asks again. When the
+  script runs out, the strip under the top bar says "That's the loop" and offers Start over.
+  - **Undo there is the visitor's.** Unlike a real board, where an agent's MCP call is an undo
+    step, the scripted agent's steps never go on the stack. Each remembered board is saved with
+    how far the agent had got on it (`World` in `Demo.tsx`), and each agent step is also made on
+    every remembered board where the agent was at the same point. So undoing "Add card" leaves
+    what the agent did since, and undoing an answer puts the question back and the agent back
+    to waiting, along with anything it did because of that answer.
+  - **The lead session can't disagree with its card.** It says needs input exactly while the
+    card it's on has a question open; nothing else is stored.
+  - **It follows what the visitor does to its card.** Finish the card before answering and it
+    takes its question back and moves on. Take `#needs-ceo` off and it goes with its own
+    recommendation. Delete the card and it takes the next one; undo that and it's back on it.
+    A card dialog that's open when the agent changes the card is redrawn from the new card,
+    which drops anything typed in it and not saved.
+  - **The other two sessions run on the clock** (`demoPresence`, redrawn every second). The
+    working one in shop-web steps through a short loop of tool calls: its "seen" time counts up
+    a few seconds, then starts over with a new last-action line, the way a session with hooks
+    reports after each tool. The idle one in infra was last heard from a minute before the demo
+    opened and only gets older, so four minutes in it's marked stale like any quiet session.
+  - **On a phone** it opens on the lane that holds the open question, not the first lane, and
+    the Theme button stays in the top bar, since there's no account menu to put it in. Start
+    over is in the strip the whole time there too, at the end of its first row.
+
+  A strip under the top bar says it's a demo and nothing is saved, with links to sign up and to
+  Connect; a reload or Start over resets it. The seed has `agentSeenAt` set, so "No agent
+  connected yet" never shows there. The only request the page makes is the `GET /tasks/api/me`
+  every page starts with. What needs an account says so instead of failing: the Assistant
+  button (and `/`) explains itself, and the card dialogs show a note where Attachments go.
+  There's no account menu, encryption, or billing there. Search is the in-tab keyword search an
+  encrypted board uses (`localSearch.ts`). The top bar is written out again in `Demo.tsx`, so a
+  button added to the real one in `App.tsx` needs adding there too.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
@@ -72,6 +206,10 @@ run ahead of whatever serves the zone.
   pasted wait in the dialog and upload once the card exists; if one fails, the card stays
   and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
   still the quick way: type a title and hit Enter, or paste a list to add one card per line.
+  A title that ends in `#tags` is tagged as it's added: "Write a haiku #agent" becomes the card
+  "Write a haiku" with the tag `agent` (see Tags for the rule). That goes for quick add, each
+  line of a pasted list, and the dialog's title, where the tags move down into the Tags field
+  when you leave the title (or hit Add card), so you can see them and take them back out.
 - **Editing a card.** Nothing changes until Save (or Enter in the title or tags). The X in
   the top corner and Esc close the editor and throw the edits away, so opening a card to
   read it can't change it by accident; that covers the title, notes, due date, tags, and
@@ -92,7 +230,7 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
-- **The top bar.** Open questions, a session count, due stats, and a tag filter all add to
+- **The top bar.** "Need you", a session count, due stats, and a tag filter all add to
   the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
   guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
   gives up space one step at a time and stops at the first step that fits: the search box
@@ -100,15 +238,24 @@ run ahead of whatever serves the zone.
   you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
   summary goes, and last the tag filter chip moves to its own row under the bar. A phone
   always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
-  attribute, and `styles.css` does the rest.
+  attribute, and `styles.css` does the rest. There's one count of what's waiting on you: "need
+  you" adds up the open questions (`// QUESTIONS`) and the sessions stopped at a prompt
+  (`// SESSIONS`), and the Sessions button next to it only says how many sessions are live.
 - **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
   `aria-label` (the account button is "Account", not the email address). The account and
   lane menus are `role="menu"` with `menuitem` children, the other popovers are
   `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
   popover moves focus into it, Esc or a click outside gives focus back to its button, and in
   a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
-  `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
-  it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
+  `src/client/Board.tsx`). The card editor, New card, and Encryption are modal: native
+  `<dialog>` elements opened with `showModal()`, each with `role="dialog"`, `aria-modal="true"`,
+  and a name (the editor's is "Edit card: " plus the card's title). The browser keeps Tab
+  inside an open one. Closing it gives focus back to what opened it: the card for the editor
+  (found again by id when a move redrew it in another lane), the lane's + for New card
+  (`useModal` in `src/client/modal.ts`; React takes these dialogs off the page instead of
+  closing them, and the browser only hands focus back on a close). The card editor and New card
+  open with focus on the title. On a touch screen the editor focuses the dialog instead, so the
+  keyboard doesn't cover a card you only meant to read.
 - **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
   under the title (touch screens only; the current lane is marked): that moves it right away,
   keeps any other edits, and closes the card, so it's two taps from the board. Or long-press
@@ -145,6 +292,20 @@ run ahead of whatever serves the zone.
   the top bar, to clear. While a filter is on, each lane's count reads matches / total
   ("2 / 22"). The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
+- **Tags typed in a title.** `splitTitleTags` in `src/shared.ts` pulls trailing `#tags` off a
+  title a person types for a new card. It reads only the end of the title, one word at a time,
+  and stops at the first word that isn't a tag, so a title meant literally stays as typed. A
+  word counts as a tag when it follows a space, is `#` plus only letters, digits, `-` or `_`
+  (32 at most), and has a letter in it. So "Fix login #agent #shop-api" is "Fix login" with two
+  tags, and these are left alone: `#123` (an issue number), `C#`, `foo#bar`, "Tag a card #agent
+  first" (not at the end), `#agent.` (punctuation), and a title that is nothing but tags. Tags
+  are lower-cased and repeats dropped. Past 10 tags the words left over stay in the title, and
+  `#needs-ceo` stays in the title because only `ask_ceo` sets it. It runs in the tab
+  (`App.tsx`, `Demo.tsx`, `NewCard.tsx`) before anything is saved, so the demo board gets it
+  and an encrypted board seals the title and each tag separately. It does not run on a title
+  being edited (the card editor has a Tags field right there, and a saved title shouldn't
+  change shape under you), and it never runs on titles from agents over MCP or from the
+  assistant: those pass `tags`. `npm run check:tags` covers the rule.
 - **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
   numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
   bold, italic, strikethrough, quotes, and `---` rules. A single line break stays a line break.
@@ -299,28 +460,140 @@ they came from anywhere else, including sibling subdomains that `SameSite=Lax` l
 ## // CONNECT_AN_AGENT
 
 Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP client
-can work the board. The in-app page at **/tasks/connect** shows the server URL, setup steps
-for each client, connected apps, and tokens, then the session hooks (`#sessions`), how the
-`#agent` tag, questions, claims, and the event feed fit together (`#working`), and the tool
-list (`#tools`). It's the first item in the user menu, the `// START_HERE` block on an empty
-board links to it, and so does the Sessions list.
+can work the board. The page at **/tasks/connect** opens with a headline for people running
+coding agents and the four-step `// QUICK_START` for Claude Code (`#quick`), then shows the
+server URL, setup steps for each client (`#add`, Claude Code's tab first), the starter prompt (`#prompt`), connected apps and tokens (`#apps`), the
+one-command Sessions setup (`#sessions`), how the `#agent` tag, questions, claims, and the
+event feed fit together (`#working`), and the tool list (`#tools`). It's the first item in
+the user menu, the `// START_HERE` block on an empty board links to it, and so do the
+Sessions list and the "No agent connected yet" line, chip, and card note a board shows until
+its first agent connects (`// HOW_IT_WORKS`). Signed out, the landing page, the demo board's
+strip, and the not-found page link to it too.
 
+- **The page is public.** Someone deciding whether to sign up can read every step first.
+  Signed out, the two parts that read or change an account (connected apps, tokens) become a
+  "Sign in to create a token" link, which goes to `/tasks/?next=/tasks/connect#…` so sign-in
+  lands back on the same section. The top bar's back link goes to the board signed in and to
+  the landing page signed out. `App.tsx` routes `connect` ahead of the sign-in check and
+  passes `signedIn`; the Worker hands every page the same HTML and never gated it.
+- **The quick start.** Four steps: sign in, **Add a sample agent card**, **Copy the command**,
+  paste it in a terminal. The same `QuickStart` component is the empty board's `// START_HERE`
+  (`// HOW_IT_WORKS`, First run). On the Connect page, which has no board connection, the
+  sample button leaves a note in `sessionStorage` and goes to the board, which adds the card.
+  Copy the command creates an access token named "Claude Code quick start" and copies one line
+  (`quickStartCommand`):
+
+  ```sh
+  claude mcp remove tasks -s local >/dev/null 2>&1; claude mcp add --transport http tasks https://askscottpierce.com/tasks/mcp --header 'Authorization: Bearer tasks_…' && claude 'Work the agent cards on my Tasks board. Call get_started on the tasks MCP server first and follow what it returns.' --allowedTools mcp__tasks
+  ```
+
+  - No `/mcp` Authenticate and Allow round trip: the token is the sign-in. It's shown once, in
+    the command, and the page says so and says what the command changes. The token is typed on
+    the command line, so it also stays in the shell's history; the page says that too, and that
+    it can be revoked under Connected apps. OAuth, which leaves no
+    token on disk, is the Claude Code tab under `#add`.
+  - `claude mcp add` refuses a name that's already there, so the local-scope entry is removed
+    first; that fails quietly when there isn't one. The new entry is local scope (the folder
+    it's run in), which wins over a `tasks` in user or project scope.
+  - Everything is single-quoted and the prompt is one plain line with no `$`, `!`, quotes, or
+    backticks, so no shell expands anything. The prompt comes before `--allowedTools`, which
+    takes a list and would swallow it. `--allowedTools mcp__tasks` lets Claude use the board's
+    tools without a prompt per call; file edits and shell commands still ask. The page says
+    both halves under the steps: the board's tools include deleting cards and lanes, which
+    Undo takes back, and writing files and running commands aren't pre-approved. Write, Edit,
+    and Bash stay out of `--allowedTools` on purpose; the sample card is built to not need them.
+  - Step 4 says what happens and no more: Claude Code may ask once whether you trust the
+    folder, and to pick Yes there, because that prompt starts on "No, exit" and Enter alone
+    quits (the folded line says the same); a question lands on the card, and an answer gets a plan in the notes and the card
+    in Done. The lede after step 2 says two steps are left, not that Claude Code is working.
+  - The front page tells the same four steps under `// CONNECT_AN_AGENT`, without the buttons
+    (a signed-out page can't mint a token), with a Sign in to start button. The OAuth command
+    sits under them as the other way.
+  - Quick start tokens that were never used are commands that were copied and never run. The
+    button revokes those before it makes a new one, so clicking it again doesn't eat the 10.
+  - Codex has the same shape on its tab (`codexQuickCommand`): `export TASKS_TOKEN=… && codex
+    mcp add tasks --url … --bearer-token-env-var TASKS_TOKEN && codex '<prompt>'`. Cursor, VS
+    Code, and the chat apps have no terminal command to start them, so they keep their steps.
+  - The flags were checked against `claude mcp add --help`, `claude mcp remove --help`,
+    `claude --help` (2.1.289), and `codex mcp add --help` (0.150.1). Check again when they change.
+- **The starter prompt is one line.** Step 03 is `STARTER_LINE` from `src/agent-rules.ts`: it
+  tells the agent to call the MCP tool `get_started`, which returns the working rules
+  (`workingRules` in the same file). The rules live on the server so the pasted prompt is easy
+  to quote, works in every client, and can't go stale. A second tab, "The full rules", shows
+  the same text for reading or pasting whole. The rules cover: only `#agent` cards; a session
+  id, plus `agent`, `machine`, and `project` for `claim_card`, none of which the agent runs a
+  command to find; `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
+  Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
+  notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo` with the session
+  id, keep the claim, move on; Done and `release_card`; and at the very end, hold nothing.
+  - **The session id needs no shell.** `get_started` makes an id for the call (`tasks-` and 8
+    characters; nothing is stored until it claims) and the rules say to use it. That works in
+    every client and under the quick start's permissions, where `echo $CLAUDE_CODE_SESSION_ID`
+    would be a Bash approval. With the Sessions hooks installed the board already has a row
+    under Claude Code's own session id, so a made-up id would be a second row. For that case
+    the hook prints `Tasks session id: <id>` on `SessionStart`, which Claude Code adds to the
+    session's context, and the rules say to use that id when the line is there. One row either
+    way. A machine whose hooks were installed before this prints nothing and gets the second
+    row until the setup command is run again. The Connect page's copy of the rules has no
+    server to make an id, so it says to make one up once.
+  - **Waiting for an answer.** Nothing calls an agent when the owner answers, and an agent
+    with only MCP tools can't sleep. So the server holds: `wait_for_answer` takes the ids of
+    the cards the agent asked on and returns the moment one is answered, or after 30 seconds
+    (`seconds`, at most 45, under the 60 seconds most MCP clients allow a call). The rules
+    have the agent call it again for up to 10 minutes, then say plainly "answer on the board,
+    then tell me to check the board" and stop. It's the same in an interactive Claude Code
+    session, a `claude -p` run, and any other MCP client. The MCP server stays stateless: the
+    Worker rereads the cards every 2 seconds (`cardDetail`, at most 30 reads a call) and keeps
+    nothing; a client that hangs up ends the loop. Each call counts as hearing from the
+    session, at both ends of the hold, so an agent that's waiting never reads stale and keeps
+    its cards (`// SESSIONS`). A card you delete, or move to the last lane
+    with its question still open, ends the wait too: the answer says the card is gone or
+    finished and to stop waiting on it, the same rule that ends its claim (`// SESSIONS`).
+  - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
+    failing: the rules have the agent call `ask_ceo` on the card with what it needs and options
+    that are whole actions the owner can settle from the board, so it lands on the card face and
+    in "need you". The one it recommends has to work without the missing permission: "Do it
+    another way: …" with the tools it has (write the result into the card's notes, say), or
+    "Skip this card" when there's no other way. "I've allowed it in the terminal, try again" can
+    be offered, never recommended, and once per card: in a headless session, or one that only
+    runs what was approved up front, there's nothing in the terminal to allow, so the retry is
+    refused again and the agent would ask the same thing twice. Writing blocked in
+    the notes isn't enough, because nobody sees it. It can't cover a permission
+    prompt that's still open in an interactive terminal, since the agent is stopped inside the
+    tool call; the Sessions hooks report that one as a session that needs input.
+  - **The rules only use tools the quick start approved.** The copied command allows the
+    board's tools (`--allowedTools mcp__tasks`) and nothing else, and step 4 says "Nothing else
+    needs approving in the terminal". So nothing in the rules reaches for another tool on its
+    own: no shell, no sleep, no background command.
+  - **The event feed is there when you ask for it.** The agent starts it only when the
+    owner's prompt asks for the event feed in so many words, and it has Claude Code's Monitor
+    tool. It used to start it whenever the Sessions hook had printed `Tasks event feed:
+    installed`, which put an approval prompt in a terminal nobody was watching, and a denied
+    one left the session reading "needs input · wants to use Monitor". The hook still prints
+    the line, and the rules say to leave it alone. The feed adds new cards, edits, and deletes
+    to what `wait_for_answer` hears; Claude Code asks once before it runs the script unless
+    it's been allowed. With the feed running, the agent still calls `wait_for_answer` while a
+    question of its own is open, since that's what tells the board it's waiting.
+  - When a tool's behavior changes, check `src/agent-rules.ts` against `src/tool-docs.ts`,
+    `src/mcp.ts`, and `src/shared.ts`.
 - **The page stands on its own.** Someone using the hosted app has no checkout, so the page
-  never points at this file. It hands out `scripts/tasks-presence.mjs` and
-  `scripts/tasks-events.mjs` as downloads (bundled as text at build time) and tells people to
-  keep them in `~/.config/tasks/`, next to the token. Off the hosted origin, its commands set
-  `TASKS_PRESENCE_URL` and `TASKS_URL` to the server they were copied from.
+  never points at this file. Its one command installs `scripts/tasks-presence.mjs` and
+  `scripts/tasks-events.mjs` into `~/.config/tasks/`, next to the token (`// SESSIONS`), and
+  "Do it by hand" still offers both as downloads (bundled as text at build time). Off the
+  hosted origin, its commands set `TASKS_PRESENCE_URL` and `TASKS_URL` to the server they were
+  copied from.
 - **One list of tools.** `src/tool-docs.ts` holds every MCP tool once: the description an agent
   reads and the line a person reads on the Connect page. `src/tools.ts` and `src/mcp.ts` take
   their descriptions from it, and `mcp.ts` fails to compile if it lists a tool that isn't
   registered, so the page can't drift from the server.
 
-- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`, `get_card`,
-  `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
+- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
+  rules, above), `get_board`, `get_card`,
+  `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
-  and `update_card` replaces the whole list.
+  and `update_card` replaces the whole list when it's passed and keeps it when it isn't.
 - **Reading a card.** `get_board` is the overview: it shows the first 120 characters of each
   card's notes, says how many more there are (`… [+480 more characters]`), and lists file
   names. `get_card` returns one card in full: all of the notes, lane, tags, due date, the
@@ -338,7 +611,7 @@ board links to it, and so does the Sessions list.
   needed, then see a consent screen with the app's name and where it returns to,
   and choose Allow. Access tokens last an hour and refresh tokens 90 days. Connected
   apps are listed on the Connect page, and disconnecting one kills its tokens.
-- **Access tokens (fallback).** For clients that take a pasted token (Codex, Glean's
+- **Access tokens.** For the quick start command, and for clients that take a pasted token (Codex, Glean's
   API Key method): `Authorization: Bearer tasks_…`. Per user, at most 10, stored as
   SHA-256 hashes in D1 (`api_tokens`). Only a browser session can create or revoke
   them.
@@ -366,7 +639,10 @@ node scripts/tasks-events.mjs     # one JSON object per line on stdout
 ```
 
 In Claude Code, run that under the Monitor tool and each line wakes the session. The lead
-agent definition (`~/.claude/agents/lead.md`) does this itself.
+agent definition (`~/.claude/agents/lead.md`) does this itself. The working rules from
+`get_started` start it only when your prompt asks for the event feed, because Monitor is an
+approval prompt in the terminal and `wait_for_answer` already covers waiting. The Sessions setup command (`// SESSIONS`)
+installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 
 - **One project per lead.** Tag each card with its repo's folder name (`#receptionist`) next to
   `#agent`, and run one lead per repo. `tasks-events --tag receptionist` passes on only that
@@ -401,7 +677,8 @@ When an agent needs you to decide something, it asks on the card and you answer 
 - **Asking.** The MCP tool `ask_ceo` takes a card id, a one-line question, 2 to 4 options, and
   optionally which option the agent recommends (counting from 1). The card gets `#needs-ceo` and
   holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
-  notes. Asking again replaces the question.
+  notes. Asking again replaces the question. It also takes `session_id`, the id the agent
+  claimed the card with, so the board can say who's waiting (below).
 - **Answering.** The card face shows the question with a button per option, the recommended one
   outlined and marked `REC` ("recommended" where there's room). On a touch screen the buttons
   on the card face take two taps, since that's where a stray tap lands and an answer reaches
@@ -411,16 +688,61 @@ When an agent needs you to decide something, it asks on the card and you answer 
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. When the bar is short on room, and always on a phone, the
   count is all that shows.
+- **Who's waiting.** The session that asked reads `needs input` and `asked: <the question>`
+  from the moment it asks until you answer: on its row in Sessions, on the session line of
+  the card (the line's tooltip has the question; the question itself is right under it), and
+  as one line under the question in the "need you" list: agent · machine · project, and how
+  long the question has been open (`waiting 4m`). The agent keeps its claim while it waits,
+  which is what keeps that line on the card. The mechanics are in `// SESSIONS`, under
+  "A session that asked".
+- **One count for everything waiting on you.** "Need you" also counts the sessions that are
+  stopped at a prompt (state needs input, heard from in the last 5 minutes; see `// SESSIONS`),
+  and lists them under the questions: project, what it wants, machine, and Copy resume command.
+  Those can't be answered from the board, so the row is the way back to the terminal. Three
+  questions and one blocked session read "4 need you" (`AsksButton` in `src/client/Ask.tsx`).
+- **One decision counts once.** A session that needs input while it holds the claim on a card
+  with an open question is the same decision as that question, whether it's waiting on the
+  answer or stopped at a terminal prompt as well. It counts as the question, and the session
+  shows as one line under it instead of as a row of its own. A blocked session that holds no
+  card with a question still counts. An asker that stopped polling is still shown under its
+  question, marked stale, so you know nobody is listening for that answer right now. The rule is `blockedSessions` in
+  `src/presence-shared.ts`, and the top bar, the list, the demo, and the front page's sample
+  bar all read it.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
   Taking `#needs-ceo` off by hand clears the question without an answer.
-- **The agent hears it.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
+- **The agent waits for it.** `wait_for_answer` over MCP holds for up to 30 seconds and
+  returns as soon as one of the cards it was given is answered, with that card in full. It also
+  returns when a card was deleted, was moved to the last lane with its question still open, or
+  had its question cleared by hand. The working rules have
+  an agent call it in a loop for up to 10 minutes (`// CONNECT_AN_AGENT`). No shell, no feed.
+  Every call counts as hearing from the session, so it doesn't go stale while it waits.
+- **The feed says it too.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
   and `question`, so the agent acts on it without reading the card:
   `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?"}`.
   `get_board` shows an open question as `ASKING: … [1) … | 2) …]` and the last answer as
   `ANSWERED: "…" to "…"`, ahead of the notes. An `answered` event without `answer` still means
   what it always did: you took `#needs-ceo` off yourself.
+- **Stuck is a question too.** An agent that can't go on (a tool was refused, something is
+  missing) asks with `ask_ceo` what to do about it, so the card shows it and "need you" counts it.
+- **The status line is on the card.** When a card's notes open with a `STATUS:` line (under
+  any `ANSWER:` lines), the card face shows it as one line of small mono text, two lines at
+  most, so nobody opens a card to see what its agent is doing (`statusLine` in
+  `src/shared.ts`, drawn by `CardFace`). Agents often open the line with a date
+  (`STATUS: 2026-10-04 — read the folder…`), which would take the room the news needs, so the
+  face leaves a leading date or date and time off (`withoutLeadingDate`, used by `faceLine`).
+  The notes keep the line as written, and the face's tooltip shows all of it. A card with an open question shows the question
+  instead, and a card in the last lane shows neither.
+- **Right after you answer, the card says what you answered.** The STATUS line an agent wrote
+  before asking usually says it's waiting on you, and it stays in the notes until the agent
+  rewrites it, some seconds after your tap. So an answer remembers the STATUS line the card
+  had at that moment (`was` on `answer`), and while the card's STATUS is still that one, the
+  face shows `answered: <your answer>` in its place. The agent's next STATUS line takes over;
+  moving or retagging the card doesn't bring the old one back. A card with no STATUS line
+  shows the answer the same way until it gets one. The rule is `faceLine` in `src/shared.ts`,
+  and `npm run check:nudge` runs it. An encrypted board is the same as any
+  other here: the browser has the decrypted notes, and nothing new is stored or sent.
 - **Undo.** Undoing an answer puts the question back, but nothing tells the agent, the same as
   every other undo. If it already acted, say so on the card.
 - **Encrypted boards** have no questions. They'd be stored unencrypted, and MCP is closed there.
@@ -430,8 +752,9 @@ For a lead agent's instructions:
 ```
 When you need Scott to decide something, call ask_ceo on the card with a one-line question and
 2 to 4 options that are each a complete action, and say which you recommend. Put the reasoning
-in the notes under the status line. Leave the card in Doing and move on. When an `answered`
-event arrives with an `answer`, act on that answer; without one, reread the card.
+in the notes under the status line. Pass your session id to ask_ceo, leave the card in Doing,
+keep your claim on it, and move on. When an `answered` event arrives with an `answer`, act on
+that answer; without one, reread the card.
 ```
 
 ## // GAUNTLET
@@ -477,7 +800,18 @@ The Sessions button in the top bar lists every Claude Code session that's report
 machine: grouped by project, the ones waiting on you first. A row shows the state (working,
 needs input, idle), the agent and machine, one line about its last action, and how long ago it
 was heard from. After 5 quiet minutes a row is marked stale. "Copy resume command" copies
-`cd <folder> && claude --resume <id>` for the machine it runs on. A card that a lead agent has
+`cd <folder> && claude --resume <id>` for the machine it runs on. A session that never sent a
+folder has nothing to resume, so its row has no such button; one that sent `X-Tasks-Link` shows
+"open session" either way. A session that didn't say its project is listed under "No project",
+and a machine it didn't name is left off the row. An agent with no hooks at all (Cursor, Codex,
+anything that only speaks MCP) still gets a row, from its claims: see Claiming cards below.
+The button's count is the
+sessions that are live (heard from in the last 5 minutes, and not an MCP-only session that's
+idle; see "A session that only speaks MCP" below), and it never turns orange: the ones that need input are counted on
+"need you" beside it, in one list with the open questions (`// QUESTIONS`), so there's one
+number to watch. A stale session isn't counted there. Claude Code's "waiting for your input"
+notice puts every finished session in needs input after a minute, so without that cutoff the
+count would only ever go up. A card that a lead agent has
 claimed shows the same state line under its title, and its editor shows the session's whole
 row, resume command included.
 
@@ -489,13 +823,57 @@ transcripts in `~/.claude/projects` on the machine that ran them.
 resume command), machine, agent kind, state, the last-action line, when it started, and when it
 was last seen. The last-action line is a tool name plus a file name (`Edit: server.ts`), a Bash
 call's description when it has one (never the command), or Claude's own notification text
-(`Claude needs your permission to use Bash`). Rows are deleted 24 hours after they were last
-updated, when the session ends, and all at once when the board turns encryption on. At most 200
-are kept.
+(`Claude needs your permission to use Bash`). For a session with no hooks it's a line
+about the card, like `claimed "<card title>"` or `finished "<card title>"`. Rows are deleted
+24 hours after they were last updated, when the session ends, and all at once when the board
+turns encryption on. At most 200 are kept.
 
-**Install the hook** on each machine (this goes in `~/.claude/settings.json`; merge it with any
-hooks already there). It uses the same token file as `// AGENT_EVENTS`:
-`~/.config/tasks/token`, or `TASKS_TOKEN`.
+Per claim: the card's id, the session's id, the agent kind, and when it was claimed. While a
+question that session asked on the card is open (`ask_ceo`), the claim also holds a copy of
+the question and when it was asked, which is how the row reads `needs input` and `asked: …`
+without that being written into the row. The copy comes off when you answer or the question is
+taken back. A claim ends when its card is done or deleted, when it's released, when its
+session ends, and 15 minutes after the session was last heard from; encryption erases them
+with the rows. Card text is copied here in those two places and no others: a title in a
+hookless session's last-action line, and an open question on its claim. A session's row is
+made by its first hook report, its first `claim_card`, or an `ask_ceo` that names a session;
+`wait_for_answer` only moves last-seen on a row that's already there. The privacy page
+(`src/client/Legal.tsx`) says the same in plainer words; change them together.
+
+**Install the hook** on each machine with one command. The Connect page shows it with a fresh
+token filled in (`/tasks/connect#sessions`; "Create a token" is right there):
+
+```sh
+curl -fsSL https://askscottpierce.com/tasks/setup.mjs \
+  | TASKS_TOKEN='tasks_…' \
+    node --input-type=module -
+```
+
+- **What it changes.** It writes the token to `~/.config/tasks/token` (mode 600), puts
+  `tasks-presence.mjs` and `tasks-events.mjs` next to it, and adds the seven hooks below to
+  `~/.claude/settings.json`. Nothing else.
+- **What it keeps.** Every hook and setting already in `settings.json`, in order; its hooks go
+  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`
+  and prints that path: with `~` for your home folder, or in full when the file lives somewhere else.
+  A second run changes nothing and makes no second backup. An event that already has a hook
+  running `tasks-presence.mjs`, from any path, counts as done, so hand-added hooks pointing at
+  a checkout aren't doubled. A symlinked `settings.json` is edited where it really lives.
+- **What stops it, before anything is written.** A `settings.json` that isn't valid JSON, a
+  token that doesn't start with `tasks_`, or a token the server refuses. It checks the token
+  with one empty `POST /tasks/api/presence`, which stores nothing; with no network it says the
+  token is untested and carries on. `--dry-run` on the end prints the plan, writes nothing,
+  and sends nothing.
+- **How it's served.** `scripts/tasks-setup.mjs` is the installer. The Worker answers
+  `/tasks/setup.mjs` (`src/server.ts`; the Worker answers every `/tasks` address) with that file plus the two
+  scripts and its own origin written into it (`buildSetup` in `src/setup.ts`), so one download
+  is everything that lands on the machine and it can be read before it's run. The token goes
+  in the environment, never in a URL. From a checkout, `TASKS_TOKEN=… node scripts/tasks-setup.mjs`
+  installs the copies next to it.
+- Run with no `TASKS_TOKEN`, it reuses the token already saved, which is how to pick up newer
+  scripts later. `npm run check:setup` runs all of this against a throwaway HOME.
+
+**Or by hand** (this goes in `~/.claude/settings.json`; merge it with any hooks already there).
+It uses the same token file as `// AGENT_EVENTS`: `~/.config/tasks/token`, or `TASKS_TOKEN`.
 
 ```json
 {
@@ -513,16 +891,22 @@ hooks already there). It uses the same token file as `// AGENT_EVENTS`:
 
 `scripts/tasks-presence.mjs` reads the hook's JSON on stdin and posts about 200 bytes: session
 id, folder, event name, tool name, file path, and notification text. The rest of the payload
-never leaves the machine. It never prints, always exits 0, gives up after 3 seconds, and sends
-tool-use events at most once every 30 seconds per session. The two events that fire constantly
+never leaves the machine. It prints only on `SessionStart`, where Claude Code adds a hook's
+output to the session's context: `Tasks session id: <id>`, so the agent claims cards under
+the id this row has without running a command, and `Tasks event feed: installed` when
+`tasks-events.mjs` sits next to it. It always exits 0, gives up after 3 seconds, and sends
+tool-use events at most once every 30 seconds per session, except that the first tool event
+after any other kind of event always goes (below, "A settled prompt clears"). The two events that fire constantly
 (`UserPromptSubmit`, `PostToolUse`) run in the background with `async`. The rest run in line,
 which costs about a tenth of a second each: a backgrounded `Stop` hook is killed when a
 `claude -p` run exits, so the row would be left saying "working".
 The machine name is the host's name, or `TASKS_MACHINE`. On a box without this repo, copy the one
-file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) has the
-same steps for that case: a download of the script, and this JSON with a Copy button, pointed at
-`~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
-hooks") and when it isn't ("Add another machine").
+file; it has no dependencies beyond Node 22. The Connect page (`/tasks/connect#sessions`) keeps the
+same steps under "Do it by hand": a download of each script, and this JSON with a Copy button,
+pointed at `~/.config/tasks/tasks-presence.mjs`. The Sessions list links there when it's empty ("Set up the
+hooks") and when it isn't ("Add another machine"). When any row came from an agent with no hooks
+(no folder and no link, which is what the quick start alone gives you), one line under the list
+says why that row has no resume command and links there too ("add the session hooks").
 
 **Or with no script, hooks of type `http`.** The same endpoint takes Claude Code's hook payload
 directly:
@@ -554,33 +938,159 @@ slow a session; the `X-Tasks-Presence` response header says what happened (`stor
 | `SessionStart` | idle | session started |
 | `UserPromptSubmit` | working | got a prompt |
 | `PreToolUse`, `PostToolUse`, anything else | working | `Edit: server.ts` (at most one write per 30s while already working) |
-| `PermissionRequest` | needs input | wants to use Bash |
-| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
-| `Notification` (`auth_success`, `agent_completed`, `quota_…`) | unchanged | the notification's message |
+| `PermissionRequest` | needs input, until the session's next event of any kind | wants to use Bash |
+| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
+| `Notification` (`auth_success`, `agent_completed`, `elicitation_complete`, `elicitation_response`, `quota_…`) | unchanged | the notification's message |
 | `Stop` | idle | finished its turn |
 | `SessionEnd` | row deleted | |
+| `ask_ceo` over MCP, while the question is open | reads needs input, over whatever the rows above last wrote | asked: Limit by IP or by account? |
+| You answer it, or the question is taken back | what the rows above last wrote | the same |
+
+**A settled prompt clears.** `needs input` from a `PermissionRequest` or a `Notification` isn't
+a state the session has to leave by a matching event: the next event of any kind replaces the
+row, so `PostToolUse` puts it back to working and `Stop` to idle. Approved or denied, the
+session moved on, and the row says so. The catch was the throttle. A tool event inside the
+30-second window was dropped before it was sent, so a prompt you'd answered could sit at
+"needs input · wants to use Monitor" for a minute with nothing waiting. Now any event that
+isn't a tool event clears the script's stamp, and the first tool event after it is always
+sent; the server's own throttle only ever applied to a row that already says working. A
+denied tool fires no `PostToolUse` of its own, so the row clears on the session's next tool
+call or at the end of its turn. Add a `PreToolUse` hook beside the others if you want it a
+call sooner; the endpoint takes it as a tool event.
 
 **Kept apart from the board.** Sessions and claims live in their own Durable Object, `Presence`
 (`src/presence.ts`), one per user, in its own SQLite tables. Nothing goes through
 `TodoAgent.mutate`, so a session reporting in never adds an undo step, flashes a card, reindexes
-search, or publishes an agent event. The browser reads the list over its own WebSocket,
+search, or publishes an agent event. The board tells `Presence` one thing, and nothing comes
+back: which cards a change just finished or deleted, so their claims can end (Claiming cards,
+below). The browser reads the list over its own WebSocket,
 `/tasks/presence`, which takes the session cookie and refuses other origins like the board's.
 
 **Claiming cards.** Several lead agents can work one board. Before starting a card, a lead calls
-the MCP tool `claim_card` with the card's id and its session id (`CLAUDE_CODE_SESSION_ID` in
-Claude Code). The `Presence` object handles one call at a time, so of two leads asking at once,
+the MCP tool `claim_card` with the card's id and its session id: Claude Code's own when the
+hooks have printed it into the session, otherwise the one `get_started` handed it
+(`// CONNECT_AN_AGENT`). The `Presence` object handles one call at a time, so of two leads asking at once,
 one gets the card and the other is told who has it. `get_board` ends with the list of claimed
 cards, and `release_card` gives one back. A claim holds for 15 minutes after its session was
 last heard from, which is longer than the 5-minute stale mark on purpose: a lead that's thinking
-keeps its card, and one that died gives it up without anyone cleaning up. Claiming counts as
-being heard from, so a lead with no hooks installed can still hold cards. Claims aren't written
-on the card, so they don't show up in undo, notes, or search. For a lead agent's instructions:
+keeps its card, and one that died gives it up without anyone cleaning up. Any MCP call that
+names a session counts as hearing from it: `claim_card`, `release_card`, `ask_ceo`, and
+`wait_for_answer`, which also counts for whoever holds the cards it was given. So a lead with no
+hooks installed can still hold cards, and one that's waiting on your answer keeps them. Claims aren't written
+on the card, so they don't show up in undo, notes, or search.
+
+**A finished card isn't claimed.** A claim says a session is working on the card, and nothing is
+working on a card that's done or gone. So a claim ends the moment its card reaches the last lane
+or is deleted, whoever did it: the agent over MCP (with or without `release_card`), you in the
+app, or the assistant. The card stops saying "working" right then instead of 15 minutes later.
+A `release_card` that arrives afterward finds nothing to release and says so, which is fine.
+
+- **Where it happens.** `TodoAgent.mutate` (and undo and redo, which change the board without it)
+  compares the board before and after with `endedCards` in `src/presence-shared.ts`. If a card
+  ended, it calls `Presence.finish`, which drops the claim. That call is one-way and runs after
+  the change is saved: no undo step, no flash, no agent event. A board with one lane has no done
+  lane, so only a delete ends a claim there. An encrypted board keeps no presence and is skipped.
+- **What counts.** Being in the last lane now and not before. That covers a move, a card added
+  straight to the last lane, and a lane change that makes another lane the last one. A card
+  moved back out of the last lane is just a card again.
+- **Undo doesn't bring a claim back.** Undo the move and the card returns to its lane unclaimed.
+  The agent claims it again if it's still on it; a claim the board invented would say a session
+  is working when nobody has heard that from the session. Redoing the move, or undoing the
+  "Add card" that made a claimed card, ends the claim like any other change does.
+- **The session's row.** A session that reports through hooks keeps the row its hooks wrote.
+  One that only claims gets a new last-action line, below.
+
+**A session that asked.** A session with a question open is waiting on you, and both the card
+and Sessions say so until you answer. How it works, and what was decided:
+
+- **`ask_ceo` says who asked.** It takes an optional `session_id`. When the agent leaves it
+  off, the asker is whoever holds the claim on the card, which is the agent itself when it
+  claimed first, as the rules have it. So forgetting the id costs nothing. A named session
+  that holds no claim gets one by asking, unless another live session has the card; then the
+  question stands on the card with no session tied to it. `Presence.asked` in `src/presence.ts`.
+- **The agent keeps its claim while it waits.** The rules used to say release, so another
+  agent could take the card. But a card waiting on its owner isn't up for grabs (the rules
+  already skip cards showing ASKING), and the held claim is what puts the session's line on
+  the card. So the question lives on the claim (`asked` on `Claim`), not in a table of its own.
+- **Needs input is read, not written.** The row underneath keeps whatever hooks or claims last
+  wrote, like `working · mcp__tasks__wait_for_answer`. `Presence.view` runs the rows through
+  `withAsks` (`src/presence-shared.ts`): a session whose claim carries a question reads
+  `needs input` and `asked: <question>` (its newest, with several open). Hook events keep
+  landing underneath and can't flip it back, and the moment the question closes the row is
+  simply what was last stored. The demo and the front page's sample board build their rows
+  with the same function.
+- **Answering.** The board tells `Presence` which questions a change closed (`settledAsks`,
+  next to `endedCards`): answered, or taken back by removing `#needs-ceo` or undoing the ask.
+  The question comes off the claim and the claim stays. A hookless session's row goes back to
+  working and says `got your answer on "<card>"`; a session with hooks shows what its hooks
+  last wrote. Nobody was heard from, so last-seen doesn't move. Within about 2 seconds the
+  agent's `wait_for_answer` returns, it claims again, and the row is its own from there.
+- **A waiting agent never goes stale.** Each `wait_for_answer` call moves last-seen for the
+  session it names and for the sessions holding the cards it names (`Presence.touch`), when
+  the call starts and again when a hold ends unanswered. An agent 10 minutes into waiting was
+  heard from at most 30 seconds ago.
+- **When it gives up.** The rules stop the wait at 10 minutes. The agent stops calling, the row
+  goes stale 5 minutes later (still under its question in "need you", marked stale), and
+  after 15 quiet minutes the claim lapses and takes the question's tie with it: the card keeps
+  its question and still counts once, with no session line. The next agent run takes
+  ANSWERED cards first, so the answer isn't lost.
+- **Undo doesn't bring the tie back.** Undo an answer and the question returns to the card;
+  the session keeps its claim but no longer reads needs input, the same way a claim that
+  ended stays ended. Nothing told the agent either.
+- **Passed on:** leaving it to the agent to re-claim on a timer while it waits (it has no
+  timer), a separate "waiting" state (needs input is what it is), and writing needs input into
+  the stored row (the next hook event would overwrite it).
+
+**A session that only speaks MCP.** An agent with no hooks is heard from through its MCP calls
+alone, and `claim_card`, `release_card`, and `ask_ceo` write its whole row. `agent`, `machine`, and `project`
+on `claim_card` are how it says who it is; passing them again on a later claim replaces what it
+said before, and leaving them off keeps it. The card's session line reads the name from the
+session's row, the same one Sessions shows, so a later `claim_card` without `agent` can't put
+"agent" on the card while Sessions says "cursor". MCP can read the board, so the last-action line
+names the card by its title.
+
+| Call | State | Last action |
+|---|---|---|
+| `claim_card`, got the card | working | claimed "Fix the login redirect" |
+| `claim_card`, refused | working if it holds another card, else idle | asked for "Fix the login redirect", which another session holds |
+| `release_card`, holds another card | working | released "Fix the login redirect" |
+| `release_card`, its last card | idle | released "Fix the login redirect" |
+| `ask_ceo` on a card it holds | needs input while the question is open | asked: Limit by IP or by account? |
+| You answered | working (it kept the card) | got your answer on "Fix the login redirect" |
+| The question was taken back | working | its question on "Fix the login redirect" was taken back |
+| `wait_for_answer` | unchanged; last-seen moves | unchanged |
+| An agent moved the card to the last lane | idle, or working if it holds another card | finished "Fix the login redirect" |
+| You or the assistant moved it there | same | "Fix the login redirect" was moved to Done |
+| The card was deleted | same | "Fix the login redirect" was deleted |
+| 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
+
+So such a session is "working" only while it holds a card. **Idle means finished, and isn't
+counted as live.** With no hooks, nothing says the agent's process is still running, and an
+idle MCP-only session holds no card and waits on nothing. So the Sessions button doesn't count
+it (`isLive`): a one-shot agent that moved its card to Done and exited drops out of "N live
+sessions" right then, not 5 minutes later, while its row stays in the list saying what it
+finished. The rules' last step has the agent release anything it still holds, which is what
+makes its row idle. An idle session with hooks still counts: its terminal is open. The test
+for "MCP-only" is a row with no folder, since every hook report carries one. A refused claim counts as being heard
+from and nothing more. Once a hook reports for a session, the event table above is in charge of
+its row, and a claim or release only moves its last-seen time (and fills in the agent kind when
+the hooks didn't send one). The rules are `afterClaim`, `afterRelease`, `endedCards`, and
+`afterEnded`, `afterAsk`, `settledAsks`, `afterSettled`, `withAsks`, and `isLive` in
+`src/presence-shared.ts`; `npm run check:presence` runs them, along with the "need you" count. The last three rows don't count as hearing from the session, so its last-seen
+time stays put: the line says "finished" only when an agent made the move, since the board can't
+tell which agent, and says what happened to the card when a person did.
+What a hookless session can't say: that it's stopped at a terminal prompt, or that it's alive
+between MCP calls, which is why the lead instructions below renew the claim. For a lead
+agent's instructions:
 
 ```
-Before you move a card to Doing, call claim_card with its id, your CLAUDE_CODE_SESSION_ID, and
+Before you move a card to Doing, call claim_card with its id, your session id (the "Tasks
+session id:" line in your context, or $CLAUDE_CODE_SESSION_ID), and
 agent "lead". If it's refused, another lead has it: skip that card. Call claim_card again on the
-card you're working at least every 10 minutes, and release_card when you move it to Done or
-hand it to Scott with needs-ceo.
+card you're working at least every 10 minutes. When you ask Scott something with ask_ceo, pass
+the same session id and keep the claim: the card shows you waiting on him. Call wait_for_answer
+with the card's id while you wait. Moving a card to Done releases it for you; call release_card
+only when you give a card up.
 ```
 
 **Encrypted boards keep no presence.** It's metadata about sessions, not card text, so it could
@@ -667,6 +1177,14 @@ for card changes and cancellation.
   plan from D1 on each message.
 - Billing stays off until `STRIPE_PRICE_ID` (var) and the `STRIPE_SECRET_KEY` and
   `STRIPE_WEBHOOK_SECRET` secrets are all set.
+- **Pricing is public and never hard-coded.** `GET /tasks/api/plans` needs no session and
+  returns `{ free: { dailyChats }, pro: { dailyChats, price } | null }`. The caps are
+  `FREE_DAILY_CHATS` and `PRO_DAILY_CHATS`; `price` is `{ amount, currency, interval,
+  intervalCount }` read from Stripe for `STRIPE_PRICE_ID` (amount in the smallest unit) and
+  kept in memory for an hour. With billing off `pro` is `null`, and the landing page shows
+  Free only and says Pro isn't on sale yet. If Stripe can't be reached, or the price is tiered
+  or one-time, `price` is `null` and the page says the price is shown at checkout. The key
+  needs read access to Prices. Don't put a dollar amount in the client.
 
 Setup:
 1. In Stripe, create a product ("Tasks Pro") with a recurring price, and put its `price_…` id in
@@ -677,7 +1195,7 @@ Setup:
    with events `checkout.session.completed` and `customer.subscription.created`,
    `.updated`, `.deleted`, `.paused`, `.resumed`. Copy its signing secret.
 4. `npx wrangler secret put STRIPE_SECRET_KEY` (a restricted key needs write access to
-   Checkout Sessions and Customer Portal, and read access to Subscriptions), then
+   Checkout Sessions and Customer Portal, and read access to Subscriptions and Prices), then
    `STRIPE_WEBHOOK_SECRET`.
 
 Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` prints a
@@ -688,6 +1206,63 @@ Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` pr
 `/tasks/privacy` and `/tasks/terms` (`src/client/Legal.tsx`) are public pages, linked
 from the sign-in screen and from Google's consent screen. Keep the privacy policy in
 step with what the app stores: update it when you add a table, a processor, or a cookie.
+
+## // LINK_PREVIEWS_AND_TITLES
+
+`index.html` carries what a shared link shows for the front page: the title, description,
+canonical URL, `og:*` and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. Only put
+true facts in there: no ratings, no user counts, and no price until billing is on.
+
+**Every page gets its own head.** Link-preview fetchers (Slack, X, iMessage, Hacker News) read
+the raw HTML and don't run JavaScript, and every page is the same `index.html`. So the Worker,
+which answers every `/tasks` page itself, rewrites the head on the way out with `HTMLRewriter`
+(`shell` and `withHead` in `src/server.ts`), from one table: `PAGE_META` in `src/routes.ts`.
+
+| Address | `<title>`, `og:title`, `twitter:title` | Description | Canonical and `og:url` |
+|---|---|---|---|
+| `/tasks/` | the default title | as written in `index.html` | `https://askscottpierce.com/tasks/` |
+| `/tasks/demo` | Demo board · Tasks | a live demo board, no sign-up | `…/tasks/demo` |
+| `/tasks/connect` | Connect an agent · Tasks | from the table | `…/tasks/connect` |
+| `/tasks/pricing` | Pricing · Tasks | from the table | `…/tasks/pricing` |
+| `/tasks/privacy`, `/tasks/terms` | Privacy · Tasks, Terms · Tasks | from the table | their own address |
+| anything else (404) | Not found · Tasks | "There's no page at this address." | removed, and `robots` is `noindex` |
+
+- **To add a page or change a title**, edit `PAGE_META`. A row has a `name` and a
+  `description`; the description is written to `meta description`, `og:description`, and
+  `twitter:description` alike. The client's tab titles come from the same rows: `useTitle`
+  only accepts a name that's in the table, so a title can't say one thing in the HTML and
+  another in the tab.
+- **The front page is the exception.** Its descriptions and JSON-LD stay written out in
+  `index.html`, and the Worker only sets its title, from `DEFAULT_TITLE`. Every other page has
+  the JSON-LD block removed: it describes the product, on the front page.
+- **Canonical URLs always name production** (`SITE` in `src/routes.ts`), whatever host served
+  the page, and have no trailing slash except `/tasks/`. `/tasks/demo/` says `/tasks/demo`.
+- **`og:image` is the same picture everywhere.** A per-page image would need its own render.
+- **`/tasks/pricing` is the front page opened at its pricing section**, with its own title and
+  canonical so a shared pricing link previews as pricing.
+- **Rewritten pages carry no `ETag`**: the file's ETag describes `index.html`, not the page
+  made from it. The Worker never answered a page with a 304 anyway.
+- It works the same under `vite dev` and from the built Worker. Check a page with
+  `curl -s localhost:5173/tasks/demo | grep -iE '<title>|description|canonical|og:|twitter:'`.
+
+- **The share image** is `public/tasks/og.png` (1200x630), and the home-screen icon is
+  `public/tasks/apple-touch-icon.png` (180x180). Both are screenshots of HTML kept in
+  `scripts/og/` (`og.html`, `icon.html`). To change one, edit the HTML, run `npm run og`, look
+  at the PNG, and commit both. The script drives headless Chrome from
+  `/Applications/Google Chrome.app`; set `CHROME=` to use another Chrome or Chromium. It needs
+  a network connection for the Google Fonts, and fails if a PNG comes out the wrong size.
+- **Static files go in `public/tasks/`**, so their path matches their URL and the asset layer
+  serves them. A file anywhere else under `public/` isn't reachable on the `/tasks` routes,
+  and a missing one gets the not-found page with a 404. After adding one, check
+  `curl -sI localhost:5173/tasks/og.png` says `image/png`.
+- X, Slack, and iMessage cache previews. After changing the image, rename it (and the URLs in
+  `index.html`) if the old one has to stop showing.
+- **Tab titles** come from `useTitle` in `src/client/title.ts`: `useTitle("Connect an agent")`
+  gives "Connect an agent · Tasks". Each page calls it once at the top of its component, with a
+  name from `PAGE_META` (or "Board", your own board's tab, which is never in served HTML). The
+  sign-in screen calls it with no name and gets the full default title, because that's the
+  page a shared link lands on. `DEFAULT_TITLE` in `src/routes.ts` is that title; `<title>` in
+  `index.html` should say the same, and the Worker overwrites it with the constant either way.
 
 ## // SIGN_IN_WITH_GOOGLE_AND_MICROSOFT
 
@@ -734,15 +1309,23 @@ npm run db:migrate:local
 npm run dev          # http://localhost:5173/tasks/ — Workers AI is always remote, so `npx wrangler login` first
 npm run dev:local    # no Cloudflare login needed; everything works except the assistant
 npm run typecheck
+npm run build && npx vite preview   # the built Worker, for checking status codes: /tasks/nope is a 404
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
+npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
+npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
+npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
+npm run check:presence   # Sessions rules: what a claim, a refused claim, and a release say, and that one decision counts once
+npm run og               # re-render the share image and home-screen icon from scripts/og/
+npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
+npm run check:launch     # the launch copy against its limits, and the gallery's files and sizes
 ```
 
-The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
+The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
 `src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
-`src/auth.ts` (redirect and cookie paths), `vite.config.ts` (`build.assetsDir`), and
-`wrangler.jsonc` (`routes`, `run_worker_first`).
+`src/auth.ts` (redirect and cookie paths), `src/agent-rules.ts` (the default `base`),
+`vite.config.ts` (`build.assetsDir`), and `wrangler.jsonc` (`routes`, `run_worker_first`).
 
 `.dev.vars` sets `DEV_LOGIN_CODES=1`, which skips sending email: the code shows
 on the sign-in screen and in the terminal. Copy `.dev.vars.example` to create it.
@@ -796,13 +1379,75 @@ the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newe
 - `vite.config.ts` reads the version, the commit, and the changelog when the build starts and
   bakes them in as `__BUILD__` (`src/client/Footer.tsx` reads it). Nothing is fetched at run
   time. The footer shows the newest two releases with entries, 14 lines at most, newest first
-  within each group.
+  within each group. `__BUILD__.counts` is how many entries the changelog holds (all of them,
+  the ones under `[Unreleased]`, and the newest release's), which the landing page quotes.
 - A `+` after the commit means the build had uncommitted changes, so the commit doesn't fully
   say what's running. A deploy from a clean `main` never has one.
 - Cutting a release: `[Unreleased]` becomes `[X.Y.Z] - YYYY-MM-DD` with a fresh empty
   `[Unreleased]` above it, `version` in `package.json` is set to match, and the commit is tagged
   `vX.Y.Z`.
 - To check a deploy landed, compare the footer with `git rev-parse --short HEAD`.
+
+## // LAUNCH
+
+`docs/launch/` is the Product Hunt kit. Nothing in it deploys or posts anything.
+
+- `product-hunt.md`: the form's fields, the maker's first comment, ready answers, and the shorter
+  pitches for X, LinkedIn, and Hacker News. Limits and where they came from are at the top.
+- `checklist.md`: what to do before, on, and after launch day, in order.
+- `video.md`: a shot list for a short demo video.
+- `gallery/`: six gallery images and the 240x240 thumbnail.
+
+```sh
+npm run shots                                  # make the gallery from http://localhost:5190
+npm run shots -- http://localhost:5173 --only 03,06   # just some of them; `thumb` is the thumbnail
+npm run shots -- https://askscottpierce.com --only 01,02,03,04,06,thumb   # from the live site (not 05)
+npm run check:launch                           # count the copy against its limits, and check the gallery
+```
+
+Each image is one idea: a crop of the real app set on a 1270x760 dark canvas with a
+`// KICKER`, a headline, and usually a line under it, saved at 2x. In order: the board with an
+agent's question on a card, the "need you" list, the Sessions list, an open card, the quick
+start's command, and the "need you" list on a phone. The canvas is HTML in `scripts/shots.mjs`
+(`canvas()`), so a headline is changed there and the gallery is shot again. A headline says
+"one tap" only over the "need you" list, because a card on the board takes two taps on a touch
+screen (`// QUESTIONS`).
+
+`scripts/shots.mjs` drives the Chrome in `/Applications` over the DevTools protocol (`CHROME=` to
+use another), headless and with a throwaway profile, so there's no dependency to install and it
+never touches the Chrome you're signed in to. How the crops are made:
+
+- A list or a dialog is cropped to its own edges, with everything else on the page hidden for the
+  shot, so no sliver of the board shows around it.
+- A crop that's taller than the canvas runs off the bottom edge, and the cut is put in the gap
+  between two rows of the open card's notes, never through one.
+- `05` is the only signed-in picture. The script signs up through the landing page's form with a
+  made-up `shots-…@example.com` address and the code a dev server shows on screen
+  (`DEV_LOGIN_CODES=1`), adds the sample card, copies the command, and presses Show the steps,
+  since the block folds after a copy and the command is inside it. So `05` comes from a dev
+  server only; against the live site it fails and says so. It finds the quick start by structure
+  (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
+  and 3, the command in a `role="status"` block), not by wording. The token in the command is
+  dotted out and the local address is swapped for the hosted one. The picture is the command
+  block alone (the command, its Copy button, and the line about the token), because Product
+  Hunt shows a gallery image 635px wide until it's clicked, and at that size the four steps'
+  small print can't be read at any zoom that keeps the command in frame. The steps are said in
+  the canvas's line under the headline instead. The script narrows the window until the block,
+  drawn at 2x, is as wide as the canvas, which puts the app in its narrow layout; when the
+  command runs longer it steps the zoom down until the whole block fits. After a re-shoot,
+  shrink it and look: `sips -Z 635 --out /tmp/05.png docs/launch/gallery/05-quick-start.png`.
+
+Each shot waits for the thing it's a picture of and fails with the reason when it isn't there,
+or when the canvas wouldn't fit (a headline too wide, a list too tall), so a change to the demo
+or a page that breaks a shot shows up as a failed run. Two runs against the same build give the
+same bytes. The canvas's fonts come from Google Fonts, so it needs the network. Look at the PNGs
+after every run.
+
+The copy's limits are checked from the `<!-- count: … -->` comment above each block
+(`scripts/check-launch.mjs`). The same check fails when a gallery image named in `product-hunt.md`
+is missing, isn't 2540x1520 or 1270x760, or is 3 MB or more, and when `gallery/` holds a picture
+the copy doesn't name. Every claim in the copy has to be true of the app as built; when a
+feature changes, check `docs/launch/` the same way you'd check the landing page.
 
 ## // DEPLOY
 
