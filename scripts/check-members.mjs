@@ -1525,6 +1525,72 @@ section("a member who floods");
   for (const t of [fo, calm, back, big, w, watch, ...tabs]) t.close();
 }
 
+// ---------- HTTP calls about someone else's board ----------
+
+section("a member's HTTP calls are counted too");
+{
+  // With the socket's bucket empty, 150 access checks and 120 parallel 200 KB downloads used to
+  // all be answered, each costing D1 reads and a call into the owner's board. A viewer could.
+  const H = rules.MEMBER_HTTP_RATE;
+  const fo = await open(floodOwner);
+  await fo.wait((f) => f.type === "cf_agent_state");
+  const fileCard = (await fo.rpc("addCard", [fo.state().lanes[0].id, "Card with a file"])).result;
+  const bytes = new Uint8Array(200 * 1024).fill(120);
+  const up = await call(floodOwner, "POST", `/api/attachments?card=${fileCard}`, bytes, { "Content-Type": "text/plain", "X-Filename": "big.txt", "Content-Length": String(bytes.length) });
+  const fileId = up.data?.attachment?.id;
+  ok("the owner attaches a 200 KB file", up.status === 200 && !!fileId, up.status);
+  const accessOf = (who, board = floodOwner.id) => call(who, "GET", `/api/board/access?board=${board}`);
+  const download = (who) => call(who, "GET", `/api/attachments/${fileId}?board=${floodOwner.id}`);
+  const count = (list, status) => list.filter((r) => r.status === status).length;
+  const refill = async () => { console.log(`     … waiting ${H.burst / H.perSecond + 1}s for the HTTP allowance to refill`); await sleep((H.burst / H.perSecond + 1) * 1000); };
+
+  // A page that opens a shared board: the access check, then a dozen images at once.
+  const page = [await accessOf(watcher), ...(await Promise.all(Array.from({ length: 12 }, () => download(watcher))))];
+  ok("a page with a dozen attachments loads: the access check and every file", count(page, 200) === 13 && page.slice(1).every((r) => r.text.length === bytes.length), page.map((r) => r.status).join());
+  await refill();
+
+  let t0 = Date.now();
+  const checks = await Promise.all(Array.from({ length: 150 }, () => accessOf(watcher)));
+  let slow = checks.filter((r) => r.status === 429);
+  console.log(`     … 150 access checks from a viewer in ${Date.now() - t0} ms: ${count(checks, 200)} answered, ${slow.length} told to slow down`);
+  ok(`of 150 access checks at once, about ${H.burst} are answered`, count(checks, 200) >= H.burst - 5 && count(checks, 200) <= H.burst + 8 && count(checks, 200) + slow.length === 150, [count(checks, 200), slow.length]);
+  ok("the rest are 429 slow_down with Retry-After, and name nothing", slow.length > 0 && slow.every((r) => r.data?.code === "slow_down" && Number(r.headers.get("retry-after")) >= 1 && r.headers.get("cache-control") === "no-store" && !r.text.includes(floodOwner.email)), slow[0]?.text);
+  // (A token comes back every 200 ms, so each of these spends what trickled in first.)
+  const drain = (who, fn = accessOf) => Promise.all(Array.from({ length: 8 }, () => fn(who)));
+  await drain(watcher);
+  const knock = await open(watcher, { board: floodOwner.id, unpaced: true });
+  ok("the board's socket is counted with them", refused(knock, 429), how(knock));
+  knock.close();
+  ok("their own board isn't counted against it", (await call(watcher, "GET", "/api/board/access")).status === 200 && (await call(watcher, "GET", "/api/boards")).status === 200);
+
+  // Downloads, by another member with a full allowance. These read R2, and the board counts them exactly.
+  t0 = Date.now();
+  const files = await Promise.all(Array.from({ length: 120 }, () => download(flooder)));
+  slow = files.filter((r) => r.status === 429);
+  console.log(`     … 120 parallel 200 KB downloads from a viewer in ${Date.now() - t0} ms: ${count(files, 200)} served, ${slow.length} told to slow down`);
+  ok(`of 120 parallel downloads, about ${H.burst} are served and the rest are 429`, count(files, 200) >= H.burst - 5 && count(files, 200) <= H.burst + 8 && count(files, 200) + slow.length === 120 && slow.every((r) => r.data?.code === "slow_down" && Number(r.headers.get("retry-after")) >= 1), [count(files, 200), slow.length]);
+  await drain(flooder, download);
+  ok("an upload past it is refused before the file is read", (await call(flooder, "POST", `/api/attachments?card=${fileCard}&board=${floodOwner.id}`, bytes, { "Content-Type": "text/plain", "X-Filename": "x.txt", "Content-Length": String(bytes.length) })).status === 429);
+
+  // Someone who isn't on the board at all. Refusing them has to be cheap, and say nothing.
+  const knocker = await account("knocker");
+  const real = await Promise.all(Array.from({ length: 150 }, () => accessOf(knocker)));
+  ok(`a stranger's first ${H.burst} or so are the usual 404, and the rest are 429 with no lookup behind them`, count(real, 404) >= H.burst - 5 && count(real, 404) <= H.burst + 8 && count(real, 404) + count(real, 429) === 150, [count(real, 404), count(real, 429)]);
+  const fake = randomBytes(16).toString("hex");
+  const mixed = await Promise.all(Array.from({ length: 8 }, () => [accessOf(knocker), accessOf(knocker, fake), call(knocker, "GET", `/api/attachments/${fileId}?board=${fake}`)]).flat());
+  const slowed = mixed.filter((r) => r.status === 429);
+  ok("slowed down, a real board, a made-up one, and a file on either all answer the same", slowed.length >= 20 && new Set(slowed.map((r) => r.text)).size === 1 && mixed.every((r) => r.status === 429 || r.status === 404), mixed.map((r) => r.status).join());
+  ok("an id that can't be a board is a 404 that costs nothing, allowance or not", (await call(knocker, "GET", `/api/attachments/${fileId}?board=nope`)).status === 404 && refused(await open(knocker, { board: "../x" }), 404));
+  const out = await Promise.all(Array.from({ length: 40 }, () => accessOf(null)));
+  ok("signed out, every one is a 401 before anything is counted or read", count(out, 401) === 40);
+
+  await refill();
+  const again = [await accessOf(watcher), await download(watcher), await download(flooder), await accessOf(knocker)];
+  ok("after a quiet spell it all works as before", again.map((r) => r.status).join() === "200,200,200,404", again.map((r) => r.status).join());
+  await fo.rpc("deleteCard", [fileCard]);
+  fo.close();
+}
+
 section("open sockets follow the owner's plan");
 {
   const wait = (RECHECK_S + 15) * 1000;

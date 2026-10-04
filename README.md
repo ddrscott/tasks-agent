@@ -1422,6 +1422,7 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 | Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
 | The board as stored (JSON, UTF-8 bytes) | 768 KB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine. The board's Durable Object keeps it in one 2 MB row, so the owner always has more than half of it to themselves |
 | Card deletions by one member | 200 a UTC day | `[delete_limit] …`. Each one is a row in the audit log, which nothing prunes |
+| HTTP calls one account makes about someone else's board (`?board=`: the access check, uploads, downloads, the socket upgrade) | a bucket of their own: 60 at once, refilling 5 a second (`MEMBER_HTTP_RATE`) | `429 {"error":"Slow down. …","code":"slow_down"}` with `Retry-After`, before any membership lookup |
 | Board pushes to one member socket | at most one every 200 ms | a burst of writes is coalesced: each socket gets the board as it stands, five times a second at most. One change on a quiet board goes out at once |
 
 The bucket is per member id and lives in the board object's memory; uploads draw on it too
@@ -1432,6 +1433,29 @@ code in brackets is shown without it (`plainError`). Measured with `check:member
 succeed in about 4.5 seconds and push 337 MB to each watching socket (the whole board, once per
 write). Now 19 get through, 100 are refused, the socket is closed in about 0.3 seconds, and a
 watching socket is sent the board twice, about 84 KB.
+
+**HTTP calls are counted too.** The socket's bucket only ever saw frames. With it empty, a
+viewer's script got 150 `GET /api/board/access?board=` answered in half a second and 120
+parallel 200 KB downloads in 0.7, each costing two D1 reads and a call into the owner's board
+object, the downloads an R2 read on top. Now every HTTP call about someone else's board
+spends from a per-account bucket first: 60 at once, which is a board opening with a few dozen
+image attachments on screen, then 5 a second. Past it the answer is `429` with `Retry-After`.
+
+- **Two counts, on purpose.** The first is in the Worker (`spendBoardCall` in
+  `src/members.ts`), keyed by the signed-in account and kept in the isolate's memory. It's
+  checked before the membership read, so it covers strangers and made-up board ids as well,
+  and a refused call wakes no board. Memory is per isolate and Cloudflare can run several, so
+  it's a floor on the work, not an exact number. The second is in the board's own object
+  (`fileFor` in `src/agent.ts`), per member, in the same call that says whether the file is
+  on the board: that one is exact, and it sits in front of every R2 read a member can cause.
+  Uploads were already charged to the socket's bucket (`uploadPolicy`).
+- **What a refusal costs, in order.** Signed out: a 401 with no read at all (no cookie, no
+  lookup). A `board` that can't be an id: a 404 with nothing but the session read. Past the
+  allowance: a 429 with nothing but the session read. A stranger inside the allowance: the
+  session read and one membership read, then the same 404 as always. The 429 is the same for a
+  member, a stranger, and a board that doesn't exist, so it says nothing about any of them.
+- **Your own board isn't counted**, and neither is `/api/boards`. The app waits out a 429 on
+  the access check (`Retry-After`, three tries) instead of reading it as "not shared with you".
 
 **How fast a member can make the board bigger.** A writer used to be able to take the board to
 1 MB in about three seconds: 45 frames of 4,000 control characters, which are six bytes each
@@ -1591,7 +1615,9 @@ and `GET /tasks/api/attachments/<attachment id>?board=<owner id>`. A viewer's up
 `403 {"error":"…","code":"read_only"}`. Anyone without access, a bad id, and a staged upload
 (`stage=1`) by a member are `404 {"error":"not found"}`. A member can download only files on
 the board right now (not ones undo could bring back), and their copies are `Cache-Control: no-store`.
-Uploads land under the owner's prefix and count against the owner's quota.
+Uploads land under the owner's prefix and count against the owner's quota. Both calls answer
+`429 slow_down` with `Retry-After` past the HTTP allowance (**What a member can cost you**), and an
+upload to a card tagged `#agent` or `#gauntlet` is `403 agent_card`.
 
 **The API.** All of it takes the session cookie, and non-GET calls from another origin are
 refused like the rest of `/api`. Bodies and answers are JSON. Signed out is `401 {"error":"signed out"}`.
@@ -1611,7 +1637,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `GET /api/board/audit?limit=50&before=<id>` | | `{ entries: AuditEntry[], next: number\|null }`, newest first; pass `next` as `before`. `limit` up to 200 |
 | `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. The columns are under **The audit exports**, below |
 | `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
-| `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found` |
+| `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found`, `429 slow_down` with `Retry-After` for someone else's board asked about too fast |
 | `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/invites/lookup` | `{ token }` | `200 { invite: { board, ownerEmail, email, role, expiresAt } }` for a live invite to this account. `200 { member: { board, ownerEmail, role } }` when this account already used this very link and is still on the board. `404 invite_invalid` for everything else, `429 too_many` |
 | `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |

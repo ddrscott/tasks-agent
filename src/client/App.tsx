@@ -129,17 +129,26 @@ function BoardHost({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   useEffect(() => {
     if (!boardId) { setAccess(null); return; }
     let off = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setAccess(null);
-    fetch(api(`/api/board/access?board=${encodeURIComponent(boardId)}`)).then(async (r) => {
+    const ask = (tries: number) => fetch(api(`/api/board/access?board=${encodeURIComponent(boardId)}`)).then(async (r) => {
       if (off) return;
       if (r.status === 401) { onSignOut(); return; }
+      // Asked too fast (a reload loop, many tabs): wait as long as the server says and ask again.
+      // It says nothing about the board, so it mustn't read as "not shared with you".
+      if (r.status === 429) {
+        if (tries >= 3) { fallBack("That board couldn't be reached just now. This is your own board."); return; }
+        timer = setTimeout(() => { void ask(tries + 1); }, Math.min(15, Math.max(1, Number(r.headers.get("Retry-After")) || 2)) * 1000);
+        return;
+      }
       const a = r.ok ? asMemberAccess(((await r.json()) as { access?: unknown }).access) : null;
       if (off) return;
       if (a) setAccess(a);
       // One answer for a board that was unshared, one you were never on, and one that doesn't exist: the server doesn't say which.
       else fallBack("That board isn't shared with you. You may have been removed, or the link is wrong. This is your own board.");
     }).catch(() => { if (!off) fallBack("That board couldn't be reached just now. This is your own board."); });
-    return () => { off = true; };
+    void ask(0);
+    return () => { off = true; clearTimeout(timer); };
   }, [boardId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchTo = useCallback((board: string | null) => {

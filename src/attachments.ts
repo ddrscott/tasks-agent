@@ -22,8 +22,8 @@
 import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
 import { kidOf } from "./sealed";
-import { access } from "./members";
-import { errorCode, plainError, SLOW_DOWN } from "./member-rules";
+import { access, spendBoardCall, tooFast } from "./members";
+import { BOARD_ID, errorCode, plainError, SLOW_DOWN } from "./member-rules";
 import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
@@ -51,9 +51,14 @@ function cleanType(raw: string | null): string {
  * Whose files this request is about. No `board`, or your own id: yours. Anyone else's id goes
  * through the membership check, and every failure is the same "not found".
  */
-async function boardOf(req: Request, env: Env, user: User): Promise<{ ownerId: string; member: null | "viewer" | "writer"; lapsed: boolean } | null> {
+async function boardOf(req: Request, env: Env, user: User): Promise<{ ownerId: string; member: null | "viewer" | "writer"; lapsed: boolean } | Response | null> {
   const board = new URL(req.url).searchParams.get("board");
   if (board === null || board === user.id) return { ownerId: user.id, member: null, lapsed: false };
+  // In order of cost: an id that can't be a board, then this account's allowance for calls
+  // about other people's boards (a 429, with no lookup), and only then the membership read.
+  if (!BOARD_ID.test(board)) return null;
+  const slow = spendBoardCall(user.id);
+  if (slow) return slow;
   const a = await access(env, user, board);
   if (a.effective !== "viewer" && a.effective !== "writer") return null;
   return { ownerId: board, member: a.effective, lapsed: a.reason === "plan_lapsed" };
@@ -79,6 +84,7 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   if (!cardId && !staged) return json({ error: "Which card? Missing ?card=" }, 400);
   const where = await boardOf(req, env, user);
   if (!where) return notFound();
+  if (where instanceof Response) return where;
   if (where.member === "viewer") {
     return json({ error: where.lapsed ? "This board is view only until its owner's Pro plan is back." : "You can view this board, not change it.", code: "read_only" }, 403);
   }
@@ -153,8 +159,14 @@ async function download(req: Request, env: Env, user: User, id: string): Promise
   if (!/^a[0-9a-f]{16}$/.test(id)) return notFound();
   const where = await boardOf(req, env, user);
   if (!where) return notFound();
-  // The owner can still fetch a file undo could bring back. A member gets what's on the board now.
-  if (where.member && !(await (await getAgentByName(env.TodoAgent, where.ownerId)).hasAttachment(id))) return notFound();
+  if (where instanceof Response) return where;
+  // The owner can still fetch a file undo could bring back. A member gets what's on the board
+  // now, and the board counts the download against that member before R2 is read (fileFor).
+  if (where.member) {
+    const file = await (await getAgentByName(env.TodoAgent, where.ownerId)).fileFor(user.id, id);
+    if (file === "gone") return notFound();
+    if (file !== "ok") return tooFast(file.retryAfter);
+  }
   const obj = await env.ATTACHMENTS.get(`${where.ownerId}/${id}`);
   if (!obj) return where.member ? notFound() : json({ error: "That file is gone." }, 404);
   // A member's copy isn't kept by the browser, so it's gone from there too once they're removed.

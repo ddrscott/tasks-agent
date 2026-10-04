@@ -14,7 +14,7 @@ import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  frameCost, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  frameCost, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -505,6 +505,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // Buckets of members who are gone or have been quiet don't need keeping.
     const here = new Set(this.ctx.getWebSockets(MEMBER_TAG).map((ws) => memberMeta(ws)?.id));
     for (const id of this.buckets.keys()) if (!here.has(id)) this.buckets.delete(id);
+    for (const id of this.downloads.keys()) if (!here.has(id)) this.downloads.delete(id);
     if (this.ctx.getWebSockets(MEMBER_TAG).length) await this.schedule(this.recheckMs() / 1000, "sweepMembers");
   }
 
@@ -516,6 +517,21 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Whether an attachment is on the board right now. A member may download those and no others (attachments.ts). */
   hasAttachment(id: string): boolean {
     return ops.attachmentIds(this.state).includes(id);
+  }
+
+  /** A member's downloads, counted per member here in the board, where the count is exact (MEMBER_HTTP_RATE). */
+  private downloads = new Map<string, Bucket>();
+
+  /**
+   * A member asking for a file: "gone" unless it's on the board right now, "ok" to go and
+   * read it, or how long to wait when they've asked for too many too fast. One call for both
+   * questions, made before the Worker reads R2.
+   */
+  fileFor(memberId: string, id: string): "ok" | "gone" | { retryAfter: number } {
+    const r = spendToken(this.downloads.get(memberId), Date.now(), MEMBER_HTTP_RATE);
+    this.downloads.set(memberId, r.bucket);
+    if (!r.ok) return { retryAfter: retryAfter(r.bucket) };
+    return this.hasAttachment(id) ? "ok" : "gone";
   }
 
   /**

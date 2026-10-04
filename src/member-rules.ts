@@ -101,6 +101,19 @@ export function spendToken(b: Bucket | undefined, now: number, rate: { burst: nu
   return { bucket, ok: false, flood: bucket.strikes >= rate.strikes };
 }
 
+/**
+ * HTTP calls about someone else's board (`?board=<id>`: the access check, attachment uploads
+ * and downloads, the socket upgrade). Each one costs D1 reads and usually a call into the
+ * owner's board object, and none of them went through the socket's bucket, so a viewer's
+ * script could make hundreds a second. They draw on a bucket of their own, per signed-in
+ * account: `burst` at once, which is a page with a few dozen image attachments opening, and
+ * `perSecond` after that. Past it the answer is 429 with Retry-After.
+ */
+export const MEMBER_HTTP_RATE = { burst: 60, perSecond: 5, strikes: Number.MAX_SAFE_INTEGER } as const;
+export const SLOW_DOWN_HTTP = "Slow down. That's too many requests at once. Wait a few seconds and try again.";
+/** Whole seconds until a bucket that just refused has a token again. */
+export const retryAfter = (b: Bucket, rate: { perSecond: number } = MEMBER_HTTP_RATE) => Math.max(1, Math.ceil((1 - b.tokens) / rate.perSecond));
+
 /** Errors a member's client treats specially start with a code in brackets, like the board's `[board_shared]`. */
 export const errorCode = (message: string) => /^\[([a-z_]+)\]/.exec(message)?.[1] ?? null;
 /** The same error without its code, to show a person. */

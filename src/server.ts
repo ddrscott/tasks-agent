@@ -4,8 +4,8 @@ import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
-import { access, handleMembers } from "./members";
-import { H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
+import { access, handleMembers, spendBoardCall } from "./members";
+import { BOARD_ID, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -210,7 +210,10 @@ const app: ExportedHandler<Env> = {
  */
 async function memberConnect(req: Request, env: Env, user: User, sub: string, board: string): Promise<Response> {
   const refuse = () => new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
-  if (sub !== "/agent" || req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return refuse();
+  if (sub !== "/agent" || req.headers.get("Upgrade")?.toLowerCase() !== "websocket" || !BOARD_ID.test(board)) return refuse();
+  // Counted before the membership read, like every HTTP call about someone else's board.
+  const slow = spendBoardCall(user.id);
+  if (slow) return slow;
   const a = await access(env, user, board);
   if (a.effective === "none" || a.role === "owner") return refuse();
   const agent = await getAgentByName(env.TodoAgent, board);

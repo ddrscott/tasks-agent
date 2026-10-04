@@ -11,7 +11,10 @@ import { waitUntil } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
 import { planFor } from "./billing";
-import { BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, SIGNAL_WAITS_MS, withRetries, type Access, type MemberRole } from "./member-rules";
+import {
+  BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, MEMBER_HTTP_RATE, retryAfter, SIGNAL_WAITS_MS, SLOW_DOWN_HTTP, spendToken, withRetries,
+  type Access, type Bucket, type MemberRole,
+} from "./member-rules";
 
 export type { Access, MemberRole } from "./member-rules";
 
@@ -42,6 +45,38 @@ const INVITE_INVALID = "This invite isn't for this account, or it's no longer va
 const inviteInvalid = () => fail(404, "invite_invalid", INVITE_INVALID);
 
 const tokenHash = (token: string) => sha256(`invite:${token}`);
+
+// ---------- how often someone may ask about a board that isn't theirs ----------
+
+// Per signed-in account, in this isolate's memory, spent before the membership lookup: a
+// refusal costs no D1 read and wakes no board. It's the first of two limits. Memory is per
+// isolate, and Cloudflare may run several, so this one is a floor on the work and not an
+// exact count; a member's downloads are counted exactly by the board itself (TodoAgent.fileFor).
+const boardCalls = new Map<string, Bucket>();
+const BOARD_CALLS_KEPT = 5000;
+
+/** The 429 for a caller past their allowance. The same for a member, a stranger, and a made-up board. */
+export function tooFast(seconds: number): Response {
+  return Response.json({ error: SLOW_DOWN_HTTP, code: "slow_down" }, { status: 429, headers: { "Retry-After": String(seconds), "Cache-Control": "no-store" } });
+}
+
+/**
+ * Count one HTTP call this account makes about a board that isn't its own. Null when it may
+ * go on, or the 429 to send back. Call it before `access`, so a refused call does no more
+ * work than reading the session did.
+ */
+export function spendBoardCall(userId: string): Response | null {
+  const now = Date.now();
+  if (boardCalls.size >= BOARD_CALLS_KEPT) {
+    // Anyone quiet for long enough to be full again loses nothing by being forgotten.
+    const full = (MEMBER_HTTP_RATE.burst / MEMBER_HTTP_RATE.perSecond) * 1000;
+    for (const [id, b] of boardCalls) if (now - b.at > full) boardCalls.delete(id);
+    if (boardCalls.size >= BOARD_CALLS_KEPT) boardCalls.clear();
+  }
+  const r = spendToken(boardCalls.get(userId), now, MEMBER_HTTP_RATE);
+  boardCalls.set(userId, r.bucket);
+  return r.ok ? null : tooFast(retryAfter(r.bucket));
+}
 
 // ---------- access ----------
 
@@ -596,7 +631,11 @@ export async function handleMembers(req: Request, env: Env, path: string): Promi
     if (path === "/api/board/audit.json") return auditExport(env, user, "json");
     if (path === "/api/boards") return boards(env, user);
     if (path === "/api/board/access") {
-      const a = await access(env, user, new URL(req.url).searchParams.get("board") ?? user.id);
+      const board = new URL(req.url).searchParams.get("board") ?? user.id;
+      // Someone else's board: counted first, so a refusal costs nothing more (spendBoardCall).
+      const slow = board === user.id ? null : spendBoardCall(user.id);
+      if (slow) return slow;
+      const a = await access(env, user, board);
       return a.effective === "none" ? fail(404, "not_found", "No such board.") : json({ access: a });
     }
     return null;
