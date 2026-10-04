@@ -25,7 +25,11 @@ type Props = {
   onClose(): void;
 };
 
-/** Edit a card. Changes save when the dialog closes, however it closes: Save, the X, Esc, or a click outside. */
+/**
+ * Edit a card. Save (or Enter in the title or tags) keeps the changes. The X and Esc throw them
+ * away, so opening a card to read it can't change it by accident. Files are the exception: they
+ * upload and come off as you go, and Undo covers a removal.
+ */
 export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(card.title);
@@ -36,8 +40,9 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
   const [tags, setTags] = useState((card.tags ?? []).map((t) => `${t} `).join(""));
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
   const [editing, setEditing] = useState(!card.notes.trim());
-  const latest = useRef({ title, notes, due, tags });
-  latest.current = { title, notes, due, tags };
+  const [lane, setLane] = useState(card.laneId);
+  const latest = useRef({ title, notes, due, tags, lane });
+  latest.current = { title, notes, due, tags, lane };
 
   useEffect(() => {
     ref.current?.showModal();
@@ -68,32 +73,47 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
     el.setSelectionRange(el.value.length, el.value.length);
   }, [editing]);
 
-  function close() {
-    const { title: t, notes: n, due: d, tags: g } = latest.current;
+  /** What Save would change, compared with the card as it was opened. */
+  function pending() {
+    const { title: t, notes: n, due: d, tags: g, lane: l } = latest.current;
     const patch: { title?: string; notes?: string; due?: string | null; tags?: string[] } = {};
     if (t.trim() && t.trim() !== card.title) patch.title = t;
     if (n !== card.notes) patch.notes = n;
     if ((d || null) !== card.due) patch.due = d || null;
     const nextTags = [...new Set(g.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
     if (nextTags.join(" ") !== (card.tags ?? []).join(" ")) patch.tags = nextTags;
+    return { patch, lane: l !== card.laneId ? l : null };
+  }
+
+  function save() {
+    const { patch, lane: to } = pending();
     if (Object.keys(patch).length) onSave(patch);
+    if (to) onMove(to);
     onClose();
   }
+
+  /** The X and Esc: close and keep nothing. */
+  const cancel = onClose;
 
   return (
     <dialog
       ref={ref} className="card-dialog" aria-label="Edit card"
-      onCancel={(e) => { e.preventDefault(); close(); }}
-      onClick={(e) => { if (e.target === ref.current) close(); }}
+      onCancel={(e) => { e.preventDefault(); cancel(); }}
+      // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
+      onClick={(e) => {
+        if (e.target !== ref.current) return;
+        const { patch, lane: to } = pending();
+        if (!Object.keys(patch).length && !to) cancel();
+      }}
     >
       <div className="dialog-body">
         <div className="dialog-top">
           <h2 className="h">CARD</h2>
-          <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={close}><IconClose /></button>
+          <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={cancel}><IconClose /></button>
         </div>
-        <TitleInput value={title} onChange={setTitle} onEnter={close} />
+        <TitleInput value={title} onChange={setTitle} onEnter={save} />
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
-        <AskBlock card={card} before={close} />
+        <AskBlock card={card} before={save} />
         {editing ? (
           <label>
             Notes
@@ -136,7 +156,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
         <div className="dialog-row">
           <label>
             Lane
-            <select className="field" value={card.laneId} onChange={(e) => onMove(e.target.value)}>
+            <select className="field" value={lane} onChange={(e) => setLane(e.target.value)}>
               {lanes.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </label>
@@ -145,7 +165,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={close} />
+        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={save} />
         <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
@@ -155,11 +175,11 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
         <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>
         <span className="spacer" />
         {onToggleDone && (
-          <button className="btn" onClick={() => { close(); onToggleDone(); }}>
+          <button className="btn" onClick={() => { save(); onToggleDone(); }}>
             {isDone ? <><IconUndo />Reopen</> : <><IconCheck />Mark done</>}
           </button>
         )}
-        <button className="btn primary" onClick={close}>Save</button>
+        <button className="btn primary" onClick={save}>Save</button>
       </div>
     </dialog>
   );

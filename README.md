@@ -63,6 +63,11 @@ run ahead of whatever serves the zone.
   pasted wait in the dialog and upload once the card exists; if one fails, the card stays
   and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
   still the quick way: type a title and hit Enter, or paste a list to add one card per line.
+- **Editing a card.** Nothing changes until Save (or Enter in the title or tags). The X in
+  the top corner and Esc close the editor and throw the edits away, so opening a card to
+  read it can't change it by accident; that covers the title, notes, due date, tags, and
+  the lane. A click outside closes an untouched card and does nothing once something has
+  been edited. Files are the exception: they upload and come off as you go.
 - **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
   shows the tags already on the board above the input, most used first (`tagsByUse` in
   `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first

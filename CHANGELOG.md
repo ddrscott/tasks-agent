@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
 - Bigger buttons on touch screens, and Theme moves into the account menu on a phone
 - Long card titles wrap in the card dialogs instead of scrolling out of view
-- The card dialogs close with an X in the top corner, and the card editor's button reads Save
+- The card editor saves only when you hit Save; the X in the top corner (or Esc) closes it and discards your edits
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts instead of the whole board
 
 ### Fixed
