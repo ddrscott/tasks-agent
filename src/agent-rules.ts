@@ -64,7 +64,7 @@ Each line it prints is a change the owner made to an agent card. Handle it right
 - offline: tell the owner the feed is down, and go back to wait_for_answer.
 With the feed running you don't need get_board to hear about changes: when nothing is left, wait for the next event instead of stopping. Keep calling wait_for_answer while a question of yours is open, since that's what tells the board you're still waiting. If Monitor refuses to start it, go on without it. The owner can install it with one command from ${origin}${base}/connect#sessions.
 
-When nothing is left and no question is open, tell the owner what you finished and which cards are still waiting on them.`;
+When nothing is left and no question is open, make sure you hold no card (release_card on any you still do), then tell the owner what you finished and which cards are still waiting on them. With nothing held and nothing asked, the board shows your session as idle and stops counting it as live.`;
 }
 
 /** The rules as a prompt to paste whole, for a client that should have them up front. */

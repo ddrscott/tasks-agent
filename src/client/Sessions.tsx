@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { blockedSessions, isStale, known, projectName, waitingFor, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isLive, isStale, known, projectName, waitingFor, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -110,7 +110,7 @@ export function CardSession({ cardId }: { cardId: string }) {
 
 // The rules for what's stale and what's waiting on you live with the shared shapes, so
 // `npm run check:presence` can run them without a browser.
-export { blockedSessions, isStale };
+export { blockedSessions, isLive, isStale };
 
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -185,7 +185,8 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
     >{label}</a>
   );
   const { sessions, claims, now } = presence;
-  const live = sessions.filter((s) => !isStale(s, now));
+  // Live is heard from lately and not a finished MCP-only session (isLive in presence-shared.ts).
+  const live = sessions.filter((s) => isLive(s, now));
   // What's waiting on you is counted once, on "need you" next door. This button only says how many are live.
   const summary = `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {
