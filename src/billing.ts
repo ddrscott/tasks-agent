@@ -92,6 +92,54 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
   ).bind(userId, sub.metadata.email ?? "", sub.customer, sub.id, sub.status, periodEnd, sub.cancel_at_period_end ? 1 : 0, Date.now()).run();
 }
 
+// ---------- public plans ----------
+
+/** What the signed-out pricing section shows. `price` is in the currency's smallest unit, straight from Stripe. */
+export type PlanPrice = { amount: number; currency: string; interval: string; intervalCount: number };
+export type Plans = {
+  free: { dailyChats: number };
+  /** Null while billing is off: Pro isn't on sale, so there's nothing to quote. */
+  pro: { dailyChats: number; price: PlanPrice | null } | null;
+};
+
+type StripePrice = { unit_amount: number | null; currency: string; active: boolean; recurring: { interval: string; interval_count: number } | null };
+
+// The price changes about never, so one Stripe read serves an isolate for an hour. A failed
+// read isn't kept: the next request asks again.
+const PRICE_TTL_MS = 60 * 60 * 1000;
+let priceMemo: { id: string; at: number; price: PlanPrice } | null = null;
+
+async function proPrice(env: Env): Promise<PlanPrice | null> {
+  const id = env.STRIPE_PRICE_ID!;
+  if (priceMemo && priceMemo.id === id && Date.now() - priceMemo.at < PRICE_TTL_MS) return priceMemo.price;
+  try {
+    const p = await stripe<StripePrice>(env, "GET", `/prices/${encodeURIComponent(id)}`);
+    // Tiered or one-time prices have no single monthly number to show; Checkout still explains them.
+    if (p.unit_amount === null || !p.recurring) return null;
+    const price = { amount: p.unit_amount, currency: p.currency, interval: p.recurring.interval, intervalCount: p.recurring.interval_count };
+    priceMemo = { id, at: Date.now(), price };
+    return price;
+  } catch (e) {
+    console.error("plans", (e as Error).message);
+    return null;
+  }
+}
+
+/**
+ * GET /api/plans: the daily assistant caps and the Pro price, for anyone, signed in or not.
+ * The page never carries a dollar amount of its own; it shows what Stripe says the price is.
+ */
+export async function handlePlans(req: Request, env: Env, path: string): Promise<Response | null> {
+  if (path !== "/api/plans" || req.method !== "GET") return null;
+  const plans: Plans = {
+    free: { dailyChats: dailyLimit(env, "free") },
+    pro: billingEnabled(env) ? { dailyChats: dailyLimit(env, "pro"), price: await proPrice(env) } : null,
+  };
+  // Short at the edge and in the browser when the price is missing, so a Stripe hiccup clears quickly.
+  const maxAge = plans.pro && !plans.pro.price ? 60 : 600;
+  return Response.json(plans, { headers: { "Cache-Control": `public, max-age=${maxAge}` } });
+}
+
 // ---------- webhook ----------
 
 const enc = new TextEncoder();
