@@ -92,15 +92,35 @@ export function SharedButton({ userId, onOpen }: { userId: string; onOpen(): voi
   const on = accepted(members).length;
   const waiting = members.length - on;
   const lapsed = board.sharing === "suspended";
-  const summary = on
-    ? `${people(on)} can see this board${lapsed ? ", view only until Pro is back" : ""}${waiting ? `, and ${invites(waiting)}` : ""}`
-    : `Nobody has joined yet. ${invites(waiting)}`;
+  const summary = lapsed
+    ? `Sharing is paused: your Pro plan isn't active. ${on ? `${people(on)} can still see this board, view only` : "Nobody has joined yet"}${waiting ? `, and ${invites(waiting)}` : ""}`
+    : on
+      ? `${people(on)} can see this board${waiting ? `, and ${invites(waiting)}` : ""}`
+      : `Nobody has joined yet. ${invites(waiting)}`;
   return (
-    <button className="btn shared-btn" aria-haspopup="dialog" onClick={onOpen} title={`${summary}. Open Members.`} aria-label={`${summary}. Open Members`}>
-      <IconPeople /><span className="hide-sm label">{on ? "Shared with" : "Invited"}</span>
-      <span className="shared-count">{on || waiting}</span>
+    <button className={`btn shared-btn${lapsed ? " paused" : ""}`} aria-haspopup="dialog" onClick={onOpen} title={`${summary}. Open Members.`} aria-label={`${summary}. Open Members`}>
+      <IconPeople /><span className="hide-sm label">{lapsed ? "Sharing paused" : on ? "Shared with" : "Invited"}</span>
+      {/* Paused, the count alone would read as business as usual on a phone, where the label doesn't fit. */}
+      <span className="shared-count">{lapsed && <span className="shared-paused" aria-hidden="true">paused · </span>}{on || waiting}</span>
     </button>
   );
+}
+
+/**
+ * Tells the board when the owner's plan, as the members list reports it, changes. The plan
+ * label by the assistant and the Upgrade or Manage item in the account menu come from a
+ * usage call that's otherwise only made now and then, so after a lapse they went on saying "pro".
+ */
+export function PlanWatch({ userId, onChange }: { userId: string; onChange(): void }) {
+  const { board } = useBoardMembers(userId);
+  const plan = board?.plan;
+  const first = useRef(true);
+  useEffect(() => {
+    if (plan === undefined) return;
+    if (first.current) { first.current = false; return; }
+    onChange();
+  }, [plan]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
 }
 
 /**
@@ -108,16 +128,18 @@ export function SharedButton({ userId, onOpen }: { userId: string; onOpen(): voi
  * (topbarFit.ts, the "shared" step). Members is in that button's menu, so the way in is still there.
  */
 export function SharedBadge({ userId }: { userId: string }) {
-  const { members } = useBoardMembers(userId);
+  const { board, members } = useBoardMembers(userId);
   if (members.length === 0) return null;
-  return <span className="shared-badge" aria-hidden="true">{accepted(members).length || members.length}</span>;
+  // Paused, the mark says so instead of counting.
+  return <span className="shared-badge" aria-hidden="true">{board?.sharing === "suspended" ? "paused" : accepted(members).length || members.length}</span>;
 }
 
 /** Beside "Members" in the account menu: how many people that is right now. */
 export function SharedNote({ userId }: { userId: string }) {
-  const { members } = useBoardMembers(userId);
+  const { board, members } = useBoardMembers(userId);
   if (members.length === 0) return null;
   const on = accepted(members).length;
+  if (board?.sharing === "suspended") return <span className="menu-note">sharing paused</span>;
   return <span className="menu-note">{on ? `shared with ${on}` : `${members.length} invited`}</span>;
 }
 
@@ -284,6 +306,11 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
   const noteRef = useRef<HTMLParagraphElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const ids = useId();
+  // "Sharing paused" in the top bar opens this dialog at the reason: the block that explains
+  // the pause takes focus, so it's what's on screen and what a screen reader says first.
+  const pausedRef = useRef<HTMLDivElement>(null);
+  const paused = board.sharing === "suspended";
+  useEffect(() => { if (paused) pausedRef.current?.focus(); }, [paused]);
 
   const billingOn = plans ? plans.pro !== null : null;
   const full = board.used >= board.maxMembers;
@@ -446,7 +473,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
       )}
 
       {board.sharing === "suspended" && (
-        <div className="mem-state">
+        <div className="mem-state" ref={pausedRef} tabIndex={-1} aria-label="Sharing is paused">
           <p className="mem-state-head"><span className="mem-chip">view only</span> Your Pro plan isn't active, so sharing is paused.</p>
           <p>
             Nothing was deleted. Everyone below is still on the board with the role you gave them, but until Pro is

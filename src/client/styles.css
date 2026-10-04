@@ -1410,7 +1410,15 @@ a.chip.no-agent:hover { border-style: solid; }
 .topbar[data-tight~="shared"] .shared-btn { display: none; }
 .topbar[data-tight~="shared"] .shared-badge { display: block; }
 .menu .menu-note { margin-left: 8px; font: 11px var(--font-mono); color: var(--accent-text); }
-.shared-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); color: var(--accent-text); }
+.shared-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); color: var(--accent-text); white-space: nowrap; }
+/* Pro lapsed: the button says sharing is paused. With the label showing, the chip is the count alone. */
+.shared-btn.paused .shared-count { border-color: var(--danger); color: var(--danger); }
+.shared-paused { display: none; }
+/* When the label has given way (a tight bar, a phone), the chip carries the word. */
+.topbar[data-tight~="labels"] .shared-btn.paused .shared-paused { display: inline; }
+@media (max-width: 900px) { .shared-btn.paused .shared-paused { display: inline; } }
+.mem-state:focus { outline: none; }
+.mem-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px, calc(100dvh - 32px)); }
 .mem-head { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 20px 20px 0; }

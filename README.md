@@ -1192,6 +1192,14 @@ each card.
   the account button as a small badge, and the menu's Members item says "shared with N".
   It looks again when the tab gets focus, and the dialog rereads the list every 20 seconds
   while it's open, so an invite accepted elsewhere shows up without a reload.
+- **A lapsed plan shows on the board, not only in Members.** With `board.sharing` at
+  `suspended` the top-bar button reads "Sharing paused" (on a phone or a tight bar, where the
+  label gives way, the chip reads `paused · 2`, and the badge on the account button reads
+  `paused`), the account menu's Members item says "sharing paused", and the button opens
+  Members with the block that explains the pause in focus. The plan label by the assistant
+  (`12/30 today · pro`) and the menu's Upgrade or Manage subscription item come from `usage()`;
+  `PlanWatch` asks for it again whenever the plan in the members list changes, so neither goes
+  on saying Pro after a lapse.
 - **`// HOW_SHARING_WORKS`** closes the People tab: the questions a manager asks before
   approving this (what it costs, how many people, what a lapse does, who owns a removed
   writer's cards, two owners, whether a viewer can copy the board, who sees the log), each

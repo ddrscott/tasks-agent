@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An audit log of invites, role changes, removals, people leaving, and deleted cards, with who and when, that the owner can download as CSV or JSON
 - Members, in the account menu: invite someone by email as a viewer or a writer, see who's on your board and since when, change a role in place, and remove someone with two taps. Pending invites show when they were sent and when they expire, with Resend and Revoke
 - Members shows how many of the board's 10 places are taken and how many invite emails you have left today, and says why when it can't invite: a free plan (with Upgrade to Pro right at the Invite button), a full board, a spent day of invites, or an address that's already there
-- When Pro lapses, Members says so: everyone's still listed, they can only look until Pro is back, and nothing was deleted
+- When Pro lapses, Members says so: everyone's still listed, they can only look until Pro is back, and nothing was deleted. The button in the top bar reads "Sharing paused" and opens Members at the reason, and the assistant's plan label stops saying Pro
 - The audit log is a tab in Members, newest first, with each time in your time zone and in UTC, and Download CSV and Download JSON buttons
 - A shared board says "Shared with 2" in the top bar. Click it to open Members
 - The Encryption dialog says up front when a board can't be encrypted because it's shared, with a button to Members, and Members says when a board can't be shared because it's encrypted

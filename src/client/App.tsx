@@ -23,7 +23,7 @@ import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
-import { MembersDialog, SharedBadge, SharedButton, SharedNote } from "./Members";
+import { MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote } from "./Members";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
@@ -719,6 +719,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
             </button>}
             {/* Your own board only. It shows once someone's invited (// TEAM_BOARDS). */}
             {!sharedBoard && <SharedButton userId={me.id} onOpen={() => setMembersOpen(true)} />}
+            {!sharedBoard && <PlanWatch userId={me.id} onChange={refreshUsage} />}
             <div className="anchor">
               <button className="btn icon account-btn" title={me.email} aria-label="Account" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser />{!sharedBoard && <SharedBadge userId={me.id} />}</button>
               {menuOpen && (
