@@ -12,7 +12,9 @@
 // in the API response, and no email is sent), and it reads and writes the same local D1 the
 // server uses, through `wrangler d1 execute --local`: to make the owner Pro the way the Stripe
 // webhook would, to age an invite past 7 days, and to check that only a hash of each token is
-// stored. It refuses to run against anything but localhost. One line per assertion; exits 1 on
+// stored. It also makes one throwaway account an admin (a `users` row, the way the admin page
+// writes it) to check Pro given and taken back by an admin, and that an admin gets nothing on
+// anyone's board. It refuses to run against anything but localhost. One line per assertion; exits 1 on
 // any failure. The plan-lapse rows wait for the board's own recheck (MEMBER_RECHECK_SECONDS,
 // 30 by default), so a full run takes a minute or two.
 
@@ -1742,6 +1744,137 @@ section("open sockets follow the owner's plan");
   const back = await writerSock.wait((f) => f.type === "tasks_access" && f.effective === "writer", wait, mark);
   ok("when Pro comes back, so does the role, on the same socket", back?.reason === null && back?.plan === "pro", back);
   ok("the writer can write again", (await writerSock.rpc("addCard", [lanes[0].id, "After the lapse"])).success === true);
+}
+
+// ---------- Pro an admin gave ----------
+
+section("Pro given by an admin");
+{
+  // Pro is a live subscription or a grant from the admin page (planSource in src/billing.ts),
+  // and a shared board follows that one answer. A board of its own, so the rows above and
+  // below keep their owner. The admin is an ordinary account whose `users` row is made an
+  // admin straight in the local D1, the way the page's Admin switch writes it; ADMIN_EMAILS
+  // stays as it is.
+  d1("DELETE FROM login_limits WHERE key LIKE 'ip:%' OR key LIKE 'invite-%'");
+  const admin = await account("admin");
+  const gOwner = await account("grantowner");
+  const gMember = await account("grantmember");
+  const usersRow = (u) => d1(`SELECT role, pro_grant, changed_by FROM users WHERE email = ${q(u.email)}`)[0];
+  const adminCall = (who, body, headers) => call(who, "POST", "/api/admin/users", body, headers);
+
+  // Nobody but an admin gets anything from /api/admin, and a refused call changes nothing.
+  const anonList = await call(null, "GET", "/api/admin/users");
+  const anonSet = await adminCall(null, { email: gOwner.email, pro: true });
+  ok("signed out, the admin calls are refused", anonList.status === 401 && anonSet.status === 401 && !anonList.text.includes("@"), [anonList.status, anonSet.status]);
+  for (const [who, label] of [[admin, "an account that isn't an admin yet"], [gOwner, "an owner"], [stranger, "a stranger"]]) {
+    const l = await call(who, "GET", "/api/admin/users");
+    const g = await adminCall(who, { email: who.email, pro: true });
+    const a = await adminCall(who, { email: who.email, admin: true });
+    ok(`${label} can't list accounts, give Pro, or make an admin`, l.status === 403 && g.status === 403 && a.status === 403 && !l.text.includes(gMember.email), [l.status, g.status, a.status]);
+  }
+  ok("and nothing was written by any of that", [admin, gOwner, stranger].every((u) => { const r = usersRow(u); return r?.role === "user" && r.pro_grant === 0 && r.changed_by === null; }), [admin, gOwner, stranger].map(usersRow));
+  ok("an owner nobody gave Pro can't invite", (await invite(gOwner, gMember.email, "writer")).status === 402);
+
+  d1(`UPDATE users SET role = 'admin' WHERE email = ${q(admin.email)}`);
+  ok("made an admin in the users table, the account can list accounts", usersRow(admin)?.role === "admin" && (await call(admin, "GET", "/api/admin/users")).status === 200 && (await call(admin, "GET", "/api/me")).data?.admin === true && (await call(gOwner, "GET", "/api/me")).data?.admin === false);
+  const adminToken = (await call(admin, "POST", "/api/tokens", { name: "check admin" })).data.token;
+  const byToken = await call(null, "GET", "/api/admin/users", undefined, { Authorization: `Bearer ${adminToken}` });
+  const byTokenSet = await adminCall(null, { email: gOwner.email, pro: true }, { Authorization: `Bearer ${adminToken}` });
+  ok("an admin's access token isn't an admin: the calls take the browser session only", byToken.status === 401 && byTokenSet.status === 401, [byToken.status, byTokenSet.status]);
+  const elsewhere = await adminCall(admin, { email: gOwner.email, pro: true }, { Origin: "https://evil.example" });
+  const sibling = await adminCall(admin, { email: gOwner.email, pro: true }, { "Sec-Fetch-Site": "same-site" });
+  ok("a page on another origin can't flip the switch with the admin's cookie", elsewhere.status === 403 && sibling.status === 403 && usersRow(gOwner).pro_grant === 0, [elsewhere.status, sibling.status]);
+  const adminUp = await new Promise((resolve) => {
+    const ws = new WebSocket(`${WS_BASE}/tasks/api/admin/users`, { headers: { Cookie: admin.cookie }, handshakeTimeout: 10_000 });
+    ws.on("open", () => { ws.close(); resolve({ opened: true }); });
+    ws.on("unexpected-response", (_r, res) => { res.resume(); resolve({ opened: false, status: res.statusCode }); });
+    ws.on("error", () => resolve({ opened: false, status: null }));
+  });
+  ok("the admin address answers no WebSocket upgrade, and the server stays up", !adminUp.opened && (adminUp.status === null || adminUp.status === 404) && (await call(null, "GET", "/api/me")).status === 200, adminUp);
+
+  // The grant: no subscription row anywhere, and the owner can share.
+  const grant = await adminCall(admin, { email: gOwner.email, pro: true });
+  ok("an admin gives the owner Pro", grant.status === 200 && grant.data?.user?.proGrant === true && grant.data.user.plan === "pro" && d1(`SELECT COUNT(*) AS n FROM subscriptions WHERE user_id = ${q(gOwner.id)}`)[0].n === 0, grant);
+  const inv = await invite(gOwner, gMember.email, "writer");
+  const acc = await call(gMember, "POST", "/api/invites/accept", { token: tokenOf(inv) });
+  ok("an owner on granted Pro can invite, and the invite is accepted", inv.status === 201 && acc.status === 200 && acc.data.board.role === "writer", [inv.status, acc.status]);
+  // A second invite, left pending, for the resend row below.
+  const pend = await invite(gOwner, watcher.email, "viewer");
+  ok("the owner's members list says sharing is on", pend.status === 201 && (await call(gOwner, "GET", "/api/board/members")).data.board.sharing === "on");
+  const gOwnerSock = await open(gOwner);
+  await gOwnerSock.wait((f) => f.type === "cf_agent_state");
+  const gLane = gOwnerSock.state().lanes[0].id;
+  const gSock = await open(gMember, { board: gOwner.id });
+  const first = await gSock.wait((f) => f.type === "tasks_access");
+  ok("the member is a writer on the granted owner's board", gSock.opened && first?.effective === "writer" && first.plan === "pro" && (await gSock.rpc("addCard", [gLane, "On granted Pro"])).success === true, first);
+
+  // An admin is not a member of anyone's board.
+  const aAccess = await call(admin, "GET", `/api/board/access?board=${gOwner.id}`);
+  const aNowhere = await call(admin, "GET", `/api/board/access?board=${randomBytes(16).toString("hex")}`);
+  const aSock = await open(admin, { board: gOwner.id });
+  ok("the admin who gave it can't open that board: the same answer as a board that doesn't exist", aAccess.status === 404 && aAccess.text === aNowhere.text && refused(aSock, 404), [aAccess.status, how(aSock)]);
+  aSock.close();
+  const aMembers = await call(admin, "GET", "/api/board/members");
+  const aAudit = await call(admin, "GET", "/api/board/audit?limit=200");
+  ok("the admin's members list and audit log are their own, with nobody else's board in them", aMembers.status === 200 && aMembers.data.board.id === admin.id && !aMembers.text.includes(gMember.email) && !aAudit.text.includes(gMember.email) && !aAudit.text.includes(gOwner.email), [aMembers.status, aAudit.status]);
+  ok("the admin's board list has nothing shared", (await call(admin, "GET", "/api/boards")).data.shared.length === 0);
+  const listed = (await call(admin, "GET", "/api/admin/users")).data;
+  const keys = [...new Set(listed.users.flatMap((u) => Object.keys(u)))].sort().join();
+  ok("the account list carries accounts and plans, and nothing about boards, members, or invites", keys === "changedAt,changedBy,createdAt,email,lastSeenAt,plan,proGrant,role,root,stripe" && listed.users.some((u) => u.email === gOwner.email && u.proGrant && u.plan === "pro") && listed.users.some((u) => u.email === gMember.email && u.plan === "free" && u.role === "user"), keys);
+
+  // The admin takes Pro back: the same lapse a canceled subscription is, on the open socket.
+  let mark = gSock.frames.length;
+  let oMark = gOwnerSock.frames.length;
+  let t0 = Date.now();
+  const revoke = await adminCall(admin, { email: gOwner.email, pro: false });
+  const tAnswered = Date.now();
+  const lapsed = await gSock.wait((f) => f.type === "tasks_access" && f.reason === "plan_lapsed", 3000, mark);
+  const oHeard = await gOwnerSock.wait((f) => f.type === "tasks_members", 3000, oMark);
+  console.log(`     … the admin took Pro back: answered in ${tAnswered - t0} ms, the open writer was view only after ${lapsed ? lapsed._at - t0 : "never"} ms, the owner's tab heard after ${oHeard ? oHeard._at - t0 : "never"} ms`);
+  ok("an admin takes the grant back", revoke.status === 200 && revoke.data?.user?.proGrant === false && revoke.data.user.plan === "free", revoke);
+  ok("the open member's board is view only within a second, with no recheck to wait for", lapsed?.effective === "viewer" && lapsed.role === "writer" && lapsed.plan === "free" && lapsed._at - t0 < 1000, lapsed ? lapsed._at - t0 : "never");
+  ok("in fact before the admin had the answer", !!lapsed && lapsed._at <= tAnswered + 50, [lapsed?._at, tAnswered]);
+  ok("the owner's open tab hears in the same moment", !!oHeard && oHeard._at - t0 < 1000);
+  ok("a write right after is refused, in words that say why", (await gSock.rpc("addCard", [gLane, "After the grant went"])).error === rules.READ_ONLY_LAPSED);
+  ok("the member can still read, on the same socket", (await gSock.rpc("search", [{ query: "granted", limit: 3 }])).success === true && gSock.ws.readyState === WebSocket.OPEN);
+  const noInvite = await invite(gOwner, stranger.email, "viewer");
+  ok("new invites are refused once the grant is gone", noInvite.status === 402 && noInvite.data?.code === "pro_required", noInvite);
+  const noResend = await call(gOwner, "POST", "/api/board/invites/resend", { email: watcher.email });
+  ok("and resends, and the members list says sharing is paused", noResend.status === 402 && noResend.data?.code === "pro_required" && (await call(gOwner, "GET", "/api/board/members")).data.board.sharing === "suspended", noResend);
+  const gShared = (await call(gMember, "GET", "/api/boards")).data.shared[0];
+  ok("the member's board list says view only and why", gShared?.role === "writer" && gShared.effective === "viewer" && gShared.reason === "plan_lapsed", gShared);
+  ok("nothing was deleted: the member is still listed as a writer", (await call(gOwner, "GET", "/api/board/members")).data.members.some((m) => m.email === gMember.email && m.role === "writer" && m.status === "accepted"));
+  ok("the owner's audit log has the same entry a Stripe lapse writes", has(await audit(gOwner), "sharing_suspended", null, { actor: "system" }));
+
+  mark = gSock.frames.length;
+  t0 = Date.now();
+  const again = await adminCall(admin, { email: gOwner.email, pro: true });
+  const back = await gSock.wait((f) => f.type === "tasks_access" && f.effective === "writer", 3000, mark);
+  console.log(`     … the admin gave Pro again: the open writer could write again after ${back ? back._at - t0 : "never"} ms`);
+  ok("given again, the role is back within a second", again.status === 200 && back?.reason === null && back.plan === "pro" && back._at - t0 < 1000, back ? back._at - t0 : "never");
+  ok("and the member writes again on the same socket", (await gSock.rpc("addCard", [gLane, "Granted again"])).success === true);
+  ok("the return is in the audit log too", has(await audit(gOwner), "sharing_restored", null, { actor: "system" }));
+
+  // A grant on top of a subscription: taking the grant back leaves a paying owner on Pro.
+  makePro(gOwner);
+  mark = gSock.frames.length;
+  const paid = await adminCall(admin, { email: gOwner.email, pro: false });
+  await sleep(1200);
+  ok("taking the grant from an owner who also pays changes nothing for members", paid.status === 200 && paid.data.user.plan === "pro" && paid.data.user.proGrant === false && !gSock.frames.slice(mark).some((f) => f.type === "tasks_access" && f.reason === "plan_lapsed") && (await gSock.rpc("addCard", [gLane, "Still paying"])).success === true);
+
+  // An admin who is also a member is that member and no more.
+  const aInv = await invite(gOwner, admin.email, "viewer");
+  const aAcc = await call(admin, "POST", "/api/invites/accept", { token: tokenOf(aInv) });
+  const aView = await open(admin, { board: gOwner.id });
+  const aFirst = await aView.wait((f) => f.type === "tasks_access");
+  ok("an admin invited as a viewer is a viewer", aInv.status === 201 && aAcc.status === 200 && aFirst?.effective === "viewer" && aFirst.role === "viewer", aFirst);
+  ok("and can't change a card", (await aView.rpc("addCard", [gLane, "From an admin"])).error === rules.READ_ONLY);
+  ok("or get the owner's members list or audit log", !aView.frames.some((f) => f.type === "tasks_members") && !(await call(admin, "GET", "/api/board/members")).text.includes(gMember.email) && !(await call(admin, "GET", "/api/board/audit?limit=200")).text.includes(gMember.email));
+  ok("or invite to it, change a role on it, or remove someone from it", (await call(admin, "POST", "/api/board/invites", { email: stranger.email, role: "viewer", board: gOwner.id })).status === 402
+    && (await call(admin, "POST", "/api/board/members/role", { email: gMember.email, role: "viewer", board: gOwner.id })).status === 404
+    && (await call(admin, "POST", "/api/board/members/remove", { email: gMember.email, board: gOwner.id })).status === 404
+    && (await call(gOwner, "GET", "/api/board/members")).data.members.some((m) => m.email === gMember.email && m.role === "writer"));
+  for (const s of [aView, gSock, gOwnerSock]) s.close();
 }
 
 // ---------- the audit log ----------
