@@ -1,0 +1,518 @@
+// Team boards: a Pro owner invites people into their board by email, each as a viewer or a
+// writer. This file holds the one answer to "may this user do this on that board" (`access`),
+// the invite and membership API, the invite email, and the audit log. The rules themselves are
+// in member-rules.ts; the board's Durable Object (agent.ts) enforces them on every change.
+//
+// There is no other way in: no public link, no "anyone with the link", and a board's id opens
+// nothing by itself. Every surface that reaches someone else's board calls `access` first, and
+// answers "no such board" and "not your board" the same way.
+
+import { getAgentByName } from "agents";
+import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
+import { planFor } from "./billing";
+import { BOARD_ID, decide, inviteEmail, isMemberRole, type Access, type MemberRole } from "./member-rules";
+
+export type { Access, MemberRole } from "./member-rules";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+/** How long an invite link works. */
+export const INVITE_TTL_MS = 7 * DAY_MS;
+// Tries at opening, accepting, or declining an invite link. A token is 256 random bits, so
+// these aren't what keeps guessing out; they keep the endpoint from being hammered and stop
+// anyone from using it to test addresses.
+const LOOKUPS_PER_USER_PER_HOUR = 30;
+const LOOKUPS_PER_IP_PER_HOUR = 120;
+
+const num = (v: string | undefined, fallback: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+};
+/** People on one board, pending invites included. */
+export const maxMembers = (env: Env) => num((env as { MAX_BOARD_MEMBERS?: string }).MAX_BOARD_MEMBERS, 10);
+/** Invite emails one owner may send in a UTC day, resends included, so an account can't be used to send spam. */
+export const maxDailyInvites = (env: Env) => num((env as { MAX_DAILY_INVITE_EMAILS?: string }).MAX_DAILY_INVITE_EMAILS, 20);
+
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
+const fail = (status: number, code: string, error: string) => json({ error, code }, status);
+
+/** One refusal for a bad token, a used one, an expired one, a revoked one, and one meant for another account. */
+const INVITE_INVALID = "This invite isn't for this account, or it's no longer valid.";
+const inviteInvalid = () => fail(404, "invite_invalid", INVITE_INVALID);
+
+const tokenHash = (token: string) => sha256(`invite:${token}`);
+
+// ---------- access ----------
+
+type MemberRow = {
+  owner_id: string; owner_email: string; member_email: string; member_id: string; role: MemberRole;
+  status: "pending" | "accepted"; token_hash: string | null; expires_at: number | null;
+  invited_at: number; accepted_at: number | null; updated_at: number;
+};
+
+const none = (board: string): Access => ({ board, ownerEmail: null, role: null, effective: "none", reason: "not_member", plan: "free" });
+
+/**
+ * May `user` reach the board `ownerId`, and as what. The one function every surface asks: the
+ * board socket, attachments, and the board's own Durable Object before each change a member
+ * makes.
+ *
+ * - The owner is the owner, whatever their plan.
+ * - A member needs an accepted invite for the email they're signed in as. With the owner off
+ *   Pro they're a viewer (`plan_lapsed`); on an encrypted board they have no way in.
+ * - Everyone else, and every id that names no board, gets the same `none`.
+ *
+ * `known.sealed` is for the Durable Object, which already knows whether its board is encrypted.
+ */
+export async function access(env: Env, user: User, ownerId: string, known?: { sealed: boolean }): Promise<Access> {
+  if (typeof ownerId !== "string" || !BOARD_ID.test(ownerId)) return none(String(ownerId).slice(0, 32));
+  if (user.id === ownerId) {
+    return { board: ownerId, ownerEmail: user.email, ...decide({ isOwner: true, membership: null, plan: "free", sealed: false }), plan: await planFor(env, ownerId) };
+  }
+  const row = await env.DB.prepare(
+    "SELECT role, owner_email, member_email FROM board_members WHERE owner_id = ? AND member_id = ? AND status = 'accepted'",
+  ).bind(ownerId, user.id).first<Pick<MemberRow, "role" | "owner_email" | "member_email">>();
+  // The id is a hash of the email, so these agree unless something is badly wrong. Check anyway.
+  if (!row || row.member_email !== user.email) return none(ownerId);
+  const plan = await planFor(env, ownerId);
+  const sealed = known ? known.sealed : await (await getAgentByName(env.TodoAgent, ownerId)).isSealed();
+  const d = decide({ isOwner: false, membership: row.role, plan, sealed });
+  if (d.effective === "none") return { ...none(ownerId), role: d.role, reason: d.reason };
+  return { board: ownerId, ownerEmail: row.owner_email, ...d, plan };
+}
+
+/** Whether this email holds a live invite or a membership, which lets it sign in past ALLOWED_EMAILS. */
+export async function hasInvite(env: Env, email: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    "SELECT 1 AS ok FROM board_members WHERE member_id = ? AND member_email = ? AND (status = 'accepted' OR expires_at > ?) LIMIT 1",
+  ).bind(await userIdFor(email), email, Date.now()).first<{ ok: number }>();
+  return !!row;
+}
+
+/** Whether a board has anyone on it or invited to it. Such a board can't be encrypted. */
+export async function boardShared(env: Env, ownerId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT 1 AS ok FROM board_members WHERE owner_id = ? LIMIT 1").bind(ownerId).first<{ ok: number }>();
+  return !!row;
+}
+
+// ---------- audit log ----------
+
+export type AuditAction =
+  | "invite_sent" | "invite_resent" | "invite_accepted" | "invite_declined" | "invite_revoked" | "invite_expired"
+  | "role_changed" | "member_removed" | "member_left" | "sharing_suspended" | "sharing_restored";
+
+export type AuditEntry = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null };
+
+function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction, target: string | null, from: MemberRole | null = null, to: MemberRole | null = null) {
+  return env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .bind(ownerId, Date.now(), actor, action, target, from, to);
+}
+
+const audit = (...args: Parameters<typeof auditRow>) => auditRow(...args).run();
+
+type AuditDbRow = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null };
+const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, at: r.at, actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role });
+
+/** A spreadsheet runs a cell that starts with = + - or @ as a formula. Emails can start with those. */
+function csvCell(v: string | number | null): string {
+  let s = v === null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// ---------- telling the board ----------
+
+/**
+ * Tell the board's Durable Object that its membership or its owner's plan just changed, so
+ * sockets that are already open are closed or downgraded now (TodoAgent.membersChanged). The
+ * object also rechecks on its own every MEMBER_RECHECK_SECONDS, so a failure here is late,
+ * never lost.
+ */
+async function signal(env: Env, ownerId: string): Promise<void> {
+  try {
+    await (await getAgentByName(env.TodoAgent, ownerId)).membersChanged();
+  } catch (e) {
+    console.warn("telling the board about a membership change failed", (e as Error).message);
+  }
+}
+
+/**
+ * Write "sharing suspended" or "sharing restored" to the audit log the moment the owner's plan
+ * changes what members can do. Nothing is deleted either way. Called by the Stripe webhook, by
+ * the board while members are connected, and when the owner opens the members list, so a
+ * lapse nobody announced (a missed webhook, a period that ran out) is still written down.
+ */
+export async function syncSharing(env: Env, ownerId: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
+  const row = await env.DB.prepare("SELECT suspended FROM board_sharing WHERE owner_id = ?").bind(ownerId).first<{ suspended: number }>();
+  if (!row) return null; // never shared
+  const suspended = (await planFor(env, ownerId)) === "pro" ? 0 : 1;
+  let flipped = false;
+  if (row.suspended !== suspended) {
+    // Only the request that flips the row writes the entry.
+    const changed = await env.DB.prepare("UPDATE board_sharing SET suspended = ?1, updated_at = ?2 WHERE owner_id = ?3 AND suspended != ?1")
+      .bind(suspended, Date.now(), ownerId).run();
+    flipped = true;
+    if (changed.meta.changes === 1 && (await boardShared(env, ownerId))) {
+      await audit(env, ownerId, "system", suspended ? "sharing_suspended" : "sharing_restored", null);
+    }
+  }
+  return { suspended: !!suspended, flipped };
+}
+
+/** The owner's subscription just changed (billing.ts). Record it and tell the open sockets. */
+export async function planChanged(env: Env, ownerId: string): Promise<void> {
+  if ((await syncSharing(env, ownerId)) !== null) await signal(env, ownerId);
+}
+
+// ---------- the invite email ----------
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const ROLE_WORDS: Record<MemberRole, string> = { viewer: "a viewer (you can read it, not change it)", writer: "a writer (you can add, edit, and move cards)" };
+
+function inviteLink(req: Request, token: string): string {
+  // The token rides in the fragment, which browsers never send to a server: it stays out of
+  // access logs and Referer headers. The page reads it and posts it to /api/invites/*.
+  return `${new URL(req.url).origin}/tasks/invite#t=${token}`;
+}
+
+/**
+ * Send the invite, or in dev (DEV_LOGIN_CODES=1) print it and hand the link back, the same way
+ * sign-in codes work there. In production the link only ever goes to the invited mailbox.
+ */
+async function sendInvite(req: Request, env: Env, owner: User, email: string, role: MemberRole, token: string, expiresAt: number): Promise<{ devLink?: string } | { error: string }> {
+  const link = inviteLink(req, token);
+  if (env.DEV_LOGIN_CODES === "1") {
+    console.log(`[dev] invite for ${email} to ${owner.email}'s board (${role}): ${link}`);
+    return { devLink: link };
+  }
+  const until = new Date(expiresAt).toISOString().slice(0, 10);
+  const text = `${owner.email} invited you to their Tasks board as ${ROLE_WORDS[role]}.\n\nOpen the invite:\n${link}\n\n`
+    + `Sign in as ${email} to accept or decline. The link works once and expires on ${until} (7 days).\n\n`
+    + "If you weren't expecting this, you can ignore this email. Nothing is shared with you unless you accept.";
+  const html = `<!doctype html><html><body style="margin:0;background:#f7f6f3;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#2c2c2c">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px">
+<table width="100%" style="max-width:440px;background:#fffef9;border:2px solid #2c2c2c" cellpadding="0" cellspacing="0"><tr><td style="padding:32px">
+<div style="font-size:24px;font-weight:700;margin-bottom:24px">tasks<span style="color:#E85D00">.</span></div>
+<p style="font-size:15px;margin:0 0 16px"><b>${esc(owner.email)}</b> invited you to their Tasks board as ${esc(ROLE_WORDS[role])}.</p>
+<a href="${esc(link)}" style="display:inline-block;background:#E85D00;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px">Open the invite</a>
+<p style="font-size:13px;color:#6b6b6b;margin:24px 0 0">Sign in as ${esc(email)} to accept or decline. The link works once and expires on ${until} (7 days). If you weren't expecting this, ignore this email. Nothing is shared with you unless you accept.</p>
+</td></tr></table></td></tr></table></body></html>`;
+  try {
+    await env.EMAIL.send({ from: { email: env.EMAIL_FROM, name: "Tasks" }, to: email, subject: `${owner.email} invited you to a Tasks board`, text, html });
+    return {};
+  } catch (e) {
+    console.error("invite email failed", (e as { code?: string }).code, (e as Error).message);
+    return { error: "We couldn't send the invite email. Try Resend in a minute." };
+  }
+}
+
+/** Count one invite email against the owner's day. False when today's are used up. One atomic statement. */
+async function spendInviteEmail(env: Env, ownerId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `INSERT INTO invite_sends (owner_id, day, sent) VALUES (?1, ?2, 1)
+     ON CONFLICT(owner_id, day) DO UPDATE SET sent = sent + 1 WHERE invite_sends.sent < ?3
+     RETURNING sent`,
+  ).bind(ownerId, new Date().toISOString().slice(0, 10), maxDailyInvites(env)).first<{ sent: number }>();
+  return !!row;
+}
+
+// ---------- owner side ----------
+
+export type Member = { email: string; role: MemberRole; status: "pending" | "accepted"; invitedAt: number; acceptedAt: number | null; expiresAt: number | null; expired: boolean };
+const toMember = (r: MemberRow): Member => ({
+  email: r.member_email, role: r.role, status: r.status, invitedAt: r.invited_at, acceptedAt: r.accepted_at,
+  expiresAt: r.status === "pending" ? r.expires_at : null, expired: r.status === "pending" && (r.expires_at ?? 0) <= Date.now(),
+});
+
+const rowFor = (env: Env, ownerId: string, email: string) =>
+  env.DB.prepare("SELECT * FROM board_members WHERE owner_id = ? AND member_email = ?").bind(ownerId, email).first<MemberRow>();
+
+/**
+ * Why the owner can or can't invite right now:
+ * `on`, `pro_required` (free plan, nobody invited yet), `suspended` (people are on the board
+ * and Pro lapsed: they're view only until it's back), or `encrypted`.
+ */
+export type Sharing = "on" | "pro_required" | "suspended" | "encrypted";
+
+async function listMembers(env: Env, owner: User): Promise<Response> {
+  // Opening the list is also a chance to notice a plan change no webhook announced.
+  if ((await syncSharing(env, owner.id))?.flipped) await signal(env, owner.id);
+  const { results } = await env.DB.prepare("SELECT * FROM board_members WHERE owner_id = ? ORDER BY invited_at").bind(owner.id).all<MemberRow>();
+  const plan = await planFor(env, owner.id);
+  const sealed = await (await getAgentByName(env.TodoAgent, owner.id)).isSealed();
+  const sent = await env.DB.prepare("SELECT sent FROM invite_sends WHERE owner_id = ? AND day = ?")
+    .bind(owner.id, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
+  const sharing: Sharing = sealed ? "encrypted" : plan === "pro" ? "on" : results.length ? "suspended" : "pro_required";
+  return json({
+    board: {
+      id: owner.id, ownerEmail: owner.email, plan, sharing,
+      maxMembers: maxMembers(env), used: results.length,
+      maxInvitesPerDay: maxDailyInvites(env), invitesToday: sent?.sent ?? 0,
+    },
+    members: results.map(toMember),
+  });
+}
+
+/** What every new invite and resend needs first: Pro, and a board that isn't encrypted. */
+async function mayInvite(env: Env, owner: User): Promise<Response | null> {
+  if ((await planFor(env, owner.id)) !== "pro") return fail(402, "pro_required", "Sharing a board is part of Pro. Upgrade to invite people.");
+  if (await (await getAgentByName(env.TodoAgent, owner.id)).isSealed()) {
+    return fail(409, "board_encrypted", "An end-to-end encrypted board can't be shared. Turn encryption off first.");
+  }
+  return null;
+}
+
+async function setRole(env: Env, owner: User, row: MemberRow, role: MemberRole): Promise<Response> {
+  if (row.role !== role) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE board_members SET role = ?, updated_at = ? WHERE owner_id = ? AND member_email = ?").bind(role, Date.now(), owner.id, row.member_email),
+      auditRow(env, owner.id, owner.email, "role_changed", row.member_email, row.role, role),
+    ]);
+    if (row.status === "accepted") await signal(env, owner.id);
+  }
+  return json({ member: toMember({ ...row, role }), changed: row.role !== role });
+}
+
+/** A fresh token on a pending invite, and its email. The old link stops working the moment the hash is replaced. */
+async function reissue(req: Request, env: Env, owner: User, row: MemberRow, role: MemberRole): Promise<Response> {
+  if (!(await spendInviteEmail(env, owner.id))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
+  const token = randomToken();
+  const now = Date.now();
+  const expiresAt = now + INVITE_TTL_MS;
+  const changed = await env.DB.prepare(
+    "UPDATE board_members SET token_hash = ?, expires_at = ?, role = ?, updated_at = ? WHERE owner_id = ? AND member_email = ? AND status = 'pending'",
+  ).bind(await tokenHash(token), expiresAt, role, now, owner.id, row.member_email).run();
+  // Accepted in the meantime: there's nothing to resend.
+  if (changed.meta.changes !== 1) return fail(409, "already_member", "They already accepted.");
+  await audit(env, owner.id, owner.email, "invite_resent", row.member_email, row.role !== role ? row.role : null, role);
+  const sent = await sendInvite(req, env, owner, row.member_email, role, token, expiresAt);
+  const member = toMember({ ...row, role, expires_at: expiresAt });
+  if ("error" in sent) return json({ error: sent.error, code: "email_failed", member }, 502);
+  return json({ member, ...sent });
+}
+
+async function invite(req: Request, env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+  const email = inviteEmail(body.email);
+  if (!email) return fail(400, "bad_email", "That doesn't look like an email address we can invite. Use plain letters, digits, and punctuation.");
+  if (!isMemberRole(body.role)) return fail(400, "bad_role", "Pick viewer or writer.");
+  const role = body.role;
+  if (email === owner.email) return fail(400, "self", "That's you. You already own this board.");
+  const refused = await mayInvite(env, owner);
+  if (refused) return refused;
+
+  const existing = await rowFor(env, owner.id, email);
+  // Inviting someone who's already on the board changes their role, or does nothing. No email.
+  if (existing?.status === "accepted") return setRole(env, owner, existing, role);
+  if (existing) return reissue(req, env, owner, existing, role);
+
+  const max = maxMembers(env);
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM board_members WHERE owner_id = ?").bind(owner.id).first<{ n: number }>();
+  if ((count?.n ?? 0) >= max) return fail(409, "member_limit", `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`);
+  if (!(await spendInviteEmail(env, owner.id))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
+
+  const token = randomToken();
+  const now = Date.now();
+  const expiresAt = now + INVITE_TTL_MS;
+  // The cap is checked again inside the insert, so two invites racing can't both squeeze past it.
+  const added = await env.DB.prepare(
+    `INSERT INTO board_members (owner_id, owner_email, member_email, member_id, role, status, token_hash, expires_at, invited_at, updated_at)
+     SELECT ?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ?8
+     WHERE (SELECT COUNT(*) FROM board_members WHERE owner_id = ?1) < ?9
+     ON CONFLICT(owner_id, member_email) DO NOTHING`,
+  ).bind(owner.id, owner.email, email, await userIdFor(email), role, await tokenHash(token), expiresAt, now, max).run();
+  if (added.meta.changes !== 1) return fail(409, "member_limit", `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`);
+  await env.DB.batch([
+    auditRow(env, owner.id, owner.email, "invite_sent", email, null, role),
+    env.DB.prepare("INSERT OR IGNORE INTO board_sharing (owner_id, suspended, updated_at) VALUES (?, 0, ?)").bind(owner.id, now),
+  ]);
+  const sent = await sendInvite(req, env, owner, email, role, token, expiresAt);
+  const member: Member = { email, role, status: "pending", invitedAt: now, acceptedAt: null, expiresAt, expired: false };
+  if ("error" in sent) return json({ error: sent.error, code: "email_failed", member }, 502);
+  return json({ member, ...sent }, 201);
+}
+
+async function resend(req: Request, env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+  const email = inviteEmail(body.email);
+  const row = email ? await rowFor(env, owner.id, email) : null;
+  if (!row || row.status !== "pending") return fail(404, "not_found", "There's no pending invite for that address.");
+  const refused = await mayInvite(env, owner);
+  if (refused) return refused;
+  return reissue(req, env, owner, row, row.role);
+}
+
+/** Take back a pending invite (`revoke`) or take an accepted member off the board (`remove`). */
+async function drop(env: Env, owner: User, body: Record<string, unknown>, status: "pending" | "accepted"): Promise<Response> {
+  const email = inviteEmail(body.email);
+  const gone = email ? await env.DB.prepare("DELETE FROM board_members WHERE owner_id = ? AND member_email = ? AND status = ? RETURNING role")
+    .bind(owner.id, email, status).first<{ role: MemberRole }>() : null;
+  if (!gone) return fail(404, "not_found", status === "pending" ? "There's no pending invite for that address." : "Nobody with that address is on this board.");
+  await audit(env, owner.id, owner.email, status === "pending" ? "invite_revoked" : "member_removed", email, gone.role, null);
+  // Their open tabs lose the board before this request answers.
+  if (status === "accepted") await signal(env, owner.id);
+  return json({ ok: true });
+}
+
+async function changeRole(env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+  const email = inviteEmail(body.email);
+  if (!isMemberRole(body.role)) return fail(400, "bad_role", "Pick viewer or writer.");
+  const row = email ? await rowFor(env, owner.id, email) : null;
+  if (!row) return fail(404, "not_found", "Nobody with that address is on this board.");
+  return setRole(env, owner, row, body.role);
+}
+
+const AUDIT_PAGE = 50;
+const AUDIT_EXPORT_MAX = 50_000;
+
+async function auditPage(req: Request, env: Env, owner: User): Promise<Response> {
+  const q = new URL(req.url).searchParams;
+  const before = Number(q.get("before"));
+  const limit = Math.min(200, num(q.get("limit") ?? undefined, AUDIT_PAGE));
+  const { results } = await env.DB.prepare(
+    "SELECT id, at, actor, action, target, from_role, to_role FROM board_audit WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3",
+  ).bind(owner.id, Number.isInteger(before) && before > 0 ? before : 0, limit + 1).all<AuditDbRow>();
+  const page = results.slice(0, limit);
+  return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null });
+}
+
+async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    "SELECT id, at, actor, action, target, from_role, to_role FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
+  ).bind(owner.id, AUDIT_EXPORT_MAX).all<AuditDbRow>();
+  const name = `tasks-audit-${new Date().toISOString().slice(0, 10)}.${format}`;
+  const headers = { "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+  if (format === "json") {
+    return new Response(JSON.stringify({ board: owner.id, owner: owner.email, exportedAt: new Date().toISOString(), entries: results.map(toEntry) }, null, 2),
+      { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
+  }
+  const lines = ["id,time,actor,action,target,from_role,to_role"];
+  for (const r of results) lines.push([r.id, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role].map(csvCell).join(","));
+  return new Response(`${lines.join("\r\n")}\r\n`, { headers: { ...headers, "Content-Type": "text/csv; charset=utf-8" } });
+}
+
+// ---------- invitee side ----------
+
+/** Spend one try from this account's and this address's hourly budget for invite links. */
+async function withinLookups(req: Request, env: Env, user: User): Promise<boolean> {
+  const ip = req.headers.get("CF-Connecting-IP") ?? "unknown";
+  return (await spendGuess(env, `invite-ip:${ip}`, LOOKUPS_PER_IP_PER_HOUR, HOUR_MS))
+    && (await spendGuess(env, `invite-user:${user.id}`, LOOKUPS_PER_USER_PER_HOUR, HOUR_MS));
+}
+
+const tooMany = () => fail(429, "too_many", "Too many tries at invite links. Wait a while and try again.");
+
+/** The pending invite a token names, but only for the account it was sent to and only while it's live. */
+async function liveInvite(env: Env, user: User, token: unknown): Promise<MemberRow | null> {
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  // Looked up by the token's SHA-256, so nothing is compared byte by byte against a secret.
+  const row = await env.DB.prepare("SELECT * FROM board_members WHERE token_hash = ?").bind(await tokenHash(token)).first<MemberRow>();
+  if (!row || row.status !== "pending" || row.member_email !== user.email) return null;
+  if ((row.expires_at ?? 0) <= Date.now()) {
+    // Used too late. Kill the token so it's written down once, and leave the invite for the owner to resend.
+    const killed = await env.DB.prepare("UPDATE board_members SET token_hash = NULL, updated_at = ? WHERE owner_id = ? AND member_email = ? AND token_hash = ?")
+      .bind(Date.now(), row.owner_id, row.member_email, row.token_hash).run();
+    if (killed.meta.changes === 1) await audit(env, row.owner_id, user.email, "invite_expired", row.member_email, row.role, null);
+    return null;
+  }
+  return row;
+}
+
+async function lookup(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
+  if (!(await withinLookups(req, env, user))) return tooMany();
+  const row = await liveInvite(env, user, body.token);
+  if (!row) return inviteInvalid();
+  return json({ invite: { board: row.owner_id, ownerEmail: row.owner_email, email: row.member_email, role: row.role, expiresAt: row.expires_at } });
+}
+
+async function accept(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
+  if (!(await withinLookups(req, env, user))) return tooMany();
+  const row = await liveInvite(env, user, body.token);
+  if (!row) return inviteInvalid();
+  const now = Date.now();
+  // Single use: the token's hash is cleared in the same statement that accepts, so of two
+  // requests racing with one link, one changes a row and the other finds nothing.
+  const used = await env.DB.prepare(
+    `UPDATE board_members SET status = 'accepted', token_hash = NULL, expires_at = NULL, accepted_at = ?1, updated_at = ?1
+     WHERE token_hash = ?2 AND status = 'pending' AND member_email = ?3 AND member_id = ?4 AND expires_at > ?1`,
+  ).bind(now, row.token_hash, user.email, user.id).run();
+  if (used.meta.changes !== 1) return inviteInvalid();
+  await audit(env, row.owner_id, user.email, "invite_accepted", user.email, null, row.role);
+  return json({ ok: true, board: { id: row.owner_id, ownerEmail: row.owner_email, role: row.role } });
+}
+
+async function decline(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
+  if (!(await withinLookups(req, env, user))) return tooMany();
+  const row = await liveInvite(env, user, body.token);
+  if (!row) return inviteInvalid();
+  const gone = await env.DB.prepare("DELETE FROM board_members WHERE token_hash = ? AND status = 'pending' AND member_email = ?")
+    .bind(row.token_hash, user.email).run();
+  if (gone.meta.changes !== 1) return inviteInvalid();
+  await audit(env, row.owner_id, user.email, "invite_declined", user.email, row.role, null);
+  return json({ ok: true });
+}
+
+export type SharedBoard = { board: string; ownerEmail: string; role: MemberRole; effective: "viewer" | "writer"; reason: null | "plan_lapsed"; plan: "free" | "pro"; since: number | null };
+
+async function boards(env: Env, user: User): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    "SELECT owner_id, owner_email, role, accepted_at FROM board_members WHERE member_id = ? AND member_email = ? AND status = 'accepted' ORDER BY accepted_at LIMIT 50",
+  ).bind(user.id, user.email).all<Pick<MemberRow, "owner_id" | "owner_email" | "role" | "accepted_at">>();
+  const shared: SharedBoard[] = [];
+  for (const r of results) {
+    const plan = await planFor(env, r.owner_id);
+    // An encrypted board can't have members, so there's no need to wake each board to ask.
+    const d = decide({ isOwner: false, membership: r.role, plan, sealed: false });
+    shared.push({ board: r.owner_id, ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
+  }
+  return json({ own: { board: user.id, email: user.email, plan: await planFor(env, user.id) }, shared });
+}
+
+async function leave(env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
+  const board = typeof body.board === "string" && BOARD_ID.test(body.board) ? body.board : null;
+  const gone = board ? await env.DB.prepare("DELETE FROM board_members WHERE owner_id = ? AND member_id = ? AND member_email = ? AND status = 'accepted' RETURNING role")
+    .bind(board, user.id, user.email).first<{ role: MemberRole }>() : null;
+  // The same answer for a board that isn't there and one you were never on.
+  if (!board || !gone) return fail(404, "not_found", "You're not on that board.");
+  await audit(env, board, user.email, "member_left", user.email, gone.role, null);
+  await signal(env, board);
+  return json({ ok: true });
+}
+
+/**
+ * The team-board API. Everything needs a browser session; the Worker has already refused
+ * writes from another origin (fromElsewhere in server.ts). `/api/board/*` is the signed-in
+ * user's own board, so there's no board id to pass and none to guess.
+ */
+export async function handleMembers(req: Request, env: Env, path: string): Promise<Response | null> {
+  const mine = path === "/api/board" || path.startsWith("/api/board/");
+  if (!mine && path !== "/api/boards" && !path.startsWith("/api/boards/") && !path.startsWith("/api/invites/")) return null;
+  const user = await currentUser(req, env);
+  if (!user) return json({ error: "signed out" }, 401);
+
+  if (req.method === "GET") {
+    if (path === "/api/board/members") return listMembers(env, user);
+    if (path === "/api/board/audit") return auditPage(req, env, user);
+    if (path === "/api/board/audit.csv") return auditExport(env, user, "csv");
+    if (path === "/api/board/audit.json") return auditExport(env, user, "json");
+    if (path === "/api/boards") return boards(env, user);
+    if (path === "/api/board/access") {
+      const a = await access(env, user, new URL(req.url).searchParams.get("board") ?? user.id);
+      return a.effective === "none" ? fail(404, "not_found", "No such board.") : json({ access: a });
+    }
+    return null;
+  }
+  if (req.method !== "POST") return null;
+  const raw = await req.json<unknown>().catch(() => null);
+  const body = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  switch (path) {
+    case "/api/board/invites": return invite(req, env, user, body);
+    case "/api/board/invites/resend": return resend(req, env, user, body);
+    case "/api/board/invites/revoke": return drop(env, user, body, "pending");
+    case "/api/board/members/role": return changeRole(env, user, body);
+    case "/api/board/members/remove": return drop(env, user, body, "accepted");
+    case "/api/invites/lookup": return lookup(req, env, user, body);
+    case "/api/invites/accept": return accept(req, env, user, body);
+    case "/api/invites/decline": return decline(req, env, user, body);
+    case "/api/boards/leave": return leave(env, user, body);
+    default: return null;
+  }
+}

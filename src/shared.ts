@@ -41,6 +41,38 @@ export type Answer = {
 
 export const MAX_ASK_OPTIONS = 4;
 
+/**
+ * Who last changed a card, so a shared board never has "who did this?". `email` is the person:
+ * the owner or a member. `via` says they didn't do it by hand: "assistant" for the in-app
+ * assistant acting on their message, "agent" for an outside agent on the owner's token (MCP).
+ * The board's Durable Object writes it from the connection that made the change (stampBy
+ * below, called by TodoAgent); nothing a client sends is ever read into it.
+ */
+export type By = { email: string; via?: "assistant" | "agent" };
+
+/**
+ * Mark every card that `after` added or changed as last changed by `by`. A card that only
+ * shifted position because another card moved isn't marked. With no `by` (nobody to name), a
+ * changed card loses its old mark instead of keeping one that's now wrong. An encrypted board
+ * is one person's, and is left alone.
+ */
+export function stampBy(before: Board, after: Board, by: By | null): Board {
+  if (after.sealed || before === after) return after;
+  const was = new Map(before.cards.map((c) => [c.id, c]));
+  const bare = (c: Card) => { const { by: _, ...rest } = c; return JSON.stringify(rest); };
+  const withBy = (c: Card, mark: By | null | undefined): Card => { const { by: _, ...rest } = c; return mark ? { ...rest, by: mark } : rest; };
+  let touched = false;
+  const cards = after.cards.map((c) => {
+    const p = was.get(c.id);
+    // Unchanged: it keeps the mark it had, whatever the op carried along.
+    const mark = p && bare(p) === bare(c) ? p.by : by;
+    if (JSON.stringify(c.by ?? null) === JSON.stringify(mark ?? null)) return c;
+    touched = true;
+    return withBy(c, mark);
+  });
+  return touched ? { ...after, cards } : after;
+}
+
 export type Card = {
   id: string;
   title: string;
@@ -53,6 +85,7 @@ export type Card = {
   tags?: string[]; // missing on cards made before tags existed, and on cards with none
   ask?: Ask; // an open question; never on an encrypted board
   answer?: Answer;
+  by?: By; // who made the last change; `updatedAt` says when. Never on an encrypted board.
 };
 
 export const MAX_ATTACHMENTS_PER_CARD = 20;

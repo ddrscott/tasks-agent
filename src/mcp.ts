@@ -177,7 +177,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const no = await locked();
       if (no) return no;
       const { session_id, ...ask } = input;
-      const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
+      const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 }, user.email)) as ToolOutcome;
       if (!r.ok) return text(r.summary, true);
       // Presence is told who asked, so the card and Sessions say that session needs input until the
       // owner answers. With no session_id it's whoever holds the card, which is the asker when the
@@ -304,7 +304,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       }, async (input: unknown) => {
         const no = await locked();
         if (no) return no;
-        const r = (await agent.runTool(name, input, undefined, "agent")) as ToolOutcome;
+        const r = (await agent.runTool(name, input, undefined, "agent", user.email)) as ToolOutcome;
         // The whole board after every write cost agents thousands of tokens a call. The lane counts
         // say the change landed; get_board and get_card are there for anything more.
         if (!r.ok) return text(r.summary, true);

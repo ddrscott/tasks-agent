@@ -1,15 +1,21 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable, type Connection } from "agents";
 import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { billingEnabled, dailyLimit, planFor, type Usage } from "./billing";
 import * as ops from "./shared";
-import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type Card, type SealInfo } from "./shared";
+import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type By, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type TaskEvent } from "./events";
 import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
+import { access, boardShared, syncSharing } from "./members";
+import {
+  assertMayChange, CLOSE_NO_ACCESS, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  type Access, type AccessFrame, type AccessReason, type Effective,
+} from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
 const HISTORY_LIMIT = 30;
@@ -28,6 +34,44 @@ const ATTACHMENT_RECHECK_S = 7 * 24 * 60 * 60;
 /** Who made a change: you (the app, its assistant) or an outside agent over MCP. */
 type Actor = "you" | "agent";
 
+/**
+ * Who is behind the code that's running right now. Set where a request enters the object and
+ * read by the write guard (`guard`) and by attribution (`by`), so neither has to trust an
+ * argument. A member's entry is made only by `memberCall`, from a fresh membership check.
+ */
+type Caller = {
+  kind: "owner" | "member";
+  email: string | null;
+  /** What this caller may do right now. Always "owner" for the owner. */
+  effective: Effective;
+  reason: AccessReason;
+  via?: By["via"];
+};
+const callers = new AsyncLocalStorage<Caller>();
+
+// Members' sockets (// TEAM_BOARDS). They are plain hibernating WebSockets this class accepts
+// and answers itself. The Agents SDK and the chat SDK never see them: both only handle sockets
+// whose attachment they wrote, so nothing they broadcast (chat messages, stream chunks, MCP
+// server lists, state) reaches a member, and no frame a member sends reaches their handlers.
+const MEMBER_TAG = "tasks-member";
+const MAX_SOCKETS_PER_MEMBER = 8;
+const MEMBER_FRAME_MAX = 256 * 1024;
+/** What a member's socket remembers between messages. `at` is when its access was last checked against D1. */
+type MemberMeta = { tm: 1; id: string; email: string; effective: Effective; reason: AccessReason; role: Access["role"]; plan: Access["plan"]; ownerEmail: string | null; at: number };
+
+function memberMeta(ws: WebSocket): MemberMeta | null {
+  try {
+    const a = ws.deserializeAttachment() as Partial<MemberMeta> | null;
+    return a && a.tm === 1 && typeof a.id === "string" && typeof a.email === "string" ? (a as MemberMeta) : null;
+  } catch {
+    return null;
+  }
+}
+
+function sendTo(ws: WebSocket, frame: string) {
+  try { ws.send(frame); } catch { /* it closed under us */ }
+}
+
 export class TodoAgent extends AIChatAgent<Env, Board> {
   initialState = ops.newBoard();
   maxPersistedMessages = 120;
@@ -40,7 +84,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // stop those frames here, before the SDK sees them. The browser never sends them there:
     // local turns go through applyLocal, which builds the transcript on the server.
     const inner = this.onMessage.bind(this);
-    this.onMessage = (connection, message) => {
+    const gated: typeof this.onMessage = (connection, message) => {
       if (this.state?.sealed && typeof message === "string") {
         const frame = chatFrame(message);
         if (frame && CHAT_FRAMES_BLOCKED_WHEN_SEALED.has(frame.type)) {
@@ -52,6 +96,265 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       }
       return inner(connection, message);
     };
+    // Every socket the SDK handles is the owner's: fetch() below lets nobody else upgrade into
+    // it. Say so for whatever the frame goes on to do.
+    this.onMessage = (connection, message) =>
+      callers.run({ kind: "owner", email: (connection.state as { email?: string } | null)?.email ?? this.ownerEmail(), effective: "owner", reason: null }, () => gated(connection, message));
+  }
+
+  // ---------- who's calling (// TEAM_BOARDS) ----------
+
+  /**
+   * The front door. The Worker has checked the session and names the caller in headers it set
+   * itself (server.ts). The owner gets the Agents SDK as before. A member gets `acceptMember`,
+   * and a request that names neither gets nothing.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    const member = request.headers.get(H_MEMBER);
+    if (member !== null) return this.acceptMember(request, member);
+    if (request.headers.get(H_USER) !== this.name) return new Response("Not found", { status: 404 });
+    return super.fetch(request);
+  }
+
+  /** The owner's socket: remember their email for attribution. */
+  onConnect(connection: Connection, ctx: { request: Request }) {
+    let email: string | null = null;
+    try { email = decodeURIComponent(ctx.request.headers.get(H_EMAIL) ?? ""); } catch { /* not ours */ }
+    if (!email) return;
+    connection.setState({ email });
+    if (email !== this.ownerEmail()) this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('owner_email', ${email})`;
+  }
+
+  /** The owner's email, as last seen on one of their sockets. For changes made with no socket in hand (a chat turn's tools). */
+  private ownerEmail(): string | null {
+    return this.sql<{ v: string }>`SELECT v FROM board_meta WHERE k = 'owner_email'`[0]?.v ?? null;
+  }
+
+  /** Who to name on a card this code is changing, or null when there's nobody to name. */
+  private by(actor: Actor): By | null {
+    const c = callers.getStore();
+    const email = c?.email ?? this.ownerEmail();
+    if (!email) return null;
+    const via = c?.via ?? (actor === "agent" ? "agent" : undefined);
+    return via ? { email, via } : { email };
+  }
+
+  /**
+   * The write guard. Every change to the board passes through here twice: in `mutate`, before
+   * anything is written, and again in `setState`, which every path ends in whether or not it
+   * went through `mutate`. The owner may do anything. A member's change is checked against
+   * what a writer may touch (assertMayChange in member-rules.ts): cards, and nothing else.
+   * Code running with no caller (the Worker's RPC, a scheduled job) is the owner's own, since
+   * a member has no way to start any.
+   */
+  private guard(before: Board, after: Board) {
+    const c = callers.getStore();
+    if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after);
+  }
+
+  override setState(next: Board) {
+    this.guard(this.state, next);
+    super.setState(next);
+    this.pushMembers();
+  }
+
+  /** The board as a member's socket gets it. Never the passphrase envelope; an encrypted board has no members anyway. */
+  private memberFrame(): string {
+    const { sealed: _, ...board } = this.state;
+    return JSON.stringify({ type: "cf_agent_state", state: board });
+  }
+
+  private accessFrame(m: MemberMeta, closed?: AccessFrame["closed"]): string {
+    const frame: AccessFrame = {
+      type: "tasks_access", board: this.name, ownerEmail: m.ownerEmail, role: m.role, effective: m.effective, reason: m.reason, plan: m.plan,
+      ...(closed ? { closed } : {}),
+    };
+    return JSON.stringify(frame);
+  }
+
+  private recheckMs(): number {
+    const n = Number((this.env as { MEMBER_RECHECK_SECONDS?: string }).MEMBER_RECHECK_SECONDS);
+    return (Number.isFinite(n) && n >= 5 ? n : 30) * 1000;
+  }
+
+  /** Take the board away from a socket: say why, then close it. Nothing more is sent to it. */
+  private dropMember(ws: WebSocket, m: MemberMeta, why: "removed" | "encrypted") {
+    sendTo(ws, this.accessFrame({ ...m, role: null, effective: "none", reason: why === "encrypted" ? "encrypted" : "not_member", ownerEmail: null, plan: "free" }, why));
+    try { ws.close(CLOSE_NO_ACCESS, why); } catch { /* already closed */ }
+  }
+
+  /**
+   * Check a member's socket against D1 again. Removed, or the board got encrypted: the socket
+   * is closed. Role or plan changed: the socket is told, and remembers the new answer.
+   * Returns what the member may do now.
+   */
+  private async refresh(ws: WebSocket, m: MemberMeta): Promise<MemberMeta | null> {
+    const a = await access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed });
+    if (a.effective === "none" || a.role === "owner") {
+      this.dropMember(ws, m, a.reason === "encrypted" ? "encrypted" : "removed");
+      return null;
+    }
+    const next: MemberMeta = { ...m, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at: Date.now() };
+    try { ws.serializeAttachment(next); } catch { return null; }
+    if (next.effective !== m.effective || next.reason !== m.reason || next.role !== m.role || next.plan !== m.plan) sendTo(ws, this.accessFrame(next));
+    return next;
+  }
+
+  /** A member connecting. The Worker checked them; check again here, with the same function, before anything is sent. */
+  private async acceptMember(request: Request, raw: string): Promise<Response> {
+    const refuse = () => new Response("Not found", { status: 404 });
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return refuse();
+    let who: { id?: unknown; email?: unknown };
+    try { who = JSON.parse(decodeURIComponent(raw)) as typeof who; } catch { return refuse(); }
+    if (typeof who.id !== "string" || typeof who.email !== "string" || who.id === this.name) return refuse();
+    await this.__unsafe_ensureInitialized();
+    const a = await access(this.env, { id: who.id, email: who.email }, this.name, { sealed: !!this.state.sealed });
+    if (a.effective === "none" || a.role === "owner") return refuse();
+    // One person, a handful of tabs. The oldest gives way.
+    const mine = this.ctx.getWebSockets(`m:${who.id}`);
+    for (const old of mine.slice(0, Math.max(0, mine.length - MAX_SOCKETS_PER_MEMBER + 1))) { try { old.close(1008, "too many tabs"); } catch { /* gone */ } }
+    const pair = new WebSocketPair();
+    const meta: MemberMeta = { tm: 1, id: who.id, email: who.email, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at: Date.now() };
+    this.ctx.acceptWebSocket(pair[1], [MEMBER_TAG, `m:${who.id}`]);
+    pair[1].serializeAttachment(meta);
+    // The same three frames useAgent expects from the SDK, so the client needs no second transport.
+    sendTo(pair[1], JSON.stringify({ type: "cf_agent_identity", name: this.name, agent: "todo-agent" }));
+    sendTo(pair[1], this.accessFrame(meta));
+    sendTo(pair[1], this.memberFrame());
+    await this.scheduleSweep();
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  /**
+   * A frame from a member's socket. Exactly one kind does anything: an RPC call to a method on
+   * the short list in member-rules.ts. Their access is read from D1 again before every call, so
+   * a role change or a removal holds from the very next frame even if no signal arrived. State
+   * pushes, chat requests, tool results, and everything else the SDK protocol has are dropped
+   * here without reaching the SDK.
+   */
+  private async memberMessage(ws: WebSocket, was: MemberMeta, message: string | ArrayBuffer) {
+    if (typeof message !== "string" || message.length > MEMBER_FRAME_MAX) return;
+    let f: { type?: unknown; id?: unknown; method?: unknown; args?: unknown };
+    try { f = JSON.parse(message) as typeof f; } catch { return; }
+    if (!f || typeof f !== "object") return;
+    if (f.type === "cf_agent_use_chat_request" && typeof f.id === "string") {
+      sendTo(ws, JSON.stringify({ type: "cf_agent_use_chat_response", id: f.id, body: "The cloud assistant belongs to the board's owner. The in-browser assistant still works here.", done: true, error: true }));
+      return;
+    }
+    if (f.type !== "rpc" || typeof f.id !== "string" || f.id.length > 100) return;
+    const reply = (r: { success: true; result: unknown } | { success: false; error: string }) =>
+      sendTo(ws, JSON.stringify({ type: "rpc", id: f.id, done: true, ...r }));
+    const m = await this.refresh(ws, was);
+    if (!m) return;
+    const needs = memberCallNeeds(f.method);
+    if (!needs || !Array.isArray(f.args)) return reply({ success: false, error: OWNER_ONLY });
+    if (needs === "writer" && m.effective !== "writer") return reply({ success: false, error: m.reason === "plan_lapsed" ? READ_ONLY_LAPSED : READ_ONLY });
+    try {
+      const fn = (this as unknown as Record<string, (...a: unknown[]) => unknown>)[f.method as string];
+      const result = await callers.run({ kind: "member", email: m.email, effective: m.effective, reason: m.reason }, () => fn.apply(this, f.args as unknown[]));
+      reply({ success: true, result: result === undefined ? null : result });
+    } catch (e) {
+      reply({ success: false, error: e instanceof Error ? e.message : "That didn't work." });
+    }
+  }
+
+  // The platform's WebSocket events. A member's socket is handled here; everything else is the SDK's.
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    const m = memberMeta(ws);
+    if (!m) return this.lifecycle.webSocketMessage(ws, message);
+    try {
+      await this.__unsafe_ensureInitialized();
+      await this.memberMessage(ws, m, message);
+    } catch (e) {
+      console.error("member socket message failed", (e as Error).message);
+    }
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    if (!memberMeta(ws)) return this.lifecycle.webSocketClose(ws, code, reason, wasClean);
+    try { ws.close(code === 1005 || code === 1006 ? 1000 : code, reason); } catch { /* already closed */ }
+  }
+
+  async webSocketError(ws: WebSocket, error: unknown) {
+    if (!memberMeta(ws)) return this.lifecycle.webSocketError(ws, error);
+  }
+
+  /**
+   * Send the board to members' sockets after a change. A socket whose access was checked
+   * within the recheck window gets it now; an older one is checked first and gets it only if
+   * it still has a way in.
+   */
+  private pushMembers() {
+    const sockets = this.ctx.getWebSockets(MEMBER_TAG);
+    if (!sockets.length) return;
+    const sealed = !!this.state.sealed;
+    const frame = sealed ? "" : this.memberFrame();
+    const stale: WebSocket[] = [];
+    const cutoff = Date.now() - this.recheckMs();
+    for (const ws of sockets) {
+      const m = memberMeta(ws);
+      if (!m) continue;
+      if (sealed) this.dropMember(ws, m, "encrypted");
+      else if (m.at < cutoff) stale.push(ws);
+      else sendTo(ws, frame);
+    }
+    if (stale.length) this.ctx.waitUntil(this.recheck(stale, true).catch((e: Error) => console.warn("member recheck failed", e.message)));
+  }
+
+  private async recheck(sockets: WebSocket[], thenSend: boolean) {
+    for (const ws of sockets) {
+      const m = memberMeta(ws);
+      if (!m) continue;
+      if ((await this.refresh(ws, m)) && thenSend) sendTo(ws, this.memberFrame());
+    }
+  }
+
+  /**
+   * The Worker calls this the moment membership or the owner's plan changes (members.ts):
+   * every member socket is checked against D1 now, so a removed member's tab loses the board
+   * before the owner's request has even answered.
+   */
+  async membersChanged() {
+    await this.recheck(this.ctx.getWebSockets(MEMBER_TAG), false);
+  }
+
+  /**
+   * The backstop for a signal that never came (a failed RPC, a plan that ran out with no
+   * webhook): while any member is connected, check them all every MEMBER_RECHECK_SECONDS.
+   * 30 seconds by default: short enough that a missed signal is a brief lag, not a hole, and
+   * the cost is one small D1 read per connected member per run, only on boards being shared
+   * right now. With nobody connected it stops.
+   */
+  async sweepMembers() {
+    const sockets = this.ctx.getWebSockets(MEMBER_TAG);
+    if (!sockets.length) return;
+    await syncSharing(this.env, this.name).catch((e: Error) => console.warn("sharing state check failed", e.message));
+    await this.recheck(sockets, false);
+    if (this.ctx.getWebSockets(MEMBER_TAG).length) await this.schedule(this.recheckMs() / 1000, "sweepMembers");
+  }
+
+  private async scheduleSweep() {
+    if (this.getSchedules().some((s) => s.callback === "sweepMembers")) return;
+    await this.schedule(this.recheckMs() / 1000, "sweepMembers");
+  }
+
+  /** Whether an attachment is on the board right now. A member may download those and no others (attachments.ts). */
+  hasAttachment(id: string): boolean {
+    return ops.attachmentIds(this.state).includes(id);
+  }
+
+  /**
+   * Run `fn` as the person the Worker says is behind an RPC call. The owner is taken at the
+   * Worker's word, which checked their session or token. Anyone else is looked up again here
+   * and has to be a writer.
+   */
+  private async asUser<T>(who: { id: string; email: string } | undefined, via: By["via"], fn: () => T): Promise<T> {
+    if (!who || who.id === this.name) {
+      return callers.run({ kind: "owner", email: who?.email ?? this.ownerEmail(), effective: "owner", reason: null, ...(via ? { via } : {}) }, fn);
+    }
+    const a = await access(this.env, who, this.name, { sealed: !!this.state.sealed });
+    if (a.effective === "none" || a.role === "owner") throw new Error("No such board.");
+    return callers.run({ kind: "member", email: who.email, effective: a.effective, reason: a.reason, ...(via ? { via } : {}) }, fn);
   }
 
   /** Message arrays built on the server (applyLocal), the only ones an encrypted board accepts whole. */
@@ -64,6 +367,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   override async persistMessages(...args: Parameters<AIChatAgent<Env, Board>["persistMessages"]>) {
     const [messages, exclude, options] = args;
+    // The chat transcript is the owner's. Nothing a member does reads or writes it.
+    if (callers.getStore()?.kind === "member") throw new Error(OWNER_ONLY);
     if (!this.state.sealed || this.trusted.has(messages)) return super.persistMessages(messages, exclude, options);
     const prior = new Map(this.messages.map((m) => [m.id, JSON.stringify(m)]));
     const kept = messages.filter((m) => prior.get(m.id) === JSON.stringify(m));
@@ -81,6 +386,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`CREATE TABLE IF NOT EXISTS redo (
       id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, chats INTEGER NOT NULL)`;
+    this.sql`CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
     if (!this.state.sealed) this.index.backfill(this.state);
   }
 
@@ -118,7 +424,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you"): Board {
     const before = this.state;
-    const after = fn(before);
+    const changed = fn(before);
+    // Before anything is written: a member's change has to be one a writer may make.
+    this.guard(before, changed);
+    const after = ops.stampBy(before, changed, this.by(actor));
     ops.assertSealedBoard(after);
     const top = this.sql<{ grp: string | null }>`SELECT grp FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!group || top?.grp !== group) {
@@ -179,9 +488,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * Record a file the Worker just stored in R2. Deliberately not @callable: only
    * the upload endpoint may add one, after it has checked the size and quota.
    */
-  attach(cardId: string, att: Attachment): { ok: true } | { ok: false; error: string } {
+  async attach(cardId: string, att: Attachment, who?: { id: string; email: string }): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
-      this.mutate("Attach file", (b) => ops.addAttachment(b, cardId, att));
+      await this.asUser(who, undefined, () => this.mutate("Attach file", (b) => ops.addAttachment(b, cardId, att)));
       return { ok: true };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
@@ -242,9 +551,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** An outside agent putting a question on a card, over MCP (mcp.ts). Not callable from the browser. */
-  askCeo(input: { id: string; question: string; options: string[]; recommended?: number }): ToolOutcome {
+  askCeo(input: { id: string; question: string; options: string[]; recommended?: number }, email?: string): ToolOutcome {
     try {
-      const board = this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent");
+      const board = callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" },
+        () => this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent"));
       const card = board.cards.find((c) => c.id === input.id)!;
       return { ok: true, summary: `Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG) };
     } catch (e) {
@@ -315,7 +625,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private restore(board: Board) {
     const before = this.state;
     // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
-    this.setState(ops.keepSettings(board, before));
+    // Whoever undid or redid it made the last change to the cards that came back different.
+    this.setState(ops.stampBy(before, ops.keepSettings(board, before), this.by("you")));
     this.reindex(before, this.state);
     // Undo and redo can finish or remove a card too (redoing a move to Done, undoing "Add card").
     // The other direction brings nothing back: a claim that ended stays ended.
@@ -365,7 +676,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * whole chat turn undoes at once; each MCP call is its own step. MCP passes
    * actor "agent", so an outside agent's own changes don't come back to it as events.
    */
-  runTool(name: ToolName, input: unknown, group?: string, actor: Actor = "you"): ToolOutcome {
+  runTool(name: ToolName, input: unknown, group?: string, actor: Actor = "you", email?: string): ToolOutcome {
+    // Called over RPC by the MCP endpoint, which has checked the owner's token: name them.
+    if (!callers.getStore() && actor === "agent") {
+      return callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" }, () => this.runTool(name, input, group, actor));
+    }
     const t = BOARD_TOOLS[name];
     if (!t) return { ok: false, summary: `Unknown tool ${name}` };
     try {
@@ -446,9 +761,15 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // string either an id already on the board or ciphertext under the board's key.
     const calls = sealed ? this.sealedCalls(raw, sealed.kid) : raw;
     const group = crypto.randomUUID();
-    const outcomes = calls.map((c) => this.runTool(c.name, c.input, group));
+    const caller = callers.getStore();
+    // The assistant acting on this person's message. A member's turn runs under their own
+    // role, so the write guard decides what it may do like any other change of theirs.
+    const run = () => calls.map((c) => this.runTool(c.name, c.input, group));
+    const outcomes = caller ? callers.run({ ...caller, via: "assistant" }, run) : run();
     const done = outcomes.filter((o) => o.ok).map((o) => o.summary);
     const reply = done.length ? `${done.join(". ")}.` : "That didn't work; try telling me again.";
+    // The transcript is the owner's chat. A member's local turn changes the board and leaves no message in it.
+    if (caller?.kind === "member") return { outcomes, reply };
     const stamp = new Date().toISOString();
     const user = { id: crypto.randomUUID(), role: "user" as const, parts: [{ type: "text" as const, text }], metadata: { createdAt: stamp } };
     const assistant = {
@@ -464,7 +785,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         { type: "text" as const, text: reply, state: "done" as const },
       ],
     };
-    const next = [...this.messages, user, assistant] as typeof this.messages;
+    const next = [...this.messages, user, assistant] as TodoAgent["messages"];
     this.trusted.add(next);
     await this.persistMessages(next);
     return { outcomes, reply };
@@ -498,6 +819,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   async enableEncryption(input: { kid: string; envelope: string; board: Board; proof: string }) {
     if (this.state.sealed) throw new Error("This board is already encrypted.");
+    // An encrypted board is closed to everyone but its owner, so it can't be one that's shared.
+    if (await boardShared(this.env, this.name)) throw new Error(SHARED_NOTICE);
     const seal = checkEnvelope(input?.kid, input?.envelope);
     const check = await proofHash(checkProof(input?.proof));
     const next = await this.adopt(input?.board, seal);
@@ -670,6 +993,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env) };
   }
 
+  /** A cloud turn's tool calls: the assistant, on the owner's behalf. Only the owner's socket can start one. */
+  private asAssistant<T>(fn: () => T): T {
+    return callers.run({ kind: "owner", email: this.ownerEmail(), effective: "owner", reason: null, via: "assistant" }, fn);
+  }
+
   async onChatMessage(_onFinish: unknown, options?: { requestId: string; abortSignal?: AbortSignal; body?: Record<string, unknown> }) {
     // The cloud model would have to read the board and the message. On an encrypted board it
     // never runs, and the plaintext message the SDK just stored is dropped again.
@@ -705,7 +1033,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       tools: {
         ...Object.fromEntries(TOOL_NAMES.map((name) => {
           const { description, inputSchema } = BOARD_TOOLS[name];
-          return [name, tool({ description, inputSchema, execute: async (input: unknown) => this.runTool(name, input, group) })];
+          return [name, tool({ description, inputSchema, execute: async (input: unknown) => this.asAssistant(() => this.runTool(name, input, group)) })];
         })),
         [SEARCH_TOOL.name]: tool({
           description: SEARCH_TOOL.description,
@@ -725,6 +1053,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return result.toUIMessageStreamResponse();
   }
 }
+
+/** Starts with its code, `[board_shared]`, so the app can tell it from any other failure. */
+const SHARED_NOTICE = "[board_shared] A shared board can't be encrypted. Remove its members and revoke its pending invites first.";
 
 const SEALED_NOTICE =
   "This board is end-to-end encrypted. Only the app, unlocked with the owner's passphrase, can read or change it, " +

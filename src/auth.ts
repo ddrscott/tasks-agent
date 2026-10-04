@@ -2,6 +2,7 @@
 // plus a one-click link carrying the same code, and a verified code becomes a
 // 30-day session cookie. Only hashes of codes and session tokens are stored.
 
+import { hasInvite } from "./members";
 import { verifyTurnstile } from "./turnstile";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -43,6 +44,15 @@ export function allowed(env: Env, email: string): boolean {
   const list = (env.ALLOWED_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (list.length === 0) return true;
   return list.some((rule) => (rule.startsWith("@") ? email.endsWith(rule) : email === rule));
+}
+
+/**
+ * Whether this email may sign in: it's on the allow list, or someone invited it to their board
+ * (a live invite or a membership, members.ts). An invite lets that one address in and changes
+ * nothing else about the list.
+ */
+export async function maySignIn(env: Env, email: string): Promise<boolean> {
+  return allowed(env, email) || (await hasInvite(env, email));
 }
 
 function randomCode(): string {
@@ -116,7 +126,7 @@ async function start(req: Request, env: Env): Promise<Response> {
   if (!(await verifyTurnstile(req, env, body.turnstile))) {
     return json({ error: "We couldn't confirm you're human. Try again.", turnstile: true }, 403);
   }
-  if (!allowed(env, email)) return json({ error: "This board is invite-only, and that email isn't on the list." }, 403);
+  if (!(await maySignIn(env, email))) return json({ error: "This board is invite-only, and that email isn't on the list." }, 403);
 
   const prev = await env.DB.prepare("SELECT sent_at FROM login_codes WHERE email = ?").bind(email).first<{ sent_at: number }>();
   if (prev && Date.now() - prev.sent_at < RESEND_COOLDOWN_MS) {
@@ -161,7 +171,7 @@ async function start(req: Request, env: Env): Promise<Response> {
  * Count one guess against `key` and say whether it's within the hourly budget. One atomic
  * statement, so parallel requests can't all read the same count.
  */
-async function spendGuess(env: Env, key: string, max: number, windowMs: number): Promise<boolean> {
+export async function spendGuess(env: Env, key: string, max: number, windowMs: number): Promise<boolean> {
   const now = Date.now();
   const row = await env.DB.prepare(
     `INSERT INTO login_limits (key, window_start, guesses) VALUES (?1, ?2, 1)

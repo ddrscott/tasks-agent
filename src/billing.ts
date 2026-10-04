@@ -9,6 +9,7 @@
 // STRIPE_PRICE_ID are set.
 
 import { currentUser, type User } from "./auth";
+import { planChanged } from "./members";
 
 export type Plan = "free" | "pro";
 export type Usage = { plan: Plan; used: number; limit: number; billing: boolean };
@@ -90,6 +91,9 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
        current_period_end = excluded.current_period_end, cancel_at_period_end = excluded.cancel_at_period_end,
        updated_at = excluded.updated_at`,
   ).bind(userId, sub.metadata.email ?? "", sub.customer, sub.id, sub.status, periodEnd, sub.cancel_at_period_end ? 1 : 0, Date.now()).run();
+  // A shared board follows its owner's plan: members drop to view only when Pro lapses and get
+  // their roles back when it returns, on the sockets they already have open (members.ts).
+  await planChanged(env, userId).catch((e: Error) => console.warn("telling the board about a plan change failed", e.message));
 }
 
 // ---------- public plans ----------

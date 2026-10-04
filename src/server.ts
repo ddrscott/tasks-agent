@@ -4,6 +4,8 @@ import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
+import { access, handleMembers } from "./members";
+import { H_EMAIL, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -115,6 +117,7 @@ const app: ExportedHandler<Env> = {
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
+        ?? (await handleMembers(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 
@@ -124,14 +127,22 @@ const app: ExportedHandler<Env> = {
       return handleAuthorize(req, env);
     }
 
-    // The client connects to /tasks/agent (WebSocket plus a few HTTP calls). The
-    // session decides which Durable Object it reaches, so users never name one.
+    // The client connects to /tasks/agent (WebSocket plus a few HTTP calls). With no `board`
+    // in the query the session decides which Durable Object it reaches: your own. `?board=<id>`
+    // asks for a board someone shared with you, and the membership check decides (// TEAM_BOARDS).
     if (sub === "/agent" || sub.startsWith("/agent/")) {
       if (fromElsewhere(req)) return forbidden();
       const user = await currentUser(req, env);
       if (!user) return new Response("Sign in first", { status: 401 });
+      const board = new URL(req.url).searchParams.get("board");
+      if (board !== null && board !== user.id) return memberConnect(req, env, user, sub, board);
+      // Who's calling is said in headers only the Worker may set, so drop any the browser sent.
+      const headers = new Headers(req.headers);
+      for (const h of INTERNAL_HEADERS) headers.delete(h);
+      headers.set(H_USER, user.id);
+      headers.set(H_EMAIL, encodeURIComponent(user.email)); // header values are bytes; an email needn't be
       const agent = await getAgentByName(env.TodoAgent, user.id);
-      return agent.fetch(req);
+      return agent.fetch(new Request(req, { headers }));
     }
 
     // The live feed of your #agent card changes (events.ts), for an agent session on your machine.
@@ -163,6 +174,26 @@ const app: ExportedHandler<Env> = {
     return file.status === 404 ? shell(req, env, null) : file;
   },
 };
+
+/**
+ * Someone asking for a board that isn't theirs. One check (access in members.ts), and one
+ * answer for every way it can fail: a stranger, a pending invite, a removed member, an
+ * encrypted board, a made-up id. Nothing in it says whether the board exists.
+ *
+ * A member gets a WebSocket and nothing else: no HTTP calls into the owner's object, no path
+ * under /agent, and none of the browser's headers. The request the board sees is built here
+ * from scratch, with the member the Worker just checked.
+ */
+async function memberConnect(req: Request, env: Env, user: User, sub: string, board: string): Promise<Response> {
+  const refuse = () => new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  if (sub !== "/agent" || req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return refuse();
+  const a = await access(env, user, board);
+  if (a.effective === "none" || a.role === "owner") return refuse();
+  const agent = await getAgentByName(env.TodoAgent, board);
+  return agent.fetch(new Request("https://tasks.internal/agent", {
+    headers: { Upgrade: "websocket", [H_MEMBER]: encodeURIComponent(JSON.stringify({ id: user.id, email: user.email })) },
+  }));
+}
 
 /** The most a hook may send. Real payloads are a few hundred bytes; a Write's tool_input can be big, and it's thrown away. */
 const PRESENCE_MAX_BYTES = 256 * 1024;
