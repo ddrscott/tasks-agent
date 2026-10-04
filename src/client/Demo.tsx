@@ -281,13 +281,16 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const scene: Scene = !spot ? { at: "idle" }
     : spot.step === "pickup" ? { at: "between" }
     : { at: spot.card.ask ? "waiting" : spot.step === "ack" ? "heard" : spot.step === "finish" ? "working" : "reading", beat: spot.beat, card: spot.card };
+  // The script ran out. `looped` is whether the visitor saw it through: a question answered and the card finished.
+  const over = !spot;
+  const looped = Object.values(saved.current.at).includes("done");
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
   const seeded = demoPresence(scene, Date.now(), startedAt);
-  // A card that's finished or gone isn't being worked on.
+  // A card that's finished or gone isn't being worked on. The lead's claim follows the script, which already knows.
   const live = new Set(board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1).map((c) => c.id));
-  const presence = { ...seeded, claims: seeded.claims.filter((c) => live.has(c.cardId)) };
+  const presence = { ...seeded, claims: seeded.claims.filter((c) => c.cardId === spot?.card.id || live.has(c.cardId)) };
 
-  // Keyboard: n new card, t theme, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
+  // Keyboard: n new card, t theme, / assistant, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -372,11 +375,26 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
           </div>
         </header>
 
-        <aside className="demo-strip" aria-label="About this demo">
+        <aside className={`demo-strip${over ? " over" : ""}`} aria-label="About this demo">
           <h2 className="h">DEMO_BOARD</h2>
-          <p>
-            <span className="demo-more">This board lives in your browser tab. The agents on it are scripted, nothing is saved, and a reload starts it over.</span>
-            <span className="demo-short">A demo in your browser. Nothing is saved.</span>
+          {/* When the script runs out the strip says so, instead of the board just going quiet. */}
+          <p aria-live="polite">
+            {!over ? (
+              <>
+                <span className="demo-more">This board lives in your browser tab. The agents on it are scripted, nothing is saved, and a reload starts it over.</span>
+                <span className="demo-short">A demo in your browser. Nothing is saved.</span>
+              </>
+            ) : looped ? (
+              <>
+                <span className="demo-more">That's the loop: the agent asks, you answer, it finishes the card. {signedIn ? "Connect an agent to run it on your own board." : "Sign up to run it with your own agent."}</span>
+                <span className="demo-short">That's the loop. {signedIn ? "Connect an agent to run it for real." : "Sign up to run it with your own agent."}</span>
+              </>
+            ) : (
+              <>
+                <span className="demo-more">The scripted agent is out of cards, so that's all it does here. Start over to watch it ask a question and finish the card.</span>
+                <span className="demo-short">The scripted agent is out of cards. Start over to watch it work.</span>
+              </>
+            )}
           </p>
           <div className="demo-links">
             <button className="btn ghost demo-reset" onClick={onReset}>Start over</button>

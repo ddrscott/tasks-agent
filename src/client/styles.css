@@ -1276,6 +1276,9 @@ a.chip.no-agent:hover { border-style: solid; }
   .demo-links { flex: 1 1 100%; }
   .demo-links .btn { flex: 1; justify-content: center; }
   .demo-reset { display: none; }
+  /* Once the script has run out, Start over is the next thing to do, so it comes back. */
+  .demo-strip.over .demo-reset { display: inline-flex; }
+  .demo-strip.over p { flex-basis: 100%; }
   /* The real board moves Theme into the account menu on a phone. The demo has no account menu,
      and no account button in the bar, so the Theme button keeps that place. */
   .demo .theme-anchor > .btn { display: inline-flex; }
