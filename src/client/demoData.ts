@@ -22,10 +22,10 @@ export type Beat = {
   ask: Omit<Ask, "askedAt">;
   /** The status line when it picks the card up, before it asks. */
   pickup: string;
-  /** The status line once it's acting on the answer. */
-  working(answer: string): string;
-  /** The status line when the card goes to Done. */
-  done(answer: string): string;
+  /** The status line once it's acting on the answer. `heard` is how it got one: `got your answer ("…")`. */
+  working(heard: string): string;
+  /** The status line when the card goes to Done. `went` is the option it acted on. */
+  done(went: string): string;
   /** The session's last-action line at each point. */
   last: { reading: string; working: string };
 };
@@ -40,7 +40,7 @@ export const PLOT: Beat[] = [
       recommended: 0,
     },
     pickup: "STATUS: picked up — reading the schema",
-    working: (a) => `STATUS: working — got your answer ("${a}"), running the migration on staging`,
+    working: (heard) => `STATUS: working — ${heard}, running the migration on staging`,
     done: (a) => `STATUS: done — orders is on the new schema. Went with: ${a}`,
     last: { reading: "Read: schema.sql", working: "Bash: npm run migrate -- --env staging" },
   },
@@ -52,17 +52,24 @@ export const PLOT: Beat[] = [
       recommended: 0,
     },
     pickup: "STATUS: picked up — reading the search handler",
-    working: (a) => `STATUS: working — got your answer ("${a}"), writing the limiter and its tests`,
+    working: (heard) => `STATUS: working — ${heard}, writing the limiter and its tests`,
     done: (a) => `STATUS: done — search is rate limited, tests pass. Went with: ${a}`,
     last: { reading: "Read: search.ts", working: "Edit: rate-limit.ts" },
   },
 ];
 
+/** The status line when the visitor moves the agent's card to Done before the agent got there. */
+export const CLOSED_BY_YOU = "STATUS: done — you closed this one, so I stopped and took the next card";
+
 /** Swap a note's STATUS line for a new one, or put one on top when it has none. */
 export function withStatus(notes: string, line: string): string {
-  if (/^STATUS:.*$/m.test(notes)) return notes.replace(/^STATUS:.*$/m, line);
+  // A function, so a "$&" typed into an answer lands in the note as typed.
+  if (/^STATUS:.*$/m.test(notes)) return notes.replace(/^STATUS:.*$/m, () => line);
   return notes ? `${line}\n\n${notes}` : line;
 }
+
+/** Check off what's left of a card's checklist, for when the agent finishes it. */
+export const allChecked = (notes: string) => notes.replace(/^(\s*[-*] )\[ \]/gm, "$1[x]");
 
 export function seedBoard(theme: string): Board {
   const card = (c: Pick<Card, "id" | "title" | "laneId"> & Partial<Card>, minutesAgo: number): Card => ({
@@ -154,14 +161,15 @@ const LEAD = "7c1e4f2a-93b6-4d0e-a5c8-2f6b1d9e0a41";
 
 /** Which point of the script the lead session is at, worked out from the board (Demo.tsx). */
 export type Scene =
-  | { at: "idle" }
-  | { at: "between" } // done with one card, about to take the next
-  | { at: "reading" | "waiting" | "working"; beat: Beat; card: Card };
+  | { at: "idle" } // nothing left in the script
+  | { at: "between" } // about to take the next card
+  // On a card: reading before it asks, waiting on the answer, heard it a moment ago, or working on it.
+  | { at: "reading" | "waiting" | "heard" | "working"; beat: Beat; card: Card };
 
 /**
  * The three sessions the Sessions list shows. Two never change: one working, one idle. The lead
- * session in shop-api follows the scene, so answering its question moves it from needs input
- * back to working.
+ * session in shop-api follows the scene: it says needs input exactly while its card has a
+ * question open, so answering one puts it back to working in the same moment.
  */
 export function demoPresence(scene: Scene, now: number, startedAt: number): Presence {
   const recent = (t: number) => Math.max(t, now - 4 * MIN); // nothing here ever goes stale
@@ -171,6 +179,7 @@ export function demoPresence(scene: Scene, now: number, startedAt: number): Pres
     if (scene.at === "waiting") {
       return { state: "needs-input", last: `asked: ${scene.card.ask?.question ?? scene.beat.ask.question}`, seenAt: recent(Date.parse(scene.card.updatedAt)) };
     }
+    if (scene.at === "heard") return { state: "working", last: "tasks: get_card", seenAt: now - 1000 };
     return { state: "working", last: scene.beat.last[scene.at], seenAt: now - 3000 };
   };
   const sessions: Session[] = [
@@ -185,7 +194,7 @@ export function demoPresence(scene: Scene, now: number, startedAt: number): Pres
     },
   ];
   const claims: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];
-  if (scene.at === "reading" || scene.at === "waiting" || scene.at === "working") {
+  if (scene.at !== "idle" && scene.at !== "between") {
     claims.push({ cardId: scene.card.id, sessionId: LEAD, agent: "lead", claimedAt: startedAt });
   }
   return { sessions, claims, now };

@@ -6,6 +6,11 @@
 // One pretend agent follows a short script (demoData.ts): answer its question and a couple of
 // seconds later it goes back to working, updates the card's status line, moves the card to Done,
 // then picks up the next card and asks again.
+//
+// Undo and Redo walk the visitor's own changes only. The agent's steps never go on the stack:
+// each one is applied to the board on screen and to every board the stack remembers, so undoing
+// "Add card" takes the card back out and leaves what the agent did since. How far the agent has
+// got with each card (`World.at`) is saved with each remembered board, so the two can't disagree.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -45,35 +50,74 @@ export function Demo(p: Props) {
 const HISTORY_LIMIT = 50;
 const FILES_NOTE = "Files are stored with an account. Sign up to attach screenshots and logs.";
 
+/** How far the scripted agent has got with a card of its script. No entry means it hasn't touched it. */
+type Stage = "picked" | "asked" | "working" | "done";
+/** A board plus the agent's progress on it. Undo and redo swap the pair, never one half. */
+type World = { board: Board; at: Record<string, Stage> };
+type Entry = { label: string; world: World };
+
 /** What the scripted agent does next, and how long it takes to get around to it. */
 type Step = "pickup" | "ask" | "ack" | "finish";
 const STEP_MS: Record<Step, number> = { pickup: 5000, ask: 6000, ack: 2500, finish: 8000 };
-/** Which cards the agent has picked up, asked on, read the answer on, and finished. Not undoable, like a real agent's memory. */
-type Memory = Record<"started" | "asked" | "acked" | "finished", Set<string>>;
-
 /** The card the agent is on and its next step. `step` is null while it waits on an answer. */
-function whereIsIt(b: Board, m: Memory): { beat: Beat; card: Card; step: Step | null } | null {
-  if (b.lanes.length < 2) return null; // no Done lane to finish into
-  const done = b.lanes[b.lanes.length - 1].id;
+type Spot = { beat: Beat; card: Card; step: Step | null };
+
+/** The last lane is Done, when there's more than one. */
+const doneLaneOf = (b: Board) => (b.lanes.length > 1 ? b.lanes[b.lanes.length - 1].id : null);
+
+/** Where the agent is, worked out from one world and nothing else. */
+function whereIsIt(w: World): Spot | null {
+  const done = doneLaneOf(w.board);
   for (const beat of PLOT) {
-    const card = b.cards.find((c) => c.id === beat.cardId);
-    if (!card || card.laneId === done || m.finished.has(card.id)) continue;
-    const step = !m.started.has(card.id) ? "pickup" : card.ask ? null : !m.asked.has(card.id) ? "ask" : !m.acked.has(card.id) ? "ack" : "finish";
-    return { beat, card, step };
+    const card = w.board.cards.find((c) => c.id === beat.cardId);
+    const stage = w.at[beat.cardId];
+    if (!card || stage === "done") continue;
+    if (!stage) {
+      if (card.laneId === done) continue; // the visitor finished it first
+      return { beat, card, step: "pickup" };
+    }
+    if (stage === "working") return { beat, card, step: "finish" };
+    if (stage === "picked") return { beat, card, step: "ask" };
+    return { beat, card, step: card.ask ? null : "ack" };
   }
   return null;
 }
 
+const short = (s: string, max = 80) => (s.length > max ? `${s.slice(0, max)}…` : s);
+
+/** One step of the script, as a pure change to a world. Throws when the card can't take it. */
+function advance(w: World, { beat, card, step }: Spot): World {
+  const b = w.board;
+  const id = card.id;
+  const to = (stage: Stage, board: Board): World => ({ board, at: { ...w.at, [id]: stage } });
+  const status = (x: Board, line: string) => ops.updateCard(x, id, { notes: withStatus(x.cards.find((c) => c.id === id)!.notes, line) });
+  // No answer means the visitor took the question off the card, so the agent goes with its own pick.
+  const went = short(card.answer?.answer ?? beat.ask.options[beat.ask.recommended ?? 0]);
+  if (step === "pickup") {
+    const doing = card.laneId === b.lanes[0].id && b.lanes.length > 2 ? b.lanes[1].id : card.laneId;
+    return to("picked", status(doing === card.laneId ? b : ops.moveCard(b, id, doing), beat.pickup));
+  }
+  if (step === "ask") return to("asked", ops.askCard(b, id, beat.ask));
+  if (step === "ack") return to("working", status(b, beat.working(card.answer ? `got your answer ("${went}")` : `no answer, so I'm going with "${went}"`)));
+  if (step === "finish") {
+    const done = doneLaneOf(b);
+    const said = status(b, beat.done(went));
+    return to("done", done && card.laneId !== done ? ops.moveCard(said, id, done) : said);
+  }
+  return w;
+}
+
 function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset(): void }) {
   const [startedAt] = useState(() => Date.now());
-  // `saved` is the board as it stands; `board` is what's drawn, which runs ahead of it during a drag.
-  const saved = useRef<Board>(null as unknown as Board);
-  if (!saved.current) saved.current = seedBoard(readCachedTheme());
-  const [board, setBoard] = useState<Board>(saved.current);
-  const undos = useRef<{ label: string; board: Board }[]>([]);
-  const redos = useRef<{ label: string; board: Board }[]>([]);
+  // `saved` is the board as it stands, with how far the agent has got on it; `board` is what's
+  // drawn, which runs ahead of it during a drag.
+  const saved = useRef<World>(null as unknown as World);
+  // The seed has the first card's question already open.
+  if (!saved.current) saved.current = { board: seedBoard(readCachedTheme()), at: { [PLOT[0].cardId]: "asked" } };
+  const [board, setBoard] = useState<Board>(saved.current.board);
+  const undos = useRef<Entry[]>([]);
+  const redos = useRef<Entry[]>([]);
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
-  const memory = useRef<Memory>({ started: new Set([PLOT[0].cardId]), asked: new Set([PLOT[0].cardId]), acked: new Set(), finished: new Set() });
 
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
@@ -88,7 +132,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const searchInput = useRef<HTMLInputElement>(null);
   const dragging = useRef(false);
   const pending = useRef<Board | null>(null);
-  const newest = useRef<Board>(saved.current);
+  const newest = useRef<Board>(saved.current.board);
 
   // Draw a new board, animated like the real one. During a drag it waits until the card is dropped.
   const show = useCallback((next: Board, prev: Board) => {
@@ -103,22 +147,41 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     } else setBoard(next);
   }, []);
 
-  /** Every change goes through here: run the pure function, remember the board before it for Undo. */
-  const commit = useCallback((label: string, fn: (b: Board) => Board, byAgent = false) => {
+  /** Every change the visitor makes goes through here: run the pure function, remember the world before it for Undo. */
+  const commit = useCallback((label: string, fn: (b: Board) => Board) => {
     const before = saved.current;
-    const after = fn(before);
-    undos.current = [...undos.current.slice(1 - HISTORY_LIMIT), { label, board: before }];
+    const after = { board: fn(before.board), at: before.at };
+    undos.current = [...undos.current.slice(1 - HISTORY_LIMIT), { label, world: before }];
     redos.current = [];
     saved.current = after;
-    show(after, before);
-    if (byAgent) {
-      // The agent's changes light the card up, the same as on a real board.
-      const was = new Map(before.cards.map((c) => [c.id, c]));
-      const changed = after.cards.filter((c) => { const b = was.get(c.id); return !b || b.updatedAt !== c.updatedAt || b.laneId !== c.laneId; });
-      setFlash(new Set(changed.map((c) => c.id)));
-      setTimeout(() => setFlash(new Set()), 1700);
-    }
-    return after;
+    show(after.board, before.board);
+  }, [show]);
+
+  /**
+   * The agent's changes go through here instead. They aren't the visitor's to undo, so the step
+   * is also made on every remembered world where the agent was at the same point. A world where
+   * it wasn't (from before the visitor answered, say) is left as it was, still waiting.
+   */
+  const agentStep = useCallback((spot: Spot) => {
+    const before = saved.current;
+    const id = spot.card.id;
+    let after: World;
+    // The card changed under it in some way the script can't follow, so it leaves the card alone.
+    try { after = advance(before, spot); } catch { after = { board: before.board, at: { ...before.at, [id]: "done" } }; }
+    const also = (e: Entry): Entry => {
+      const there = whereIsIt(e.world);
+      if (!there || there.card.id !== id || there.step !== spot.step) return e;
+      try { return { label: e.label, world: advance(e.world, there) }; } catch { return e; }
+    };
+    undos.current = undos.current.map(also);
+    redos.current = redos.current.map(also);
+    saved.current = after;
+    show(after.board, before.board);
+    // The agent's changes light the card up, the same as on a real board.
+    const was = new Map(before.board.cards.map((c) => [c.id, c]));
+    const changed = after.board.cards.filter((c) => { const b = was.get(c.id); return !b || b.updatedAt !== c.updatedAt || b.laneId !== c.laneId; });
+    setFlash(new Set(changed.map((c) => c.id)));
+    setTimeout(() => setFlash(new Set()), 1700);
   }, [show]);
 
   /** A board action for the UI: the same promise shape the agent's stub gives, so a thrown error is a rejection. */
@@ -131,15 +194,15 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Undo and redo swap whole boards, keeping the theme, which isn't undoable.
+  // Undo and redo swap whole worlds, keeping the theme, which isn't undoable.
   const swap = useCallback((from: typeof undos, to: typeof undos) => {
     const top = from.current[from.current.length - 1];
     if (!top) return null;
     from.current = from.current.slice(0, -1);
     const before = saved.current;
-    to.current = [...to.current, { label: top.label, board: before }];
-    saved.current = { ...top.board, theme: before.theme };
-    show(saved.current, before);
+    to.current = [...to.current, { label: top.label, world: before }];
+    saved.current = { board: { ...top.world.board, theme: before.board.theme }, at: top.world.at };
+    show(saved.current.board, before.board);
     return top.label;
   }, [show]);
   const undo = useCallback(() => {
@@ -174,48 +237,25 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   }, [commit]);
 
   const answerAsk: AnswerFn = useCallback((id, input) => {
-    const ask = saved.current.cards.find((c) => c.id === id)?.ask;
+    const ask = saved.current.board.cards.find((c) => c.id === id)?.ask;
     const said = input.text?.trim() || (input.choice !== undefined ? ask?.options[input.choice] : "") || "";
     act("Answer question", (b) => ops.answerAsk(b, id, input))
       .then(() => say(`Answered: ${said.length > 60 ? `${said.slice(0, 60)}…` : said}`, true))
       .catch((e: Error) => say(e.message));
   }, [act, say]);
 
-  // The scripted agent. Where it is comes from the board, so undoing an answer puts it back to
-  // waiting, and a card the visitor finishes or deletes is skipped.
-  const spot = whereIsIt(board, memory.current);
+  // The scripted agent. Where it is comes from the world as it stands, so undoing an answer puts
+  // it back to waiting, and a card the visitor finishes or deletes is skipped.
+  const spot = whereIsIt(saved.current);
   const spotKey = spot ? `${spot.card.id}:${spot.step}` : "";
   useEffect(() => {
-    if (!spot) return;
+    const step = spot?.step;
+    if (!spot || !step) return;
     const id = spot.card.id;
-    const m = memory.current;
-    if (!spot.step) { m.acked.delete(id); return; } // a question is open again, so the next answer is news
     const timer = setTimeout(() => {
-      const now = whereIsIt(saved.current, m);
-      if (!now || now.card.id !== id || now.step !== spot.step) return;
-      const { beat, card } = now;
-      const b = saved.current;
-      const answer = card.answer?.answer ?? "your call";
-      const note = (line: string) => (x: Board) => ops.updateCard(x, id, { notes: withStatus(x.cards.find((c) => c.id === id)!.notes, line) });
-      try {
-        if (now.step === "pickup") {
-          m.started.add(id);
-          const doing = card.laneId === b.lanes[0].id && b.lanes.length > 2 ? b.lanes[1].id : card.laneId;
-          commit("Agent picked up a card", (x) => note(beat.pickup)(ops.moveCard(x, id, doing)), true);
-        } else if (now.step === "ask") {
-          m.asked.add(id);
-          commit("Agent asked a question", (x) => ops.askCard(x, id, beat.ask), true);
-        } else if (now.step === "ack") {
-          m.acked.add(id);
-          commit("Agent updated a card", note(beat.working(answer)), true);
-        } else {
-          m.finished.add(id);
-          commit("Agent finished a card", (x) => ops.moveCard(note(beat.done(answer))(x), id, x.lanes[x.lanes.length - 1].id), true);
-        }
-      } catch {
-        m.finished.add(id); // the card changed under it in some way the script can't follow; leave it alone
-      }
-    }, STEP_MS[spot.step]);
+      const now = whereIsIt(saved.current);
+      if (now && now.card.id === id && now.step === step) agentStep(now);
+    }, STEP_MS[step]);
     return () => clearTimeout(timer);
   }, [spotKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -225,7 +265,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     const t = setInterval(() => tick((n) => n + 1), 10_000);
     return () => clearInterval(t);
   }, []);
-  const scene: Scene = !spot ? { at: memory.current.finished.size ? "idle" : "between" }
+  const scene: Scene = !spot ? { at: "idle" }
     : spot.step === "pickup" ? { at: "between" }
     : { at: spot.step === "ask" ? "reading" : spot.step === "finish" ? "working" : "waiting", beat: spot.beat, card: spot.card };
   const doneLane = board.lanes[board.lanes.length - 1]?.id;
@@ -244,7 +284,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       if (isRedo && !typing) { e.preventDefault(); redo(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInput.current?.focus(); searchInput.current?.select(); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "n" && saved.current.lanes[0]) { e.preventDefault(); setQuickAddLane(saved.current.lanes[0].id); }
+      if (e.key === "n" && saved.current.board.lanes[0]) { e.preventDefault(); setQuickAddLane(saved.current.board.lanes[0].id); }
       if (e.key === "t") { e.preventDefault(); setThemeOpen((o) => !o); }
     };
     addEventListener("keydown", onKey);
@@ -252,10 +292,10 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   }, [undo, redo]);
 
   const pickTheme = (theme: string) => {
-    saved.current = { ...saved.current, theme };
+    saved.current = { board: { ...saved.current.board, theme }, at: saved.current.at };
     setBoard((b) => ({ ...b, theme }));
   };
-  const search = useCallback(async (query: string) => localSearch(saved.current, query), []);
+  const search = useCallback(async (query: string) => localSearch(saved.current.board, query), []);
   const knownTags = useMemo(() => ops.tagsByUse(board), [board]);
 
   const open = board.cards.filter((c) => c.laneId !== doneLane || board.lanes.length === 1);
