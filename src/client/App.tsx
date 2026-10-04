@@ -651,7 +651,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
           <BoardSwitcher boards={boards} access={access} onSwitch={onSwitch} onOpen={onBoards} />
-          {board.sealed && (
+          {board.sealed && !sharedBoard && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
               <IconLock /><span className="hide-sm label">encrypted</span>
             </button>
@@ -807,7 +807,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
         </PresenceContext.Provider>
       )}
 
-      {encOpen && (
+      {/* Your own board only, like Members: a shared board's encryption is its owner's. */}
+      {encOpen && !sharedBoard && (
         <EncryptionDialog
           view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} email={me.email} stub={encStub} say={(t: string) => say(t)}
           onEnabled={unlockWith} onDisabling={expectPlain} onDisabled={lock} onClose={() => setEncOpen(false)}
