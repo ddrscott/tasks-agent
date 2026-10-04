@@ -52,6 +52,13 @@ run ahead of whatever serves the zone.
   tools, and MCP calls all end in the pure functions in `src/shared.ts`. The board
   tools are defined once in `src/tools.ts` for both the assistant and MCP. The agent
   rejects state pushed directly from clients.
+- **First run.** The sign-in screen leads with what the board is for: agents work it over MCP,
+  they ask and you answer in one tap, and you see what each session is doing. `// SECURITY`
+  sits under that and says the trade-off plainly: an encrypted board is closed to outside
+  agents. A board with no cards shows `// START_HERE` above its lanes
+  (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
+  with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
+  never shows it.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch

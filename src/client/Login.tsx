@@ -165,11 +165,19 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         <h1 className="wordmark">tasks<span>.</span></h1>
         {step === "email" ? (
           <>
-            <p>
-              {next?.startsWith("/tasks/oauth/")
-                ? "Sign in to connect an agent to your Tasks."
-                : "Your tasks, with an assistant you can just talk to. Sign in with your email and there's no password to remember."}
-            </p>
+            {next?.startsWith("/tasks/oauth/") ? (
+              <p>Sign in to connect an agent to your Tasks.</p>
+            ) : (
+              <>
+                <p className="login-lede">A task board your AI agents work from.</p>
+                <ol className="login-proofs">
+                  <li>Agents read and change the board over MCP: Claude, ChatGPT, Claude Code, Cursor, and the rest.</li>
+                  <li>When an agent needs a decision, it asks on the card. You answer with one tap.</li>
+                  <li>You see what each Claude Code session is doing: working, waiting on you, or idle.</li>
+                </ol>
+                <p>Sign in with your email. There's no password to remember.</p>
+              </>
+            )}
             {providers.length > 0 && (
               <>
                 <div className="sso">
@@ -227,28 +235,29 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   );
 }
 
-/** What the sign-in page promises about security. Keep it true: README → // END_TO_END_ENCRYPTION. */
+/**
+ * What the sign-in page promises about security. It sits under the agent pitch, so it says
+ * plainly that encryption and outside agents don't go together instead of selling "no outside
+ * agent" as a feature. Keep it true: README → // END_TO_END_ENCRYPTION.
+ */
 function Security() {
   return (
     <section className="login-security" aria-labelledby="security-h">
       <h2 className="h" id="security-h">SECURITY</h2>
       <ol>
         <li><div>
-          <b>End-to-end encryption, if you want it.</b> Set a passphrase and your board is encrypted in
-          your browser before it leaves. Cards, notes, dates, files, chat. We store ciphertext and
-          nothing else.
-        </div></li>
-        <li><div>
-          <b>Open standards, no lock-in.</b> JWE with AES-256-GCM, and PBKDF2 at 600,000 rounds for the
-          passphrase. Download an encrypted backup and open it with any JOSE library, no Tasks required.
-        </div></li>
-        <li><div>
-          <b>The assistant runs in your tab.</b> On an encrypted board, a small model in the browser reads
-          your cards. No cloud model, no outside agent, and no server sees them.
-        </div></li>
-        <li><div>
           <b>No passwords to leak.</b> Sign in with an emailed code, Google, or Microsoft. We keep only
           hashes of codes and sessions.
+        </div></li>
+        <li><div>
+          <b>End-to-end encryption, if you want it.</b> Set a passphrase and the board is encrypted in
+          your browser: cards, notes, dates, files, chat. We store only ciphertext, in an open format
+          (JWE) that any JOSE library can read without Tasks.
+        </div></li>
+        <li><div>
+          <b>The trade-off.</b> An encrypted board is closed to outside agents and the cloud model,
+          because the server can't read it. A small model in your tab is the only assistant there.
+          You can turn encryption on or off later.
         </div></li>
       </ol>
       <p className="sorry"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>

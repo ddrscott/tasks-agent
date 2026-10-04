@@ -14,6 +14,7 @@ import { Connect } from "./Connect";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
 import { localSearch } from "./localSearch";
 import { recallKey, Vault } from "./vault";
+import { FirstRun } from "./FirstRun";
 import { Footer } from "./Footer";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
@@ -460,6 +461,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
+        {board.cards.length === 0 && !board.sealed && <FirstRun onConnect={onConnect} />}
         <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}

@@ -376,6 +376,23 @@ kbd {
   overflow-x: auto; overflow-y: hidden;
   scroll-snap-type: x proximity;
 }
+/* // START_HERE: the three steps an empty board shows above its lanes. Numbered like the Connect
+   page, with a full outline rather than a colored edge. */
+.first-run {
+  flex: none; margin: 20px 24px 0; padding: 16px 20px;
+  border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.first-run p { margin: 0; }
+.first-run-lede { font-weight: 600; }
+.first-run ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.first-run li { counter-increment: step; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13px; line-height: 1.5; }
+.first-run li::before { content: counter(step, decimal-leading-zero); font: 700 16px/1.4 var(--font-mono); color: var(--accent); }
+.first-run li b { font-size: 14px; font-weight: 600; }
+.first-run li span { color: var(--muted); }
+.first-run li code { font: 13px var(--font-mono); }
+.first-run li .btn { margin-top: 6px; text-decoration: none; }
+.first-run-foot { font-size: 12px; color: var(--muted); }
 .lane {
   flex: 1 0 250px; max-width: 360px; max-height: 100%;
   display: flex; flex-direction: column;
@@ -759,6 +776,11 @@ a.att-name:hover { color: var(--accent); }
 .login-card .wordmark { font-size: 32px; margin-bottom: 4px; }
 .login-card p { margin: 0; color: var(--muted); }
 .login-card form { display: flex; flex-direction: column; gap: 10px; }
+/* The pitch: one line in ink, then three numbered proofs, with the same numerals as // SECURITY below. */
+.login-card .login-lede { font: 700 20px/1.25 var(--font-display); letter-spacing: -.01em; color: var(--ink); }
+.login-proofs { margin: 0; padding: 0; list-style: none; counter-reset: proof; display: flex; flex-direction: column; gap: 8px; }
+.login-proofs li { counter-increment: proof; display: grid; grid-template-columns: 22px 1fr; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.login-proofs li::before { content: counter(proof, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent); }
 .login-card .btn { height: 42px; justify-content: center; font-size: 14px; }
 .code-input { font: 600 28px var(--font-mono); letter-spacing: .5em; text-align: center; padding: 12px 0 12px .5em; }
 .login-error { color: var(--danger); font-size: 13px; }
@@ -890,6 +912,12 @@ a.att-name:hover { color: var(--accent); }
   .topbar { padding: 12px 16px; gap: 10px; }
   .stats .hide-sm, .topbar .hide-sm { display: none; }
   .board { padding: 16px; gap: 12px; scroll-snap-type: x mandatory; scroll-padding: 16px; }
+  /* Stacked, with the numeral beside each step, so the lanes still get most of a phone screen. */
+  .first-run { margin: 12px 16px 0; padding: 12px 14px; gap: 8px; max-height: 55%; overflow-y: auto; }
+  .first-run ol { grid-template-columns: 1fr; gap: 10px; }
+  .first-run li { display: grid; grid-template-columns: 28px 1fr; gap: 0 4px; }
+  .first-run li::before { grid-row: span 3; font-size: 13px; line-height: 1.6; }
+  .first-run li > * { grid-column: 2; justify-self: start; }
   .lane { flex-basis: min(86vw, 320px); }
   .chat {
     position: fixed; inset: auto 0 0 0; z-index: 40; width: 100%; height: min(78vh, 640px);
