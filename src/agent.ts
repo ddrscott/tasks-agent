@@ -501,12 +501,13 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * right here, before the request that changed it has answered. The Worker's relay
    * (server.ts) ends the browser's connection the moment it hears that close.
    */
-  async membersChanged() {
+  async membersChanged(left?: string) {
     // First, and before any await: nothing a socket remembers about its access counts from here on.
     this.epoch += 1;
     this.markShared();
     await this.recheck(this.ctx.getWebSockets(MEMBER_TAG));
-    this.tellOwner();
+    // `left`: a member who walked out on their own (members.ts). The owner didn't do it, so their tabs say it.
+    this.tellOwner(typeof left === "string" ? left : undefined);
   }
 
   /**
@@ -523,8 +524,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * Members and "Shared with N" read it again now instead of at their next poll. Owner sockets
    * only: a member's socket never gets this frame, and it carries nothing but the fact.
    */
-  private tellOwner() {
-    const frame = JSON.stringify({ type: "tasks_members", at: Date.now() });
+  private tellOwner(left?: string) {
+    const frame = JSON.stringify({ type: "tasks_members", at: Date.now(), ...(left ? { left } : {}) });
     for (const ws of this.ctx.getWebSockets()) {
       if (!memberMeta(ws) && !this.ctx.getTags(ws).includes(MEMBER_TAG)) sendTo(ws, frame);
     }

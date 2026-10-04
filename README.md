@@ -1239,7 +1239,10 @@ each card.
   **It stays current without a reload.** Every change to the members list (an invite sent,
   accepted, declined, or revoked, a role change, a removal, someone leaving) and every plan
   change the board notices ends in `TodoAgent.membersChanged`, which sends
-  `{ "type": "tasks_members" }` to the owner's own sockets, and only those. The app answers by
+  `{ "type": "tasks_members" }` to the owner's own sockets, and only those. When a member
+  leaves on their own the frame also carries `"left": "<their email>"`, and the owner's open
+  board says "dana@example.com left your board." in a toast; the owner's own removals and
+  role changes carry no name, since the tab that made them already said so. The app answers by
   reading the list again (`membersChanged` in `Members.tsx`), so the dialog, the count in the
   top bar, and an open audit log follow within a second; `check:members` fails past 2. The
   button also looks again when the tab gets focus, and the open dialog rereads once a minute,

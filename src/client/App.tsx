@@ -431,7 +431,13 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         // Your own board's members or plan changed: Members and "Shared with N" read it again now.
         // The plan may be what changed (Pro bought, lapsed, given or taken back by an admin), so
         // the usage call that feeds the account menu and the assistant's meter is made again too.
-        else if (f.type === "tasks_members" && !sharedBoard) { membersChanged(me.id); usageRef.current(); }
+        else if (f.type === "tasks_members" && !sharedBoard) {
+          membersChanged(me.id);
+          usageRef.current();
+          // Someone left on their own. Nothing else on this screen would say so.
+          const left = (f as { left?: unknown }).left;
+          if (typeof left === "string" && left) say(`${left} left your board. They can't see it anymore.`, false, DESTRUCTIVE_TOAST_MS);
+        }
       } catch { /* not ours */ }
     },
     ...(sharedBoard ? {

@@ -232,9 +232,10 @@ function csvCell(v: string | number | null): string {
  * is pushed to their tab on a check older than MEMBER_PUSH_FRESH_MS (5 seconds), and the sweep
  * closes it within MEMBER_RECHECK_SECONDS (30).
  */
-async function signal(env: Env, ownerId: string): Promise<void> {
+async function signal(env: Env, ownerId: string, left?: string): Promise<void> {
   const work = withRetries(
-    async () => { await (await getAgentByName(env.TodoAgent, ownerId)).membersChanged(); },
+    // `left` is the member who just left on their own, so the owner's open tabs can say so.
+    async () => { await (await getAgentByName(env.TodoAgent, ownerId)).membersChanged(left); },
     SIGNAL_WAITS_MS,
     (e, attempt) => console.warn(`telling the board about a membership change failed (try ${attempt} of ${SIGNAL_WAITS_MS.length})`, (e as Error)?.message),
   ).then(() => undefined, (e: unknown) => {
@@ -682,7 +683,7 @@ async function leave(env: Env, user: User, body: Record<string, unknown>): Promi
   // The same answer for a board that isn't there and one you were never on.
   if (!board || !gone) return fail(404, "not_found", "You're not on that board.");
   await audit(env, board, user.email, "member_left", user.email, gone.role, null);
-  await signal(env, board);
+  await signal(env, board, user.email);
   return json({ ok: true });
 }
 
