@@ -929,8 +929,8 @@ slow a session; the `X-Tasks-Presence` response header says what happened (`stor
 | `UserPromptSubmit` | working | got a prompt |
 | `PreToolUse`, `PostToolUse`, anything else | working | `Edit: server.ts` (at most one write per 30s while already working) |
 | `PermissionRequest` | needs input, until the session's next event of any kind | wants to use Bash |
-| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
-| `Notification` (`auth_success`, `agent_completed`, `quota_…`) | unchanged | the notification's message |
+| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`, unknown types) | needs input | the notification's message |
+| `Notification` (`auth_success`, `agent_completed`, `elicitation_complete`, `elicitation_response`, `quota_…`) | unchanged | the notification's message |
 | `Stop` | idle | finished its turn |
 | `SessionEnd` | row deleted | |
 | `ask_ceo` over MCP, while the question is open | reads needs input, over whatever the rows above last wrote | asked: Limit by IP or by account? |
