@@ -70,6 +70,10 @@
     // is the public setting: Turnstile guards the email form, and FREE_DAILY_CHATS caps
     // each account's assistant use.
     "ALLOWED_EMAILS": "",
+    // Comma-separated emails of the root admins. They can open /tasks/admin, make other
+    // people admins, and give or take back Pro (src/users.ts). A root admin can't be
+    // demoted from the app; other admins are rows in the users table.
+    "ADMIN_EMAILS": "ddrscott@gmail.com",
     // Turnstile on the email sign-in form. Empty sitekey turns it off. The secret is
     // TURNSTILE_SECRET (wrangler secret put). Hostnames are the ones siteverify may
     // report for a real token; never add localhost here.

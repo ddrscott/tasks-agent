@@ -4,7 +4,7 @@
 // page's HTML both come from that row.
 
 /** `/tasks/` itself is the board, or the landing page when signed out. These are the rest. */
-export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite"] as const;
+export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite", "admin"] as const;
 export type Page = "board" | (typeof PAGES)[number];
 
 /** The page a path names, or null when there's no such page. `base` is "/tasks". */
@@ -53,6 +53,8 @@ export const PAGE_META = {
   // Where an invite email's link lands (// TEAM_BOARDS). The token is in the fragment, so every
   // invite is this one address, and it's kept out of search results (pageHead).
   invite: { name: "Board invite", description: "Accept or decline an invite to someone's Tasks board. Sign in as the address it was sent to." },
+  // Admins only (src/users.ts). The page is the same HTML as any other, so it's kept out of search instead.
+  admin: { name: "Admin", description: "Who can use Tasks, and on what plan." },
   terms: { name: "Terms", description: "The terms of service for Tasks, the task board your AI coding agents work over MCP." },
   notFound: { name: "Not found", description: "There's no page at this address." },
 } as const satisfies Record<Page | "notFound", { name: string; description: string }>;
@@ -74,5 +76,5 @@ export function pageHead(page: Page | null): PageHead {
   if (page === null) return { title: titleFor(PAGE_META.notFound.name), description: PAGE_META.notFound.description, url: null, index: false, landing: false };
   if (page === "board") return { title: DEFAULT_TITLE, description: null, url: `${SITE}/`, index: true, landing: true };
   const m = PAGE_META[page];
-  return { title: titleFor(m.name), description: m.description, url: `${SITE}/${page}`, index: page !== "invite", landing: false };
+  return { title: titleFor(m.name), description: m.description, url: `${SITE}/${page}`, index: page !== "invite" && page !== "admin", landing: false };
 }

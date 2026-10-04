@@ -1078,6 +1078,32 @@ a.att-name:hover { color: var(--accent-text); }
 .connect-intro .lede { font: 700 clamp(24px, 4vw, 32px)/1.15 var(--font-display); letter-spacing: -.01em; }
 .connect-intro p:not(.lede) { color: var(--muted); max-width: 62ch; }
 .muted { color: var(--muted); font-size: 13px; }
+/* The admin page (Admin.tsx): one row per account, two switches on each. */
+.admin-add { display: flex; flex-direction: column; gap: 6px; }
+.admin-add label { font: 12px var(--font-mono); color: var(--muted); }
+.admin-add-row { display: flex; gap: 8px; }
+.admin-add-row .field { flex: 1; min-width: 0; }
+.admin-add-row .btn { height: auto; }
+.admin-note { min-height: 20px; margin: -20px 0 !important; font: 13px var(--font-mono); color: var(--muted); }
+.admin-note.bad { color: var(--danger); }
+.admin-users { display: flex; flex-direction: column; gap: 4px; }
+.admin-count { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.admin-users ul { list-style: none; margin: 0; padding: 0; border-top: var(--border-w) solid var(--line); }
+.admin-users li { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.admin-users li[aria-busy="true"] { opacity: .6; }
+.admin-who { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.admin-email { font: 14px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.admin-meta { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.admin-switches { flex: none; display: flex; gap: 6px; }
+.admin-switch { height: 32px; padding: 0 12px; background: none; border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px var(--font-mono); color: var(--muted); }
+.admin-switch:hover:not(:disabled) { border-color: var(--accent); color: var(--ink); }
+.admin-switch[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.admin-switch:disabled { cursor: default; opacity: .7; }
+.admin-mark { color: var(--accent); margin-right: 5px; }
+@media (max-width: 560px) {
+  .admin-users li { flex-direction: column; align-items: stretch; gap: 10px; }
+  .admin-switch { flex: 1; height: 40px; font-size: 13px; }
+}
 
 .connect-step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; padding-top: 24px; border-top: var(--border-w) solid var(--line); }
 .step-num { font: 700 22px/1 var(--font-mono); color: var(--accent); }

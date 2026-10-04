@@ -13,6 +13,7 @@ import { reportFrom } from "./presence";
 import { buildSetup } from "./setup";
 import { handleSso } from "./sso";
 import { handleTokens, tokenUser } from "./tokens";
+import { handleAdmin } from "./users";
 // The installer and the two scripts it puts on a machine, as text (// SESSIONS).
 import eventsScript from "../scripts/tasks-events.mjs?raw";
 import presenceScript from "../scripts/tasks-presence.mjs?raw";
@@ -140,7 +141,7 @@ const app: ExportedHandler<Env> = {
       if (sub === "/api/presence" && req.method === "POST") return handlePresenceReport(req, env);
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
-        ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
+        ?? (await handleAdmin(req, env, sub)) ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
         ?? (await handleMembers(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }

@@ -10,6 +10,7 @@ import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } fr
 import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
+import { Admin } from "./Admin";
 import { Connect } from "./Connect";
 import { Demo } from "./Demo";
 import { Downgraded, EncryptionDialog, Unlock, type EncryptionStub } from "./Encryption";
@@ -38,7 +39,7 @@ import { pageAt, type Page } from "../routes";
 import { ADD_CARDS_MAX, isOwnerTag, plainError, plainText } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
-type Me = { email: string; id: string; model: string };
+type Me = { email: string; id: string; model: string; /** Shows the Admin link. The admin page's API checks the role itself. */ admin?: boolean };
 /** The most one `addCards` frame carries, in characters. A member's frame may be 32 KB (MEMBER_FRAME_MAX in agent.ts); this leaves room. */
 const ADD_CARDS_FRAME = 24 * 1024;
 // The pages are listed once, in src/routes.ts, for this and for the Worker's 404s.
@@ -85,7 +86,9 @@ export function App() {
   if (me === null) return <Login onSignedIn={load} />;
   // /tasks/pricing is the front page at its pricing section, for someone signed in too.
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
-  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
+  // Anyone signed in can ask for the page; the server answers 403 unless they're an admin, and the page says so.
+  if (page === "admin") return <Admin me={me.email} onBack={() => go("board")} />;
+  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} />;
 }
 
 /** One line to show on the next board that opens, left by the invite page ("You're on dana's board as a writer"). */
@@ -101,7 +104,7 @@ function takeFlash(): string | null {
  * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
  * saying so, and nothing keeps knocking on a board that won't open.
  */
-function BoardHost({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void }) {
   const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
   const [access, setAccess] = useState<MemberAccess | null>(null);
   const [boards, setBoards] = useState<Boards | null>(null);
@@ -162,7 +165,7 @@ function BoardHost({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     <Workspace
       // A different board is a different connection and a clean slate: nothing from one leaks into the next.
       key={boardId ?? "own"}
-      me={me} onSignOut={onSignOut} onConnect={onConnect}
+      me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin}
       shared={boardId ? access : null} boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
       notice={notice} onNoticeShown={() => setNotice(null)}
     />
@@ -171,6 +174,8 @@ function BoardHost({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
 type WorkspaceProps = {
   me: Me; onSignOut(): void; onConnect(hash?: string): void;
+  /** Open the admin page. The menu only offers it to an admin, and only on their own board. */
+  onAdmin(): void;
   /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
   shared: MemberAccess | null;
   boards: Boards | null;
@@ -184,7 +189,7 @@ type WorkspaceProps = {
   onNoticeShown(): void;
 };
 
-function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown }: WorkspaceProps) {
+function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown }: WorkspaceProps) {
   useTitle("Board");
   // Everything below asks `mode`, never the URL or a guess: "owner" on your own board, and on a
   // shared one whatever the server last said (the preflight, then `tasks_access` on the socket).
@@ -820,9 +825,12 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
                     {usage?.billing && usage.plan === "free" && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
                     )}
-                    {usage?.billing && usage.plan === "pro" && (
+                    {/* Pro an admin gave has no subscription behind it, so there's nothing to manage. */}
+                    {usage?.billing && usage.plan === "pro" && !usage.granted && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
                     )}
+                    {/* The admin page is about accounts, not boards, so it sits with what's yours and never on a board shared with you. */}
+                    {me.admin && <button role="menuitem" onClick={() => { setMenuOpen(false); onAdmin(); }}>Admin</button>}
                       </>
                     )}
                     <button className="danger" role="menuitem" onClick={() => void signOut()}>Sign out</button>
