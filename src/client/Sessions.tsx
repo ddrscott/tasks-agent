@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { blockedSessions, isStale, projectName, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isLive, isStale, known, projectName, waitingFor, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -78,13 +78,19 @@ export function CardPresence({ cardId }: { cardId: string }) {
   return <PresenceLine session={session} agent={claim.agent} now={now} />;
 }
 
-/** A session in one line. Under a claimed card's title, and under a question its session is waiting on. */
-export function PresenceLine({ session, agent, now }: { session: Session; agent?: string; now: number }) {
+/**
+ * A session in one line. Under a claimed card's title, and under a question its session is
+ * waiting on. The name is the session's own, the same one its Sessions row shows; the claim's is
+ * only for a session that never said. Under a question (`askedAt`) the line also names the
+ * project and says how long the question has been open, in place of when it was last heard from.
+ */
+export function PresenceLine({ session, agent, now, askedAt }: { session: Session; agent?: string; now: number; askedAt?: string }) {
+  const who = whoWhere(session, session.agent || agent);
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
-      <span className="sess-where">{whoWhere(session, agent || session.agent)}</span>
-      <span className="sess-seen">{ago(now - session.seenAt)}</span>
+      <span className="sess-where">{askedAt && known(session.project) ? `${who} · ${session.project}` : who}</span>
+      <span className="sess-seen">{askedAt ? waitingFor(now - Date.parse(askedAt)) : ago(now - session.seenAt)}</span>
     </div>
   );
 }
@@ -104,7 +110,7 @@ export function CardSession({ cardId }: { cardId: string }) {
 
 // The rules for what's stale and what's waiting on you live with the shared shapes, so
 // `npm run check:presence` can run them without a browser.
-export { blockedSessions, isStale };
+export { blockedSessions, isLive, isStale };
 
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -179,7 +185,8 @@ export function SessionsButton({ presence, cardTitle, open, setOpen, onConnect }
     >{label}</a>
   );
   const { sessions, claims, now } = presence;
-  const live = sessions.filter((s) => !isStale(s, now));
+  // Live is heard from lately and not a finished MCP-only session (isLive in presence-shared.ts).
+  const live = sessions.filter((s) => isLive(s, now));
   // What's waiting on you is counted once, on "need you" next door. This button only says how many are live.
   const summary = `${live.length} live session${live.length === 1 ? "" : "s"}`;
   const groups = useMemo(() => {

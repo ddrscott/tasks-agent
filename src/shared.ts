@@ -31,7 +31,11 @@ export type Ask = {
 };
 
 /** The last answer given on a card. It stays until the next question, so an agent can read it back. */
-export type Answer = { question: string; answer: string; choice?: number; at: string };
+export type Answer = {
+  question: string; answer: string; choice?: number; at: string;
+  /** The card's STATUS line at the moment of the answer ("" for none), so the face can tell when the agent has written a newer one. Older answers don't have it. */
+  was?: string;
+};
 
 export const MAX_ASK_OPTIONS = 4;
 
@@ -307,7 +311,7 @@ export function answerAsk(b: Board, id: string, input: { choice?: number; text?:
   const next: Card = {
     ...withTags(rest, (card.tags ?? []).filter((t) => t !== NEEDS_CEO_TAG)),
     notes: tidyNotes(card.notes ? `${line}\n\n${card.notes}` : line),
-    answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at },
+    answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at, was: statusLine(card.notes) ?? "" },
     updatedAt: at,
   };
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
@@ -326,6 +330,20 @@ export function statusLine(notes: string): string | null {
     return m ? m[1].slice(0, 200) : null;
   }
   return null;
+}
+
+/**
+ * The one line of agent news a card's face shows under its title. Normally the STATUS line. But a
+ * STATUS written before the owner answered ("blocked, waiting on your pick") is stale the moment
+ * they tap, and stays until the agent rewrites it. So while the STATUS is still the one the card
+ * had when it was answered, the face says what was answered instead. Any new STATUS line takes over.
+ */
+export function faceLine(c: Pick<Card, "notes" | "answer">): { kind: "status" | "answered"; text: string } | null {
+  const status = statusLine(c.notes);
+  if (c.answer && c.answer.was !== undefined && (status ?? "") === c.answer.was) {
+    return { kind: "answered", text: `answered: ${c.answer.answer}`.slice(0, 200) };
+  }
+  return status ? { kind: "status", text: status } : null;
 }
 
 /** A card's open question or last answer in one line, for agents. */

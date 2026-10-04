@@ -135,9 +135,10 @@ export function AsksButton({ cards, presence, open, setOpen, onOpenCard }: Butto
               <section key={c.id}>
                 <button className="asks-card" onClick={() => { setOpen(false); onOpenCard(c.id); }} title="Open the card">{c.title}</button>
                 <AskBlock card={c} />
+                {/* Who's waiting on this answer: agent, machine, project, and how long the question has been open. */}
                 {(() => {
-                  const s = askingSession(c, presence.sessions, presence.claims, presence.now);
-                  return s && <PresenceLine session={s} now={presence.now} />;
+                  const s = askingSession(c, presence.sessions, presence.claims);
+                  return s && <PresenceLine session={s} now={presence.now} askedAt={c.ask!.askedAt} />;
                 })()}
               </section>
             ))}

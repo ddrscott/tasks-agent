@@ -3,7 +3,7 @@
 // Nothing here is fetched or saved; a reload builds it again from scratch.
 
 import { NEEDS_CEO_TAG, type Ask, type Board, type Card } from "../shared";
-import type { Claim, Session } from "../presence-shared";
+import { withAsks, type Claim, type Session } from "../presence-shared";
 import type { Presence } from "./Sessions";
 
 const MIN = 60_000;
@@ -42,7 +42,8 @@ export const PLOT: Beat[] = [
     pickup: "STATUS: picked up — reading the schema",
     working: (heard) => `STATUS: working — ${heard}, running the migration on staging`,
     done: (a) => `STATUS: done — orders is on the new schema. Went with: ${a}`,
-    last: { reading: "Read: schema.sql", working: "Bash: npm run migrate -- --env staging" },
+    // A Bash call is listed by its description, never the command, the same as a real session's.
+    last: { reading: "Read: schema.sql", working: "Bash: Run the migration on staging" },
   },
   {
     cardId: "c-ratelimit",
@@ -192,23 +193,30 @@ export type Scene =
   // On a card: reading before it asks, waiting on the answer, heard it a moment ago, or working on it.
   | { at: "reading" | "waiting" | "heard" | "working"; beat: Beat; card: Card };
 
+/** How often a waiting agent is heard from: each wait_for_answer call holds this long (WAIT_SECONDS in agent-rules.ts). */
+const POLL_MS = 30_000;
+
 /**
  * The three sessions the Sessions list shows. Two run on the clock alone: the one in shop-web
  * keeps working through a short loop of tool calls, and the idle one in infra was last heard
  * from a minute before the demo opened and gets older from there, so it's marked stale four
  * minutes in, the way a real quiet session is. The lead
- * session in shop-api follows the scene: it says needs input exactly while its card has a
- * question open, so answering one puts it back to working in the same moment.
+ * session in shop-api follows the scene and reads the way a real session does: while its card
+ * has a question open it holds its claim and polls wait_for_answer, the claim carries the
+ * question, and the app's own rule (withAsks) makes the row say needs input and "asked: …".
+ * Answering takes the question off the claim, and the row is back to working in the same moment.
  */
 export function demoPresence(scene: Scene, now: number, startedAt: number): Presence {
   const recent = (t: number) => Math.max(t, now - 4 * MIN); // nothing here ever goes stale
   const leadNow = (): Pick<Session, "state" | "last" | "seenAt"> => {
     if (scene.at === "idle") return { state: "idle", last: "finished its turn", seenAt: recent(startedAt) };
-    if (scene.at === "between") return { state: "working", last: "tasks: get_board", seenAt: now - 2000 };
+    if (scene.at === "between") return { state: "working", last: "mcp__tasks__get_board", seenAt: now - 2000 };
     if (scene.at === "waiting") {
-      return { state: "needs-input", last: `asked: ${scene.card.ask?.question ?? scene.beat.ask.question}`, seenAt: recent(Date.parse(scene.card.updatedAt)) };
+      // Heard from every time a wait_for_answer call comes back, so it never goes stale while it waits.
+      const asked = Date.parse(scene.card.ask?.askedAt ?? scene.card.updatedAt);
+      return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: now - (Math.max(0, now - asked) % POLL_MS) };
     }
-    if (scene.at === "heard") return { state: "working", last: "tasks: get_card", seenAt: now - 1000 };
+    if (scene.at === "heard") return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: now - 1000 };
     return { state: "working", last: scene.beat.last[scene.at], seenAt: now - 3000 };
   };
   const sessions: Session[] = [
@@ -224,7 +232,11 @@ export function demoPresence(scene: Scene, now: number, startedAt: number): Pres
   ];
   const claims: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];
   if (scene.at !== "idle" && scene.at !== "between") {
-    claims.push({ cardId: scene.card.id, sessionId: LEAD, agent: "lead", claimedAt: startedAt });
+    const ask = scene.at === "waiting" ? scene.card.ask : undefined;
+    claims.push({
+      cardId: scene.card.id, sessionId: LEAD, agent: "lead", claimedAt: startedAt,
+      ...(ask ? { asked: ask.question, askedAt: Date.parse(ask.askedAt) } : {}),
+    });
   }
-  return { sessions, claims, now };
+  return { sessions: withAsks(sessions, claims), claims, now };
 }

@@ -13,15 +13,18 @@
 // Claims live here too. A lead agent claims a card with its session id over MCP
 // (claim_card); the object is single-threaded, so two leads can't both win. A claim holds
 // while its session is live and can be taken over once the session has gone quiet.
-// A session with no hooks (any MCP client) is heard from through its claims alone, and its
+// A session with no hooks (any MCP client) is heard from through its MCP calls alone, and its
 // row is written by the claim rules in presence-shared.ts.
+//
+// A session that asked the owner a question (ask_ceo) keeps its card and reads "needs input"
+// with the question until it's answered: the claim holds the question, and view() says so.
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 
 import {
-  afterClaim, afterEnded, afterRelease, known, LAPSED, STALE_MS,
-  type Claim, type ClaimRow, type Ended, type PresenceView, type Session, type SessionState,
+  afterAsk, afterClaim, afterEnded, afterRelease, afterSettled, known, LAPSED, STALE_MS, withAsks,
+  type Claim, type ClaimRow, type Ended, type PresenceView, type Session, type SessionState, type Settled,
 } from "./presence-shared";
 
 export { STALE_MS, type Claim, type PresenceView, type Session, type SessionState };
@@ -156,6 +159,11 @@ export class Presence extends DurableObject<Env> {
     } catch { /* the column is already there */ }
     this.sql.exec(`CREATE TABLE IF NOT EXISTS claims (
       card_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, agent TEXT NOT NULL, claimed_at INTEGER NOT NULL)`);
+    // asked: the question the claim's session put on the card and is waiting on, while it's open.
+    try {
+      this.sql.exec("ALTER TABLE claims ADD COLUMN asked TEXT NOT NULL DEFAULT ''");
+      this.sql.exec("ALTER TABLE claims ADD COLUMN asked_at INTEGER NOT NULL DEFAULT 0");
+    } catch { /* the columns are already there */ }
     this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
@@ -203,14 +211,18 @@ export class Presence extends DurableObject<Env> {
   view(): PresenceView {
     const now = Date.now();
     this.expire(now);
-    const sessions = (this.sql.exec("SELECT * FROM sessions ORDER BY seen_at DESC").toArray() as unknown as Row[]).map((r) => ({
+    const rows = (this.sql.exec("SELECT * FROM sessions ORDER BY seen_at DESC").toArray() as unknown as Row[]).map((r) => ({
       id: r.id, project: r.project, machine: r.machine, agent: r.agent, state: r.state, last: r.last,
       cwd: r.cwd, link: r.link, startedAt: r.started_at, seenAt: r.seen_at,
     }));
-    const claims = (this.sql.exec("SELECT * FROM claims ORDER BY claimed_at").toArray() as unknown as
-      { card_id: string; session_id: string; agent: string; claimed_at: number }[])
-      .map((r) => ({ cardId: r.card_id, sessionId: r.session_id, agent: r.agent, claimedAt: r.claimed_at }));
-    return { sessions, claims, now };
+    const claims: Claim[] = (this.sql.exec("SELECT * FROM claims ORDER BY claimed_at").toArray() as unknown as
+      { card_id: string; session_id: string; agent: string; claimed_at: number; asked: string; asked_at: number }[])
+      .map((r) => ({
+        cardId: r.card_id, sessionId: r.session_id, agent: r.agent, claimedAt: r.claimed_at,
+        ...(r.asked ? { asked: r.asked, askedAt: r.asked_at } : {}),
+      }));
+    // A session with a question open reads needs input, whatever its hooks or claims last wrote.
+    return { sessions: withAsks(rows, claims), claims, now };
   }
 
   private broadcast() {
@@ -269,8 +281,10 @@ export class Presence extends DurableObject<Env> {
     const now = Date.now();
     const cardId = clean(input.cardId, 40);
     const sessionId = clean(input.sessionId, 80);
-    const agent = clean(input.agent, 40) || "agent";
     this.expire(now);
+    // One name per session: what it says now, else what its row already holds. A claim that
+    // leaves agent off doesn't turn "cursor" into "agent" on the card.
+    const agent = clean(input.agent, 40) || this.agentOf(sessionId) || "agent";
     const held = this.sql.exec("SELECT * FROM claims WHERE card_id = ?", cardId).toArray()[0] as
       { card_id: string; session_id: string; agent: string; claimed_at: number } | undefined;
     // expire() already dropped claims of quiet sessions, so a holder that's left is live.
@@ -296,6 +310,92 @@ export class Presence extends DurableObject<Env> {
       };
     }
     return { ok: true, claim: { cardId, sessionId, agent, claimedAt: held?.claimed_at ?? now } };
+  }
+
+  /** The agent kind a session's row holds, when it has a row and said. */
+  private agentOf(sessionId: string): string {
+    return (this.sql.exec("SELECT agent FROM sessions WHERE id = ?", sessionId).toArray()[0]?.agent as string | undefined) ?? "";
+  }
+
+  /**
+   * A session asked a question on a card (ask_ceo in mcp.ts). The asker is the session the call
+   * named, or else whoever holds the card, so an agent that leaves session_id off still shows as
+   * waiting. It keeps the card: a card waiting on its owner isn't up for grabs, and the held
+   * claim is what puts the session's line on the card. If the call named a session and nobody
+   * holds the card, asking claims it. While the question is open the session reads needs input
+   * (withAsks). Returns the session that's now waiting, or null when none could be tied to it.
+   */
+  asked(user: string, input: { cardId: string; sessionId?: string; question: string; title?: string }): string | null {
+    this.user(user);
+    const now = Date.now();
+    const cardId = clean(input.cardId, 40);
+    const question = clean(input.question, 240);
+    const named = clean(input.sessionId, 80);
+    this.expire(now);
+    const held = this.sql.exec("SELECT session_id FROM claims WHERE card_id = ?", cardId).toArray()[0] as { session_id: string } | undefined;
+    if (named && /^[\w.:-]{6,80}$/.test(named) && !held) {
+      this.sql.exec("INSERT INTO claims (card_id, session_id, agent, claimed_at) VALUES (?, ?, ?, ?)", cardId, named, this.agentOf(named) || "agent", now);
+    }
+    const asker = held?.session_id ?? (named && /^[\w.:-]{6,80}$/.test(named) ? named : "");
+    if (!asker) return null;
+    // Another live session holds the card: the question stands on the card, and the caller was heard from.
+    if (named && asker !== named) {
+      this.touch({ sessionIds: [named] });
+      return null;
+    }
+    this.sql.exec("UPDATE claims SET asked = ?, asked_at = ? WHERE card_id = ?", question, now, cardId);
+    this.heard(asker, now, "", (prev, holds) => afterAsk(prev, clean(input.title, 80), holds));
+    void this.ctx.storage.setAlarm(now + STALE_MS + 1000);
+    this.broadcast();
+    return asker;
+  }
+
+  /**
+   * Questions that just closed on the board (settledAsks in presence-shared.ts; the board calls
+   * this next to finish). The session behind one stops reading needs input. It keeps the card, so
+   * one that only claims is working again; one with hooks shows what its hooks last wrote. Nobody
+   * was heard from here, so no last-seen time moves.
+   */
+  settle(closed: Settled[]) {
+    this.expire();
+    let changed = false;
+    for (const e of closed) {
+      const cardId = clean(e.cardId, 40);
+      const c = this.sql.exec("SELECT session_id, asked FROM claims WHERE card_id = ?", cardId).toArray()[0] as { session_id: string; asked: string } | undefined;
+      if (!c?.asked) continue;
+      this.sql.exec("UPDATE claims SET asked = '', asked_at = 0 WHERE card_id = ?", cardId);
+      changed = true;
+      const prev = this.sql.exec("SELECT project, machine, agent, state, last, hooks FROM sessions WHERE id = ?", c.session_id).toArray()[0] as
+        (ClaimRow & { hooks: number }) | undefined;
+      if (!prev || prev.hooks) continue;
+      const holds = this.sql.exec("SELECT COUNT(*) AS n FROM claims WHERE session_id = ?", c.session_id).toArray()[0].n as number;
+      const row = afterSettled(prev, { title: clean(e.title, 80), how: e.how }, holds);
+      this.sql.exec("UPDATE sessions SET state = ?, last = ? WHERE id = ?", row.state, row.last.slice(0, 120), c.session_id);
+    }
+    if (changed) this.broadcast();
+  }
+
+  /**
+   * An MCP call that isn't a claim still says its session is alive: wait_for_answer most of all,
+   * since an agent polling for an answer makes no other call. Moves the last-seen time of the
+   * sessions named, and of the sessions holding the cards named, and nothing else. A session with
+   * no row isn't given one: only a claim or a hook makes a row.
+   */
+  touch(input: { sessionIds?: string[]; cardIds?: string[] }) {
+    const now = Date.now();
+    this.expire(now);
+    const ids = new Set((input.sessionIds ?? []).map((id) => clean(id, 80)).filter(Boolean));
+    for (const cardId of input.cardIds ?? []) {
+      const c = this.sql.exec("SELECT session_id FROM claims WHERE card_id = ?", clean(cardId, 40)).toArray()[0] as { session_id: string } | undefined;
+      if (c) ids.add(c.session_id);
+    }
+    let moved = false;
+    for (const id of ids) {
+      moved = this.sql.exec("UPDATE sessions SET seen_at = ? WHERE id = ?", now, id).rowsWritten > 0 || moved;
+    }
+    if (!moved) return;
+    void this.ctx.storage.setAlarm(now + STALE_MS + 1000);
+    this.broadcast();
   }
 
   /**
@@ -392,5 +492,7 @@ export function describeSession(s: Session | null, now: number): string {
   const ago = Math.max(0, Math.round((now - s.seenAt) / 1000));
   const seen = ago < 90 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
   const where = `${known(s.machine) ? ` on ${s.machine}` : ""}${known(s.project) ? ` in ${s.project}` : ""}`;
-  return `${s.agent || "agent"}${where}, ${s.state.replace("-", " ")}, seen ${seen} (session ${s.id})`;
+  // "needs input" alone reads like a stuck terminal; with the line it says what it's waiting on.
+  const state = s.state === "needs-input" && s.last ? `needs input (${s.last})` : s.state.replace("-", " ");
+  return `${s.agent || "agent"}${where}, ${state}, seen ${seen} (session ${s.id})`;
 }

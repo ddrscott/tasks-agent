@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { hasTag, shownCards, SORTS, statusLine, type Board, type Card, type Lane, type SortBy } from "../shared";
+import { faceLine, hasTag, shownCards, SORTS, type Board, type Card, type Lane, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock } from "./Ask";
 import { CardPresence } from "./Sessions";
@@ -417,7 +417,7 @@ export function CardFace(p: {
   onToggle?(c: Card): void; onTag?(tag: string): void;
 }) {
   const { card } = p;
-  const status = !p.isDone && !card.ask ? statusLine(card.notes) : null;
+  const status = !p.isDone && !card.ask ? faceLine(card) : null;
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -436,7 +436,8 @@ export function CardFace(p: {
         <CardPresence cardId={card.id} />
         {!p.overlay && <AskBlock card={card} compact />}
         {/* What the agent last said it's doing, so nobody opens the card to find out. An open question says it better, and a done card is done. */}
-        {status && <div className="card-status" title={`STATUS: ${status}`}>{status}</div>}
+        {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
+        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${status.text}` : "Your answer. The agent hasn't written a new STATUS line yet."}>{status.text}</div>}
         <div className="card-meta">
           {card.tags?.map((t) => (
             <button

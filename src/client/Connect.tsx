@@ -780,10 +780,10 @@ you. One tap answers it. The answer is kept on the card. An agent that can't go 
                   The event feed prints one line of JSON each time you add, edit, move, answer, or delete
                   an <code>#agent</code> card, so an agent on your machine can act on it without polling.
                   The <a href="#sessions">Sessions setup</a> installs it
-                  as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. Run it under Claude
-                  Code's Monitor tool; the rules tell Claude Code to do that when the Sessions hooks say
-                  the feed is installed. Claude Code asks once before it runs the script.
-                  Without it, an agent waits for your answer with <code>wait_for_answer</code>. Changes an agent
+                  as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. It runs under Claude
+                  Code's Monitor tool, and only when you ask: tell the agent to use the event feed, and
+                  Claude Code asks once in the terminal before it runs the script. Left alone, an agent
+                  never starts it, and waits for your answer with <code>wait_for_answer</code>. Changes an agent
                   makes are left out, so it never wakes itself.
                 </p>
                 <Snippet lang="sh" code={eventsCommand()} />
