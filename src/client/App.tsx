@@ -299,7 +299,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   // The New card dialog: one change, so one Undo takes the whole card back out.
   const addFullCard = useCallback(async (input: NewCardInput) => {
-    await agent.stub.addCard(input.laneId, await out(clean(input.title, 200)), false, {
+    return agent.stub.addCard(input.laneId, await out(clean(input.title, 200)), false, {
       notes: input.notes.trim() ? await out(input.notes.slice(0, 4000)) : "",
       due: input.due ? await out(input.due) : null,
       tags: await Promise.all(tidyTags(input.tags).map(out)),
@@ -482,7 +482,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {newCardLane && (
-        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} vault={vault} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
       )}
       {editingCard && (
         <CardEditor

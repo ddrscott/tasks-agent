@@ -43,6 +43,12 @@ async function upload(cardId: string, file: File): Promise<void> {
   }
 }
 
+/** Upload one file to a card, encrypting it first on an encrypted board. */
+export async function uploadFile(cardId: string, file: File, vault: Vault | null): Promise<void> {
+  if (vault) await uploadSealed(vault, { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) }, cardId);
+  else await upload(cardId, file);
+}
+
 type Props = {
   cardId: string;
   vault: Vault | null;
@@ -65,8 +71,7 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }
     setPending((p) => [...p, ...files.map((f) => f.name)]);
     for (const f of files) {
       try {
-        if (vault) await uploadSealed(vault, { name: f.name, type: f.type, bytes: new Uint8Array(await f.arrayBuffer()) }, cardId);
-        else await upload(cardId, f);
+        await uploadFile(cardId, f, vault);
       } catch (e) {
         setError((e as Error).message);
       } finally {
