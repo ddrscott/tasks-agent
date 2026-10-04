@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-03
+
 ### Added
 - Kanban board at askscottpierce.com/tasks with live sync across tabs, undo and redo, themes, and attachments
 - Assistant in the sidebar — say "finished the dentist thing" and the cards move
@@ -37,4 +39,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Encrypted boards refuse plaintext from every path — chat, uploads, MCP, and stale tabs — and turning encryption off or changing the passphrase needs a key proof
 - Cookie-bearing requests from other origins are refused, including sibling subdomains
 
-[Unreleased]: https://github.com/ddrscott/tasks-agent/commits/main
+[Unreleased]: https://github.com/ddrscott/tasks-agent/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ddrscott/tasks-agent/releases/tag/v0.1.0
