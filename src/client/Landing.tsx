@@ -95,7 +95,8 @@ export function Landing({ signIn }: { signIn: ReactNode }) {
           <p className="landing-note">
             Then run <code>/mcp</code> in Claude Code, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser
             opens here to sign in and allow it. Tag a card <code>#agent</code> and tell the agent to work the board.
-            Cursor, VS Code, Codex, ChatGPT, and Claude have their own steps on the Connect page once you're signed in.
+            Cursor, VS Code, Codex, ChatGPT, and Claude have their own steps on
+            the <a href={`${BASE}/connect`}>Connect page</a>, with a starter prompt to paste in. You can read it all before you sign up.
           </p>
         </section>
 
