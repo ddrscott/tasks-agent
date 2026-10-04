@@ -166,11 +166,13 @@ const LEAD = "7c1e4f2a-93b6-4d0e-a5c8-2f6b1d9e0a41";
  * old, goes back to 0, and says something new. A row stuck on one number looks dead.
  */
 const SHOP_WEB: [last: string, seconds: number][] = [
-  ["Bash: npm test -- cart", 13],
+  // What a real row can say (reportFrom in presence.ts): a tool and a file name, or a Bash call's
+  // description. Never the command, which isn't stored.
+  ["Bash: Run the cart tests", 13],
   ["Read: cart.test.ts", 6],
   ["Read: usePrice.ts", 8],
   ["Edit: cart.test.ts", 15],
-  ["Bash: npm test -- cart", 11],
+  ["Bash: Run the cart tests again", 11],
   ["Edit: usePrice.ts", 9],
   ["Bash: Run the cart test 200 times", 22],
 ];
