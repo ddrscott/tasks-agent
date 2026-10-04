@@ -13,18 +13,24 @@ import type { NewCardInput } from "./NewCard";
 // AgentNudge.tsx takes over there). An encrypted board never shows it: agents can't reach one.
 
 /**
- * The sample card. It's safe anywhere: the agent looks, proposes, and asks before it changes a
- * file, which is also what shows off the loop. The question lands on the card and one tap answers it.
+ * The sample card. It's safe anywhere, and it can finish on what the copied command allows: the
+ * board's tools, plus reading the folder, which Claude Code doesn't ask about. The agent reads,
+ * asks which improvement to plan, and writes the plan on the card. No file is written and
+ * nothing runs but a listing, so nothing waits on an approval in a terminal the visitor isn't
+ * looking at. (Claude Code 2.1 has no Glob tool; it lists with a read-only ls, which it runs
+ * without asking. Telling the agent "no shell at all" left it guessing at file names.)
  */
 export const SAMPLE = {
-  title: "Look around this folder and suggest one small improvement",
+  title: "Look around this folder and plan one small improvement",
   notes: `A sample card, to show how an agent works this board. Delete it whenever you like.
 
-Look at the folder you were started in: the README, the scripts, whatever is there. Find 2 or 3 small improvements you could make in a few minutes, like a gap in the README, a missing .gitignore entry, or a typo. If the folder is empty or there's nothing worth fixing, offer to write a short README instead.
+Look at the folder you were started in, by reading only. List the files with whatever needs no approval from me, a file tool or a plain ls, then read the README and anything else short that says what this is. Don't write or edit a file, and don't run a command that changes anything. Nothing on this card needs either, so there's nothing for me to approve in the terminal.
 
-Don't change any files yet. Ask me which one to do with ask_ceo: one option for each improvement, and a last option, "Leave it all alone". Recommend the one you'd pick.
+Find 2 or 3 small improvements that would each take a few minutes, like a gap in the README, a missing .gitignore entry, or a typo. If the folder is empty or isn't code, offer first steps instead, like what a README for it should say.
 
-When I answer, do only that one. If I say to leave it alone, change nothing. Then write what you did in these notes and move the card to Done.`,
+Ask me which one with ask_ceo: one option for each, and a last option, "None of these". Recommend the one you'd pick.
+
+When I answer, write a short plan for that one in these notes: 3 to 6 lines that each start with "- [ ]", naming the files to touch. Don't make the change itself. If I say none, write one line saying so. Then move the card to Done.`,
   tags: [AGENT_TAG],
 };
 
@@ -73,7 +79,7 @@ export function FirstRun({ board, onConnect, add, say }: {
         signedIn hasSample={hasSample} onAddSample={addSample} onConnect={onConnect}
         lede={board.cards.length === 0
           ? "This board is empty. Four steps put Claude Code to work on it."
-          : "Two steps left, and Claude Code is working your sample card."}
+          : "Your sample card is on the board. Two steps left: copy the command and paste it in a terminal."}
       />
       <p className="first-run-foot">
         For your own work, add <code>#agent</code> to the end of a card's title, or use its Tags field.
