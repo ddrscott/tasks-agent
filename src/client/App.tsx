@@ -488,6 +488,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
       )}
       {editingCard && (
+        // The editor shows the session that claimed the card, so it reads the same list the board does.
+        <PresenceContext.Provider value={presence}>
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
@@ -510,6 +512,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           }}
           onClose={() => setEditing(null)}
         />
+        </PresenceContext.Provider>
       )}
 
       {encOpen && (

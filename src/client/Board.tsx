@@ -248,6 +248,7 @@ function LaneView(props: Props & {
   const [renaming, setRenaming] = useState(false);
   const [menu, setMenu] = useState(false);
   const adding = props.quickAddLane === lane.id;
+  const matching = props.tagFilter ? cards.filter((c) => hasTag(c, props.tagFilter!)).length : cards.length;
 
   function commitRename(value: string) {
     if (!renaming) return;
@@ -281,7 +282,12 @@ function LaneView(props: Props & {
         ) : (
           <button className="lane-name" title="Rename" onClick={() => setRenaming(true)}>{lane.name}</button>
         )}
-        <span className="lane-count">{cards.length}</span>
+        {/* Filtered-out cards only fade, so the count says how many match, out of how many. */}
+        {props.tagFilter ? (
+          <span className="lane-count" title={`${matching} of ${cards.length} tagged #${props.tagFilter}`}>{matching} / {cards.length}</span>
+        ) : (
+          <span className="lane-count">{cards.length}</span>
+        )}
         <span className="spacer" />
         <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
         <div className="anchor">

@@ -393,7 +393,7 @@ kbd {
 }
 .lane-name:hover { border-color: var(--line); }
 input.lane-name { background: var(--bg); border-color: var(--accent); outline: none; width: 100%; }
-.lane-count { font: 12px var(--font-mono); color: var(--muted); }
+.lane-count { font: 12px var(--font-mono); color: var(--muted); flex: none; white-space: nowrap; }
 .lane-head .spacer { flex: 1; }
 .lane-head .btn { height: 28px; width: 28px; }
 
@@ -439,7 +439,7 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .ask-opt.rec .ask-n { color: var(--accent); }
 .ask-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
-.ask.compact .ask-rec { display: none; }
+.ask.compact .ask-rec { font-weight: 600; padding: 1px 4px; border: 1px solid var(--accent); border-radius: var(--radius-sm); }
 .ask-other { display: flex; gap: 6px; }
 .ask-other .field { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px; }
 .asks-btn { border-color: var(--accent); }
@@ -575,7 +575,7 @@ button.chip.tag:hover { border-color: var(--accent); }
   flex: 1; border: 0; background: transparent; outline: none; resize: none;
   padding: 7px 0; max-height: 140px; font-size: 14px; line-height: 1.45;
 }
-.composer .foot { display: flex; justify-content: space-between; margin-top: 6px; font: 11px var(--font-mono); color: var(--muted); }
+.composer .foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font: 11px var(--font-mono); color: var(--muted); }
 
 .cap-note {
   display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
@@ -584,7 +584,7 @@ button.chip.tag:hover { border-color: var(--accent); }
 }
 .cap-note p { margin: 0; }
 .cap-note b { color: var(--ink); }
-.meter { font-family: var(--font-mono); }
+.meter { font-family: var(--font-mono); flex: none; white-space: nowrap; }
 .meter.full { color: var(--accent); }
 .chat-fab { display: none; }
 
@@ -721,6 +721,8 @@ a.att-name:hover { color: var(--accent); }
 .sess-project span { font-weight: 400; font-size: 11px; color: var(--muted); }
 .sess-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px/1.45 var(--font-mono); min-width: 0; }
 .sess-row.stale { opacity: .6; }
+/* The same row in the card editor, for the session that claimed the card. */
+.card-session { list-style: none; margin: 0; padding: 0; flex: none; }
 .sess-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .sess-state { flex: none; display: inline-flex; gap: 6px; font-weight: 600; color: var(--ink); }
 .sess-mark { color: var(--accent); }
@@ -981,6 +983,7 @@ a.att-name:hover { color: var(--accent); }
   .menu button { padding: 11px 10px; font-size: 14px; }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
   .move-row { display: flex; }
+  .card-session .sess-resume, .card-session .sess-links a { padding: 12px 0; margin: -6px 0; }
   .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }
   /* Shortcut hints are for keyboards. */
   .quick-add .hint, .add-lane-form .hint, .menu kbd, .search kbd { display: none; }

@@ -101,7 +101,8 @@ run ahead of whatever serves the zone.
   Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
   Click a tag on a card to fade out every card without it; click again, or the chip in
-  the top bar, to clear. The filter belongs to the tab and isn't saved. On an
+  the top bar, to clear. While a filter is on, each lane's count reads matches / total
+  ("2 / 22"). The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
 - **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
   numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
@@ -139,7 +140,9 @@ run ahead of whatever serves the zone.
   clauses, and anything the small model is unsure of, goes to GLM exactly as before. A local
   turn runs the same board tools under one undo step and is written into the chat transcript
   by `TodoAgent.applyLocal`, so undo, the ✓ lines, and every open tab see it the same way.
-  The footer under the message box says which path handled the last message. Local turns are
+  The footer under the message box says where the assistant runs in plain words ("runs in your
+  browser · cloud model as backup") and which path handled the last message; the model names
+  are in its tooltip. Local turns are
   free and don't count against the daily cap. `bench/needle.mjs` measures the policy.
 - **Cost guard.** The assistant is capped per user per day: `FREE_DAILY_CHATS` (30)
   on the free plan and `PRO_DAILY_CHATS` (150) with a Stripe subscription. The chat
@@ -337,7 +340,7 @@ When an agent needs you to decide something, it asks on the card and you answer 
   holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
   notes. Asking again replaces the question.
 - **Answering.** The card face shows the question with a button per option, the recommended one
-  outlined. The card editor shows the same plus a box for a typed answer. While anything is
+  outlined and marked `REC` ("recommended" where there's room). The card editor shows the same plus a box for a typed answer. While anything is
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. On a phone the count is all that shows.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
@@ -368,9 +371,10 @@ event arrives with an `answer`, act on that answer; without one, reread the card
 The Sessions button in the top bar lists every Claude Code session that's reporting in, on any
 machine: grouped by project, the ones waiting on you first. A row shows the state (working,
 needs input, idle), the agent and machine, one line about its last action, and how long ago it
-was heard from. After 5 quiet minutes a row is marked stale. "copy resume" copies
+was heard from. After 5 quiet minutes a row is marked stale. "Copy resume command" copies
 `cd <folder> && claude --resume <id>` for the machine it runs on. A card that a lead agent has
-claimed shows the same state line under its title.
+claimed shows the same state line under its title, and its editor shows the session's whole
+row, resume command included.
 
 **It's presence, not a log.** Each session overwrites one row. Nothing is appended, and no
 transcript, prompt, tool output, or Bash command is ever stored; Claude Code already keeps

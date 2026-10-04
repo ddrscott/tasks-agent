@@ -46,7 +46,8 @@ export function AskBlock({ card, compact, before }: BlockProps) {
           >
             <span className="ask-n">{i + 1}</span>
             <span className="ask-text">{o}</span>
-            {ask.recommended === i && <span className="ask-rec">recommended</span>}
+            {/* The outline alone reads as "selected", so the pick is always named; a card face has room for three letters. */}
+            {ask.recommended === i && <span className="ask-rec">{compact ? "rec" : "recommended"}</span>}
           </button>
         ))}
       </div>

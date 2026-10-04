@@ -3,6 +3,7 @@ import { cleanTag, type Card, type Lane } from "../shared";
 import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
 import { Markdown, toggleTask } from "./Markdown";
+import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
 import type { Vault } from "./vault";
@@ -124,6 +125,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onMo
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={cancel}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={save} />
+        <CardSession cardId={card.id} />
         {lanes.length > 1 && (
           <div className="move-row" role="group" aria-label="Move to lane">
             <span className="move-label">Move to</span>
