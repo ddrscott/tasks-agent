@@ -7,10 +7,11 @@
 //   labels  "Undo", "need you", "Sessions", "Assistant" drop to icon plus count
 //   stats   the open / due today / overdue summary goes
 //   chip    the tag filter chip moves to its own row under the bar
+//   shared  the "Shared with N" button folds into a count on the account button
 //
 // The steps land in data-tight as a word list, and styles.css does the rest.
 
-const STEPS = ["", "search", "search labels", "search labels stats", "search labels stats chip"];
+const STEPS = ["", "search", "search labels", "search labels stats", "search labels stats chip", "search labels stats chip shared"];
 
 /** True when the last button's right edge is inside the bar's padding. */
 function fits(bar: HTMLElement): boolean {

@@ -245,7 +245,7 @@ run ahead of whatever serves the zone.
   shows the tags already on the board above the input, most used first (`tagsByUse` in
   `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first
   match. It reads the board in the tab, so it works on an encrypted board.
-- **On a phone.** Up to 560px wide, the card dialogs take the whole screen with 12px
+- **On a phone.** Up to 560px wide, the card dialogs and Members take the whole screen with 12px
   padding and size to the space above the on-screen keyboard, so Tags and the buttons stay
   reachable while typing. Android Chrome shrinks the page for the keyboard
   (`interactive-widget=resizes-content` in `index.html`); iOS Safari doesn't, so
@@ -259,7 +259,8 @@ run ahead of whatever serves the zone.
   gives up space one step at a time and stops at the first step that fits: the search box
   becomes its icon (click it or press `⌘K` and it opens across the bar), then Undo, "need
   you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
-  summary goes, and last the tag filter chip moves to its own row under the bar. A phone
+  summary goes, then the tag filter chip moves to its own row under the bar, and last the
+  "Shared with N" button (`// TEAM_BOARDS`) folds into a count on the account button. A phone
   always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
   attribute, and `styles.css` does the rest. There's one count of what's waiting on you: "need
   you" adds up the open questions (`// QUESTIONS`) and the sessions stopped at a prompt
@@ -270,13 +271,16 @@ run ahead of whatever serves the zone.
   `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
   popover moves focus into it, Esc or a click outside gives focus back to its button, and in
   a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
-  `src/client/Board.tsx`). The card editor, New card, and Encryption are modal: native
+  `src/client/Board.tsx`). The card editor, New card, Encryption, and Members are modal: native
   `<dialog>` elements opened with `showModal()`, each with `role="dialog"`, `aria-modal="true"`,
   and a name (the editor's is "Edit card: " plus the card's title). The browser keeps Tab
   inside an open one. Closing it gives focus back to what opened it: the card for the editor
   (found again by id when a move redrew it in another lane), the lane's + for New card
   (`useModal` in `src/client/modal.ts`; React takes these dialogs off the page instead of
-  closing them, and the browser only hands focus back on a close). The card editor and New card
+  closing them, and the browser only hands focus back on a close). Members goes back to the
+  "Shared with N" button or the account button, whichever opened it; its two tabs are a
+  `tablist` the left and right arrow keys move through, and after Remove or Revoke focus
+  lands on the line that says what happened. The card editor and New card
   open with focus on the title. On a touch screen the editor focuses the dialog instead, so the
   keyboard doesn't cover a card you only meant to read.
 - **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
@@ -1135,8 +1139,57 @@ Sessions button is hidden, and turning encryption on erases the rows that were t
 
 A Pro owner invites people into their board by email. Each member is a **viewer** (read only) or
 a **writer**. It's the whole board; there are no per-tag scopes yet. The server side is built and
-checked (`npm run check:members`). The app's UI for it (members panel, board switcher, banners,
-who-changed-it on a card) is not built yet: this section is what that UI builds against.
+checked (`npm run check:members`). The owner's screens are built (**The owner's controls**,
+below). The member's side of the app (board switcher, banners, who-changed-it on a card) builds
+against the rest of this section.
+
+**The owner's controls** are all in `src/client/Members.tsx`.
+
+- **Members**, in the account menu under Connect an agent, opens the `// MEMBERS` dialog. It
+  has two tabs, People and Audit log, and it's modal like the card editor (`useModal`), and
+  takes the whole screen on a phone. It shows only on your own board.
+- **People** starts with one line that says who can see the board ("Shared with 2 people. 1
+  pending invite.", or "Only you can see this board."). Then `// INVITE`: an email field, a
+  viewer or writer choice with a line on what each can do, the Invite button, and the counts
+  against both caps ("3 of 10 people, pending invites included. 17 of 20 invite emails left
+  today"). `// ON_THIS_BOARD` lists the owner and each member with the date they joined, a
+  role menu that changes the role in place, and Remove. `// PENDING_INVITES` lists each
+  invite with when it was sent, when it expires (or an `expired` label), a role menu, Resend,
+  and Revoke. Remove and Revoke take two taps, like Clear in a lane's menu: the first changes
+  the label to "Tap again to remove" and does nothing else, and moving off the button starts
+  over.
+- **What it says when it can't.** Every refusal from the API is turned into a sentence by
+  `explain`, keyed on the `code`. The states the server reports in `board.sharing` each get
+  their own block: on a free plan (`pro_required`) the fields are greyed out and the upgrade
+  prompt sits where the Invite button would be, with Upgrade to Pro (Stripe Checkout) and the
+  price from `GET /api/plans`; with billing off (`plans.pro` is null) it says Pro isn't
+  available yet and shows no button. A lapsed plan (`suspended`) gets a `view only` block
+  above the list: nothing was deleted, members can only look, invites and resends are off,
+  roles and removals still work, with Upgrade to Pro and Manage subscription. An encrypted
+  board (`encrypted`) shows only that sharing is off and why, with a button to the
+  Encryption dialog. A full board and a spent day of invite emails disable Invite (and
+  Resend) and say the number.
+- **Typing an address that's already there** doesn't call the API. The API would change a
+  member's role or reissue a pending invite, and neither is what Invite looks like it does,
+  so the form points at the row instead.
+- **The dev invite link.** When the API returns `devLink` (only with `DEV_LOGIN_CODES=1`) the
+  dialog shows it in a box labeled `dev only` with a Copy button. In production the API
+  never returns one, so the box never renders.
+- **Audit log** is the second tab: newest first, 25 at a time with Show older entries, in
+  columns When, Who did it, What, To whom, and Role change. Each time is shown in local time
+  with its zone and, under it, the UTC ISO time, so it can be pasted into a ticket. Each
+  action shows in words and as its code (`role_changed`). Download CSV and Download JSON are
+  plain links to `/api/board/audit.csv` and `.json`.
+- **"Shared with N"** is a button in the top bar, left of the account button, on a board with
+  at least one member or pending invite ("Invited N" until someone accepts). It opens
+  Members. When the top bar runs out of room it's the last thing to go: the count moves onto
+  the account button as a small badge, and the menu's Members item says "shared with N".
+  It looks again when the tab gets focus, and the dialog rereads the list every 20 seconds
+  while it's open, so an invite accepted elsewhere shows up without a reload.
+- **Encryption dialog.** On a board with members or pending invites it opens with a notice
+  that a shared board can't be encrypted, how many people and invites that is, and an Open
+  Members button; the passphrase form under it is disabled. If someone's invited after the
+  dialog opened, the server's `[board_shared]` refusal is shown in the same words.
 
 **The model.**
 
@@ -1301,7 +1354,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 |---|---|---|
 | `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday }, members: Member[] }` |
 | `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit`, `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
-| `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above |
+| `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above, plus `409 already_member` when they accepted in the meantime (inviting a pending address again can answer this too) |
 | `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
 | `POST /api/board/members/remove` | `{ email }` | `200 { ok: true }`, `404 not_found` |
@@ -1315,7 +1368,8 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
 `AuditEntry` is `{ id, at, actor, action, target: string|null, from: role|null, to: role|null }`.
-`actor` is the signed-in email that did it, or `system`. Actions: `invite_sent`, `invite_resent`,
+`actor` is the signed-in email that did it, or `system`. `from` and `to` are the role before and
+after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
 late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
 `sharing_restored`. The plan entries are written when the webhook arrives, when the board
@@ -1342,8 +1396,8 @@ list would refuse it (`maySignIn` in `src/auth.ts`). Nothing else about the list
 
 **For whoever builds the UI.**
 
-- The upgrade prompt belongs on the Invite button when `board.sharing` is `pro_required`.
-  `suspended` and `encrypted` each need their own line; so does a member's `plan_lapsed`.
+- The owner's side shows `board.sharing` (`pro_required`, `suspended`, `encrypted`) in the
+  Members dialog. A member's `plan_lapsed` still needs its own line on their side.
 - `Workspace` isn't member-aware yet. On a shared board: don't mount the cloud chat (its
   history fetch is a 404), don't call `usage`, `undoRedo`, `setTheme`, or the lane and
   encryption actions, pass `board` to the attachment calls, and skip the "this board was
