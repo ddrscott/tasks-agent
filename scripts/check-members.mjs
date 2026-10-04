@@ -396,6 +396,14 @@ section("stray WebSocket upgrades");
     }
     ok(`${who ? (who === owner ? "signed in" : "signed in as someone else") : "signed out"}, an upgrade to ${stray.length} addresses that aren't sockets is refused and the server stays up`, bad.length === 0, bad);
   }
+  // Vite hides the status of a refused upgrade, so read it the other way: the same header on a
+  // plain request, which Node passes through as an ordinary one, gets the Worker's own answer.
+  const plain = [];
+  for (const path of stray) {
+    const r = await fetch(`${BASE}${path}`, { headers: { Upgrade: "websocket" }, signal: AbortSignal.timeout(10_000) });
+    plain.push([path, r.status, (await r.text()).slice(0, 60)]);
+  }
+  ok("each of them answers a plain 404 that names no page, file, or board", plain.every(([, status, body]) => status === 404 && body === "There's no WebSocket at this address."), plain.filter(([, st, b]) => st !== 404 || b !== "There's no WebSocket at this address."));
   const real = await open(owner);
   ok("the board's own socket still opens", real.opened && !!(await real.wait((f) => f.type === "cf_agent_state")), how(real));
   real.close();

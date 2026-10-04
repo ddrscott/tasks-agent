@@ -1369,7 +1369,7 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 | One frame | 32 KB, text only | the socket is closed with code **1009** |
 | Sockets per member on one board | 4 | a fifth closes the oldest (code 1008) |
 | Member sockets on one board | 48 | the upgrade answers 503 until some close |
-| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date, 16 KB as JSON | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
+| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date, 32 KB as JSON | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
 | Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
 | The board as JSON | 1 MB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine |
 | Card deletions by one member | 200 a UTC day | `[delete_limit] …`. Each one is a row in the audit log, which nothing prunes |

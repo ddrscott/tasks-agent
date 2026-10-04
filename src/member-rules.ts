@@ -108,8 +108,8 @@ export const SLOW_DOWN = "[slow_down] Slow down. That's too many changes at once
  */
 export const MEMBER_LIMITS = {
   title: 200, notes: 4000, tags: 10, tag: 32,
-  /** One card as JSON, files and all. */
-  cardBytes: 16 * 1024,
+  /** One card as JSON, files and all. Room for 4,000 characters of notes that each need escaping, and 20 files. */
+  cardBytes: 32 * 1024,
   cards: 1000,
   /** The whole board as JSON. Its Durable Object stores it in one 2 MB row, and every change sends all of it to every open tab. */
   boardBytes: 1024 * 1024,
