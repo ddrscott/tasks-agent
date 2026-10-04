@@ -1,7 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { AskBlock, AskOwnerContext } from "./Ask";
-import { ASK_HOLDS, ByLine, type Mode } from "./member";
+import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
 import { NoAgentLine } from "./AgentNudge";
 import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
@@ -45,13 +45,16 @@ type Props = {
  * a viewer, or the owner's plan lapsing), and the dialog follows it on the spot.
  */
 export function CardEditor(props: Props) {
-  return props.mode === "viewer" ? <CardView {...props} /> : <CardEdit {...props} />;
+  // An agent's work order is read only to a writer too (OWNER_TAGS in member-rules.ts).
+  return props.mode === "viewer" || agentHeld(props.mode, props.card) ? <CardView {...props} /> : <CardEdit {...props} />;
 }
 
 /** A card to read: the notes rendered with their checkboxes fixed, the files to open or download, and one button, Close. */
-function CardView({ card, lanes, vault, board, onClose }: Props) {
+function CardView({ card, lanes, vault, board, onClose, mode }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const owner = useContext(AskOwnerContext);
+  // A writer lands here only on an agent's work order; a viewer lands here on every card.
+  const held = agentHeld(mode, card);
   useModal(ref, {
     focus: (dialog) => dialog.focus(),
     fallback: () => document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(card.id)}"]`),
@@ -67,15 +70,16 @@ function CardView({ card, lanes, vault, board, onClose }: Props) {
       <div className="dialog-body">
         <div className="dialog-top">
           <h2 className="h">CARD</h2>
-          <span className="role-chip" data-role="viewer">view only</span>
+          <span className="role-chip" data-role="viewer">{held ? "read only" : "view only"}</span>
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={onClose}><IconClose /></button>
         </div>
         <h3 className="card-view-title">{card.title}</h3>
+        {held && <p className="held-note">{AGENT_HOLDS(owner ?? "the board's owner")}</p>}
         <AskBlock card={card} />
         <div className="notes-read">
           <div className="notes-head"><span id="notes-label">Notes</span></div>
           {card.notes.trim()
-            ? <div className="field md-view static" role="group" aria-labelledby="notes-label"><Markdown text={card.notes} fixed={owner ? `View only: checkboxes on ${owner}'s board are for writers to tick.` : "View only: you can't tick these."} /></div>
+            ? <div className="field md-view static" role="group" aria-labelledby="notes-label"><Markdown text={card.notes} fixed={held ? `Read only: this card is ${owner ?? "the owner"}'s agents' to work.` : owner ? `View only: checkboxes on ${owner}'s board are for writers to tick.` : "View only: you can't tick these."} /></div>
             : <p className="attachments-empty">No notes.</p>}
         </div>
         <dl className="card-facts">
@@ -90,7 +94,7 @@ function CardView({ card, lanes, vault, board, onClose }: Props) {
         </div>
       </div>
       <div className="dialog-foot">
-        <span className="view-note">{owner ? `View only on ${owner}'s board.` : "View only."}</span>
+        <span className="view-note">{held ? `Read only: ${owner ?? "the owner"}'s agent card.` : owner ? `View only on ${owner}'s board.` : "View only."}</span>
         <span className="spacer" />
         <button className="btn primary" onClick={onClose}>Close</button>
       </div>
@@ -179,11 +183,26 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
     return { patch, lane: l !== card.laneId ? l : null };
   }
 
+  // A writer can't add or remove the tags that direct the owner's agents. Said here, with the
+  // dialog still open and the field still editable, because the server would refuse the save.
+  const [error, setError] = useState("");
+  function refusedTag(patch: { title?: string; tags?: string[] }): boolean {
+    if (mode !== "writer") return false;
+    const who = owner ?? "the board's owner";
+    const inTags = patch.tags ? ownerTagTouched(card.tags ?? [], patch.tags) : null;
+    const inTitle = patch.title !== undefined ? ownerTagTouched([], [], patch.title) : null;
+    if (inTags) setError(`${OWNER_TAG_NOTE(inTags, who)} ${(card.tags ?? []).includes(inTags) ? `Put ${inTags} back in Tags` : `Take ${inTags} out of Tags`} to save.`);
+    else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who)} Take #${inTitle} off the end of the title to save.`);
+    return !!(inTags || inTitle);
+  }
+
   function save() {
     const { patch, lane: to } = pending();
+    if (refusedTag(patch)) return false;
     if (Object.keys(patch).length) onSave(patch);
     if (to) onMove(to);
     onClose();
+    return true;
   }
 
   // The Move to buttons, shown on touch screens, where dragging a card to another lane is the
@@ -191,6 +210,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   // keeps the other edits, moves the card, and closes, the way Mark done does.
   function moveNow(to: string) {
     const { patch } = pending();
+    if (refusedTag(patch)) return;
     if (Object.keys(patch).length) onSave(patch);
     onMoveNow(to);
     onClose();
@@ -213,7 +233,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           <h2 className="h">CARD</h2>
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={guard.requestClose}><IconClose /></button>
         </div>
-        <TitleInput value={title} onChange={setTitle} onEnter={save} />
+        <TitleInput value={title} onChange={(v) => { setTitle(v); if (error) setError(""); }} onEnter={save} />
         <CardSession cardId={card.id} />
         {/* Save and close first, like answering a question: the link leaves the board. */}
         <NoAgentLine card={card} before={save} />
@@ -283,7 +303,8 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={save} />
+        <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} />
+        {error && <div className="dialog-error" role="alert">{error}</div>}
         {filesNote ? <NoFiles note={filesNote} /> : (
           <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} board={board} />
         )}
@@ -297,7 +318,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
         {!held && <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>}
         <span className="spacer" />
         {onToggleDone && (!held || isDone) && (
-          <button className="btn" onClick={() => { save(); onToggleDone(); }}>
+          <button className="btn" onClick={() => { if (save()) onToggleDone(); }}>
             {isDone ? <><IconUndo />Reopen</> : <><IconCheck />Mark done</>}
           </button>
         )}

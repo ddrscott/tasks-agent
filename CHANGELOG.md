@@ -21,13 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Encryption dialog says up front when a board can't be encrypted because it's shared, with a button to Members, and Members says when a board can't be shared because it's encrypted
 - An invite link opens a page that shows who invited you, the role, and what that role can do, with Accept and Decline. It only works signed in as the address it was sent to, and it brings you back to the invite after you sign in. Open it again after you've accepted and it says you're already on the board, with a button to open it
 - A board switcher next to the logo, once someone has shared a board with you: your board, and each shared one with your role. The open board is in the address, so a reload or a bookmark comes back to it
-- A shared board says whose it is and what you can do on it. A viewer can read everything and change nothing; a writer can change cards, and lanes, undo, questions, and board settings stay with the owner
+- A shared board says whose it is and what you can do on it. A viewer can read everything and change nothing; a writer can change cards, and lanes, undo, questions, agent cards, and board settings stay with the owner
 - Leave a shared board from the account menu
 - A shared board shows who last changed each card, and whether an agent or the assistant did it for them
 - When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened. A removed member's tabs are closed within a moment, every one of them
 - When someone deletes a card on a shared board, everyone else with it open sees who did and what it was called, and the owner's message has Undo. The deletion goes in the audit log with the card's title and the lane it was in
 - The pricing section and the terms say what Pro buys: team boards, how many people a board holds, that members join free, what happens if Pro ends, who owns the cards, and that a viewer can copy what they can read. Members has the same answers under `// HOW_SHARING_WORKS`
 - A shared board holds up under a member's script: changes sent faster than a person could are told to slow down, a member can't grow someone's board past 1,000 cards or 1 MB, and a burst of changes reaches everyone else's tab a few times a second instead of once per change
+- On a shared board your agents take orders from you alone. The tags that direct them (`#agent`, `#gauntlet`, `#needs-ceo`, `#ship-ok`) are the owner's: a member can't put one on a card or take one off, and a card tagged `#agent` or `#gauntlet` is read only to members and says so. A member who types one gets the reason, with what they typed still in the box
+- Every line on the agent event feed says who made the change (`by`), and only the owner's changes are ever sent. Over MCP, `get_card` and `get_board` say when a card was last changed by a member, and the working rules tell agents that only the owner gives them work or answers
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

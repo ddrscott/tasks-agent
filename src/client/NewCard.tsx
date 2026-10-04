@@ -3,8 +3,10 @@
 // card. Files wait in the dialog and upload once the card exists to hang them on.
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
-import { plainError } from "../member-rules";
-import { useEffect, useRef, useState } from "react";
+import { isOwnerTag, plainError } from "../member-rules";
+import { useContext, useEffect, useRef, useState } from "react";
+import { AskOwnerContext } from "./Ask";
+import { OWNER_TAG_NOTE } from "./member";
 import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
@@ -50,6 +52,8 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
   // Set once the card exists. From then on Add card only retries the files that didn't upload.
   const [addedId, setAddedId] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  // Set on a board someone shared with you: the owner's email. The tags that direct their agents are theirs.
+  const owner = useContext(AskOwnerContext);
 
   // showModal() would put focus on the X. The title is where typing starts.
   useModal(ref, { focus: (dialog) => dialog.querySelector<HTMLTextAreaElement>(".title-input")?.focus() });
@@ -110,6 +114,14 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
     try {
       if (!id) {
         const split = moveTitleTags();
+        // A member can't tag a card for the owner's agents. Said before anything is sent: the
+        // tag is in the Tags field by now, where it can be seen and taken out.
+        const ownerTag = owner ? split.tags.find(isOwnerTag) : undefined;
+        if (ownerTag) {
+          setError(`${OWNER_TAG_NOTE(ownerTag, owner!)} Take ${ownerTag} out of Tags to add this card.`);
+          setBusy(false);
+          return;
+        }
         id = await onAdd({
           laneId: lanes.some((l) => l.id === lane) ? lane : laneId,
           title: split.title, notes, due: due || null,
@@ -172,7 +184,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} />
+        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} placeholder={owner ? "client urgent" : undefined} />
         {error && <div className="dialog-error" role="alert">{error}</div>}
         {filesNote ? <NoFiles note={filesNote} /> : (
         <div className={`attachments${over ? " over" : ""}`}>

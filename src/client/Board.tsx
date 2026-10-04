@@ -8,7 +8,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock, AskOwnerContext } from "./Ask";
-import { ByFace, type Mode } from "./member";
+import { agentHeld, ByFace, type Mode } from "./member";
 import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 
@@ -432,7 +432,9 @@ function LaneView(props: Props & {
             <SortableCard
               key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle}
               // No check for a viewer, and none for a writer on a card whose question is still open: the server refuses both.
-              canToggle={props.hasDone && canCards && (owns || props.isDone || !c.ask)} locked={!canCards}
+              // An agent's work order doesn't lift or tick for a writer either, and says why on its face.
+              canToggle={props.hasDone && canCards && !agentHeld(props.mode, c) && (owns || props.isDone || !c.ask)} locked={!canCards || agentHeld(props.mode, c)}
+              held={agentHeld(props.mode, c)}
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
@@ -449,8 +451,10 @@ function LaneView(props: Props & {
 
 function SortableCard(p: {
   card: Card; isDone: boolean; flash: boolean; canToggle: boolean; faded: boolean; tagFilter: string | null;
-  /** A viewer's card: it opens, and that's all. */
+  /** A viewer's card, or an agent's work order on a writer's board: it opens, and that's all. */
   locked?: boolean;
+  /** An agent's work order, as a writer sees it: the face says whose it is. */
+  held?: boolean;
   onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void; onTag(tag: string): void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id, disabled: !!p.locked });
@@ -477,7 +481,7 @@ function SortableCard(p: {
 
 /** Exported so the signed-out landing page can draw sample cards with the real markup. */
 export function CardFace(p: {
-  card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null;
+  card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null; held?: boolean;
   onToggle?(c: Card): void; onTag?(tag: string): void;
 }) {
   const { card } = p;
@@ -500,6 +504,8 @@ export function CardFace(p: {
         <div className="card-title">{card.title}</div>
         <CardPresence cardId={card.id} />
         {!p.overlay && <AskBlock card={card} compact />}
+        {/* A writer can read an agent's work order and not change it. Said here, the way a question says who it's waiting on. */}
+        {p.held && !p.overlay && <p className="card-held">{boardOwner ?? "The owner"}'s agent card. Read only.</p>}
         {/* What the agent last said it's doing, so nobody opens the card to find out. An open question says it better, and a done card is done. */}
         {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
         {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : `${boardOwner ? `${boardOwner}'s` : "Your"} answer. The agent hasn't written a new STATUS line yet.`}>{status.text}</div>}

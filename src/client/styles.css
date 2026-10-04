@@ -1590,6 +1590,9 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .ask-opt.static.rec, .ask-opt.static.rec:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
 .ask-owner { margin: 0; font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .ask-owner::before { content: "$ "; color: var(--accent); font-weight: 700; }
+/* On a writer's board, an agent's work order says whose it is, the way a question says who it waits on. */
+.card-held { margin: 6px 0 0; font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.card-held::before { content: "$ "; color: var(--accent); font-weight: 700; }
 .dialog-body .held-note { flex: none; margin: 0; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
 
 /* Who made the last change: on the card face when it wasn't you, and in the open card. */

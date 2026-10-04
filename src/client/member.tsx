@@ -4,7 +4,7 @@
 // decides a role; it only turns the server's answer into what to show and what to say.
 
 import { createContext, useContext } from "react";
-import type { ActivityFrame } from "../member-rules";
+import { isAgentCard, isOwnerTag, ownerTagInTitle, type ActivityFrame } from "../member-rules";
 import type { By, Card } from "../shared";
 
 /** A member's way into someone else's board, as the server reports it. */
@@ -59,7 +59,7 @@ export function bannerText(a: MemberAccess): { lead: string; rest: string } {
     return { lead: `${o}'s board is view only for now.`, rest: "Their Pro plan lapsed. Nothing was deleted, and you can change cards again when the plan is back." };
   }
   if (a.effective === "writer") {
-    return { lead: `You're a writer on ${o}'s board.`, rest: "You can change cards. Lanes, undo, questions, and board settings are the owner's." };
+    return { lead: `You're a writer on ${o}'s board.`, rest: "You can change cards. Lanes, undo, questions, agent cards, and board settings are the owner's." };
   }
   return { lead: `You're viewing ${o}'s board. View only.`, rest: `To change cards, ask ${o} to make you a writer.` };
 }
@@ -84,6 +84,26 @@ export function accessChangeText(was: MemberAccess, now: MemberAccess): string |
 
 /** Why the server turned a writer's change down, when the app can say it before they try. */
 export const ASK_HOLDS = (owner: string) => `This card has a question waiting on ${owner}. It can't be finished or deleted until they answer.`;
+
+// ── The owner's agents' cards and tags (OWNER_TAGS in member-rules.ts) ─────────────────────
+
+/** A card a writer can read and not change: it's a work order for the owner's agents. */
+export const agentHeld = (mode: Mode | undefined, card: Card) => mode === "writer" && isAgentCard(card);
+/** Said on such a card, in the open card. */
+export const AGENT_HOLDS = (owner: string) =>
+  `This card is a work order for ${owner}'s agents (it's tagged #agent or #gauntlet), so only ${owner} can change, move, or delete it.`;
+/** Said when a member's tags would add or remove one of the owner's. */
+export const OWNER_TAG_NOTE = (tag: string, owner: string) =>
+  `Only ${owner} can put #${tag} on a card or take it off. Their agents take orders from that tag.`;
+/**
+ * The owner tag a member's edit would add or remove, or that their title ends in, if any. The
+ * server refuses the same thing (memberChangeError); this is so the dialog can say it before
+ * anything is sent, with the field still open to fix.
+ */
+export function ownerTagTouched(before: string[], after: string[], title?: string): string | null {
+  const changed = [...after.filter((t) => !before.includes(t)), ...before.filter((t) => !after.includes(t))].find(isOwnerTag);
+  return changed ?? (title !== undefined ? ownerTagInTitle(title) : null);
+}
 
 // ── Who made the last change ────────────────────────────────────────────────────────────────
 

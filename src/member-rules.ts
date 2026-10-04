@@ -4,7 +4,7 @@
 // them on their own.
 
 import { doneLaneId } from "./lanes";
-import type { Board, Card } from "./shared";
+import { AGENT_TAG, cleanTag, forAgent, GAUNTLET_TAG, NEEDS_CEO_TAG, SHIP_OK_TAG, type Board, type Card } from "./shared";
 
 /** What an invite grants. The owner isn't a member: they're whoever the board's Durable Object is named after. */
 export type MemberRole = "viewer" | "writer";
@@ -118,6 +118,50 @@ export const MEMBER_LIMITS = {
   deletesPerDay: 200,
 } as const;
 
+// ---------- the tags that direct the owner's agents ----------
+
+/**
+ * The owner's tags, the one list of them. The owner's agents run on the owner's machine with
+ * the owner's privileges, and these tags are how the board tells them what to do: `agent` and
+ * `gauntlet` make a card a work order, `needs-ceo` coming off says "the owner answered", and
+ * `ship-ok` lets a gauntlet agent merge and deploy. So a member, writer or viewer, can't put
+ * one on a card or take one off, by any path, and can't change, move, delete, or attach to a
+ * card that carries `agent` or `gauntlet`. The write guard below enforces it, and the app
+ * reads this list to leave those controls out for a member.
+ */
+export const OWNER_TAGS: readonly string[] = [AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG, SHIP_OK_TAG];
+export const isOwnerTag = (tag: string) => OWNER_TAGS.includes(tag);
+/** A card that's a work order for the owner's agents (`agent` or `gauntlet`): read only to members. */
+export const isAgentCard = (c: Pick<Card, "tags">) => forAgent(c as Card);
+/** Which owner tag a member is trying to add or remove between two versions of a card, if any. */
+function ownerTagChanged(p: Card | undefined, c: Card): string | null {
+  return OWNER_TAGS.find((t) => !!p?.tags?.includes(t) !== !!c.tags?.includes(t)) ?? null;
+}
+/**
+ * An owner tag typed at the end of a title ("Do evil #agent"), the way quick add reads tags.
+ * It isn't a tag there, but it looks like one that took, so a member's title can't end in it.
+ */
+export function ownerTagInTitle(title: string): string | null {
+  const words = title.trim().split(/\s+/);
+  while (words.length > 1) {
+    const w = words.pop()!;
+    if (!/^#[\p{L}\p{N}_-]{1,32}$/u.test(w)) return null;
+    if (isOwnerTag(cleanTag(w))) return cleanTag(w);
+  }
+  return null;
+}
+export const ownerTagError = (tag: string) =>
+  `[owner_tag] Only the board's owner can put #${tag} on a card or take it off. The owner's agents take their orders from that tag.`;
+export const AGENT_CARD = "[agent_card] That card is a work order for the owner's agents (it's tagged #agent or #gauntlet). Only the board's owner can change, move, or delete it.";
+
+/** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. */
+function memberCardError(p: Card | undefined, c: Card): string | null {
+  if (p && isAgentCard(p)) return AGENT_CARD;
+  const tag = ownerTagChanged(p, c) ?? (typeof c.title === "string" && p?.title !== c.title ? ownerTagInTitle(c.title) : null);
+  if (tag) return ownerTagError(tag);
+  return cardTooBig(c);
+}
+
 /** The most cards one `addCards` call takes: a pasted list. A longer paste goes in as several calls. */
 export const ADD_CARDS_MAX = 200;
 
@@ -139,8 +183,8 @@ const BY_ROOM = 320;
  * the whole change afterwards; this only says the same thing earlier and one card at a time.
  */
 export function takeRoom(room: Room, c: Card): string | null {
-  const big = cardTooBig(c);
-  if (big) return big;
+  const no = memberCardError(undefined, c);
+  if (no) return no;
   if (room.cards < 1) return BOARD_FULL_CARDS;
   const size = JSON.stringify(c).length + 1 + BY_ROOM;
   if (size > room.bytes) return BOARD_FULL_BYTES;
@@ -164,8 +208,9 @@ function cardTooBig(c: Card): string | null {
  * Why a writer's change is refused, or null when it's allowed. A writer changes cards and
  * nothing else, so this compares the board before and after instead of trusting which action
  * was called: lanes (names, order, sort, roles), the theme, encryption, and every other board
- * setting have to come out identical, and a question on a card stays the owner's to answer or
- * take back. It runs on every change a member makes, whatever path it took.
+ * setting have to come out identical, a question on a card stays the owner's to answer or
+ * take back, and so do the tags that direct the owner's agents and the cards that carry them
+ * (OWNER_TAGS above). It runs on every change a member makes, whatever path it took.
  */
 export function memberChangeError(before: Board, after: Board): string | null {
   const { cards: _b, ...restBefore } = before;
@@ -176,10 +221,12 @@ export function memberChangeError(before: Board, after: Board): string | null {
   const done = doneLaneId(after.lanes);
   for (const c of after.cards) {
     const p: Card | undefined = was.get(c.id);
-    // A card this change added or touched has to fit the limits; one it left alone is the owner's business.
+    // A card this change added or touched has to be one a member may make: not an agent's
+    // work order, no owner tag put on or taken off, and inside the limits. One it left alone
+    // is the owner's business.
     if (!p || !same(p, c)) {
-      const big = cardTooBig(c);
-      if (big) return big;
+      const no = memberCardError(p, c);
+      if (no) return no;
     }
     // A question is asked by an agent and answered by the owner. A member's change can't add,
     // edit, answer, or clear one, and can't rewrite the last answer either.
@@ -188,8 +235,14 @@ export function memberChangeError(before: Board, after: Board): string | null {
     if (c.ask && done && c.laneId === done && p?.laneId !== done) return "That card has a question waiting on the board's owner.";
   }
   for (const p of before.cards) {
-    if (p.ask && !now.has(p.id)) return "That card has a question waiting on the board's owner.";
+    if (now.has(p.id)) continue;
+    if (isAgentCard(p)) return AGENT_CARD;
+    if (p.ask) return "That card has a question waiting on the board's owner.";
   }
+  // The order of the agents' cards is the order they're worked in ("take the top card"), so it
+  // has to come out the same. Moving any other card never changes it.
+  const queue = (b: Board) => b.cards.filter(isAgentCard).map((c) => c.id).join();
+  if (queue(before) !== queue(after)) return AGENT_CARD;
   if (after.cards.length > before.cards.length && after.cards.length > MEMBER_LIMITS.cards) {
     return BOARD_FULL_CARDS;
   }

@@ -110,7 +110,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     }, async (input: { tag?: string }) => {
       const no = await locked();
       if (no) return no;
-      const board = await agent.describe(input?.tag);
+      const board = await agent.describe(input?.tag, user.email);
       // Claims sit beside the board, not in it (presence.ts), so they're added here.
       const view = await presence.view();
       const lines: string[] = [];
@@ -133,7 +133,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     }, async (input: { id: string; files?: boolean }) => {
       const no = await locked();
       if (no) return no;
-      const card = await agent.cardDetail(input.id);
+      const card = await agent.cardDetail(input.id, user.email);
       if (!card) return text(`There is no card with id ${input.id}.`, true);
       const content: Part[] = [{ type: "text", text: card.text }];
       if (input.files === false) return { content };
@@ -218,7 +218,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const waiting: string[] = [];
         const ready: string[] = [];
         for (const id of ids) {
-          const card = await agent.cardDetail(id);
+          const card = await agent.cardDetail(id, user.email);
           const state = card ? askState(card.text) : null;
           // A card the owner moved to the done lane is finished, question and all: its claim ended
           // there too (Presence.finish), and the rules never pick up a card in that lane.

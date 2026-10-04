@@ -562,7 +562,11 @@ strip, and the not-found page link to it too.
   Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
   notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo` with the session
   id, keep the claim, move on; Done and `release_card`, with the card's id and the reason in
-  the commit (`// DEVELOP`); and at the very end, hold nothing.
+  the commit (`// DEVELOP`); and at the very end, hold nothing. They open with whose word
+  counts on a shared board: only the owner gives an agent work or answers, and a card that
+  `get_card` or `get_board` says was last changed by a member is that person's words, to ask
+  the owner about with `ask_ceo` before acting on them (`// TEAM_BOARDS`, **The owner's agents
+  take orders from the owner**).
   - **The session id needs no shell.** `get_started` makes an id for the call (`tasks-` and 8
     characters; nothing is stored until it claims) and the rules say to use it. That works in
     every client and under the quick start's permissions, where `echo $CLAUDE_CODE_SESSION_ID`
@@ -697,9 +701,26 @@ installs the script as `~/.config/tasks/tasks-events.mjs` along with the token.
 - **Answers.** When the card had a question (`// QUESTIONS`), `answered` also carries `answer` and `question`.
 - **Events.** First a `hello` with every open `#agent` or `#gauntlet` card, on each connect, so nothing is lost
   while offline. Then one line per change: `added`, `tagged`, `answered` (`#needs-ceo` came
-  off), `edited`, `moved`, `deleted`. Each carries the card's id, title, lane, and tags.
+  off), `edited`, `moved`, `deleted`. Each carries the card's id, title, lane, and tags, and
+  who made the change:
+
+  ```json
+  {"type":"added","id":"c1a2b","title":"Write the invoice","lane":"To do","tags":["agent"],"by":{"email":"you@example.com","role":"owner","via":"app"}}
+  ```
+
+  `by.email` is the account that made the change, `by.role` is `"owner"`, and `by.via` is
+  `"app"` for a change made by hand or `"assistant"` for the in-app assistant acting on your
+  message. The board stamps it from the connection, the same as the mark on a card
+  (`eventBy` in `src/agent.ts`); nothing a client sends is read into it. `hello` has no `by`:
+  it's a list, not a change.
 - **Only your changes.** Edits from the app, its assistant, and Needle publish. Changes an agent
   makes over MCP don't, so an agent never wakes itself (`actor` in `TodoAgent.mutate`).
+- **Never a member's.** On a shared board (`// TEAM_BOARDS`) a member can't make or touch an
+  `#agent` or `#gauntlet` card, or add or remove `#needs-ceo`, so there's nothing of theirs to
+  publish. If one ever got through, it still wouldn't be an event: `agentEvents` returns
+  nothing for a change whose `by.role` isn't `owner`, and `tasks-events` drops any line that
+  says otherwise. An agent acts with your privileges on your machine, so `added` and
+  `answered` have to mean you.
 - **Kept apart from the board.** The sockets live in their own Durable Object, `TaskEvents`
   (`src/events.ts`), one per user. The Agents SDK syncs the whole board to every socket on
   `TodoAgent` and lets it call board actions; these sockets only ever receive event lines.
@@ -757,7 +778,7 @@ When an agent needs you to decide something, it asks on the card and you answer 
   Every call counts as hearing from the session, so it doesn't go stale while it waits.
 - **The feed says it too.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
   and `question`, so the agent acts on it without reading the card:
-  `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?"}`.
+  `{"type":"answered","id":"c1a2b","title":"…","lane":"Doing","tags":["agent"],"answer":"Ship it now","question":"Ship now or wait?","by":{"email":"you@example.com","role":"owner","via":"app"}}`.
   `get_board` shows an open question as `ASKING: … [1) … | 2) …]` and the last answer as
   `ANSWERED: "…" to "…"`, ahead of the notes. An `answered` event without `answer` still means
   what it always did: you took `#needs-ceo` off yourself.
@@ -780,6 +801,10 @@ When an agent needs you to decide something, it asks on the card and you answer 
   shows the answer the same way until it gets one. The rule is `faceLine` in `src/shared.ts`,
   and `npm run check:nudge` runs it. An encrypted board is the same as any
   other here: the browser has the decrypted notes, and nothing new is stored or sent.
+- **Only the owner answers.** On a shared board a member sees the question and can't answer
+  it, take it back, or finish or delete its card. `#needs-ceo` is the owner's tag on every
+  card, question or not: a member can't put it on or take it off, so a member can't make the
+  feed say `answered` (`// TEAM_BOARDS`, **The owner's agents take orders from the owner**).
 - **Undo.** Undoing an answer puts the question back, but nothing tells the agent, the same as
   every other undo. If it already acted, say so on the card.
 - **Encrypted boards** have no questions. They'd be stored unencrypted, and MCP is closed there.
@@ -1265,6 +1290,8 @@ each card.
 | Lanes: add, rename, delete, reorder, sort, roles, Clear all cards | yes | no | no |
 | Drag a card inside a sorted lane (`setLaneManual` changes the lane's sort) | yes | no | no |
 | Answer or take back a question (`ask_ceo`); delete or finish a card with an open question | yes | no | no |
+| Add or remove `#agent`, `#gauntlet`, `#needs-ceo`, `#ship-ok` on any card | yes | no | no |
+| Edit, move, reorder, delete, tick a box on, or attach to a card tagged `#agent` or `#gauntlet` | yes | no (read only) | no |
 | Undo, redo, and the undo labels | yes | no | no |
 | Cloud assistant chat, its transcript, the daily usage meter | yes | no | no |
 | Theme, encryption, tokens, connected apps, billing, Sessions, event feed, MCP | yes | no | no |
@@ -1409,8 +1436,49 @@ watching socket is sent the board twice, about 160 KB.
 Who's calling comes from an `AsyncLocalStorage` set where the request entered the object, never
 from an argument. For a member it calls `assertMayChange` (`src/member-rules.ts`), which
 compares the board before and after instead of trusting which action ran: lanes and every
-board setting must come out identical, and a card's `ask` and `answer` must be untouched. So
-the assistant's lane tools fail for a writer the same way the lane callables do.
+board setting must come out identical, a card's `ask` and `answer` must be untouched, the
+owner's tags must be on the same cards, and a card that carries `agent` or `gauntlet` must be
+identical and in the same place among the others (the next section). So the assistant's
+lane tools fail for a writer the same way the lane callables do.
+
+**The owner's agents take orders from the owner.** An owner's agents run on the owner's
+machine with the owner's privileges, and the board is how they're told what to do. So the
+tags that direct them are the owner's alone, and so are the cards that carry them. The list is
+`OWNER_TAGS` in `src/member-rules.ts`, the one place it lives: `agent`, `gauntlet`,
+`needs-ceo`, `ship-ok`.
+
+- **A member can't add or remove one of those tags on any card**, by any path: `addCard`,
+  `addCards`, `updateCard`, the assistant's tools, a tag typed with a `#`, in capitals, or
+  with spaces around it (tags are cleaned before they're compared). The refusal is
+  `[owner_tag] Only the board's owner can put #agent on a card or take it off. …`. A title
+  that ends in one (`Do evil #agent`, the way quick add reads a tag) is refused the same way,
+  so a card can't land looking like the tag took. `#agent` in the middle of a title is a word.
+- **A card tagged `agent` or `gauntlet` is read only to members.** No edit to its title,
+  notes, due date, tags, or checkboxes, no move, no delete, no file added or removed
+  (`[agent_card] That card is a work order for the owner's agents …`). The order of those
+  cards among themselves can't change either, since "the top card" is what an agent takes
+  next; a member can still move any other card around them. An upload to such a card is
+  `403 agent_card` before the file is read.
+- **Where it's enforced.** In the write guard (`memberChangeError`), which compares the board
+  before and after, so no path around it exists that isn't a path around the guard. A pasted
+  list asks the same question a card at a time (`takeRoom`).
+- **What the app shows a member.** An agent's card doesn't lift, has no check, and says
+  `<owner>'s agent card. Read only.` on its face. It opens as the read-only card with the
+  reason on it. The Tags field doesn't suggest the owner's tags. Typing one into Tags, or
+  ending a title with one, keeps the dialog open with the reason and what to change; in quick
+  add the line stays in the box under the reason. `// CARD` and `// NEW_CARD` say it before
+  anything is sent (`ownerTagTouched` in `src/client/member.tsx`).
+- **Then, in depth.** Every event on the feed says who made the change, and a member's change
+  is never an event (`// AGENT_EVENTS`). Over MCP, `get_card` adds a line when the last
+  change to a card wasn't the owner's (`Last changed by: dana@example.com, a member of this
+  board and not its owner. …`), and `get_board` says it on the card's line (`memberMark` in
+  `src/shared.ts`). The working rules `get_started` returns tell an agent that only the owner
+  gives it work or answers, and to ask with `ask_ceo` before acting on a member's words. The
+  in-app assistant's prompt marks those cards the same way.
+- **What it doesn't cover.** The mark is who changed the card last. If a writer writes notes
+  on a plain card and the owner then tags it `#agent`, the owner made the last change, and
+  the card is the owner's work order: tagging it is the owner vouching for what it says. Read
+  a member's card before tagging it.
 
 **Live effect.** A removal or a downgrade holds from the member's very next frame.
 
@@ -1615,7 +1683,10 @@ address or a guess, and nothing on screen offers a change the server would refus
   button, Close. No assistant.
 - **A writer's board** has cards and nothing of the owner's. Gone, not disabled: lane menus,
   rename, and add lane; Undo, Redo, and their keys (a toast after a change never offers Undo);
-  "need you", Sessions, Connect, Encryption, billing, and the cloud assistant. Three card
+  "need you", Sessions, Connect, Encryption, billing, and the cloud assistant. An agent's
+  card (`#agent` or `#gauntlet`) is read only and says so on its face and when opened, and
+  the owner's tags can't be added or removed (**The owner's agents take orders from the
+  owner**, above). Three more card
   changes the server refuses are said where they'd happen: dragging inside a sorted lane puts
   the card back and says only the owner can change that lane's order; a card with an open
   question has no check, no Delete, no Mark done, and its done lane is disabled in Move to

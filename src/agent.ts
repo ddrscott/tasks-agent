@@ -8,12 +8,12 @@ import * as ops from "./shared";
 import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type By, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
-import { agentEvents, agentQueue, type TaskEvent } from "./events";
+import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events";
 import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
-  ADD_CARDS_MAX, assertMayChange, CLOSE_FLOOD, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
   MEMBER_LIMITS, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
@@ -583,7 +583,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.reindex(before, after);
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
-    if (actor === "you") this.publish(agentEvents(before, after));
+    if (actor === "you") this.publish(agentEvents(before, after, this.eventBy()));
     this.endClaims(before, after, actor);
     return after;
   }
@@ -606,6 +606,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const presence = this.env.Presence.get(this.env.Presence.idFromName(this.name));
     if (settled.length) this.ctx.waitUntil(presence.settle(settled).catch((e: Error) => console.warn("settling questions failed", e.message)));
     if (ended.length) this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
+  }
+
+  /** Who to name on a feed event: the caller's email, whether they own the board, and whether the assistant did it for them. */
+  private eventBy(): EventBy {
+    const c = callers.getStore();
+    return { email: c?.email ?? this.ownerEmail() ?? "", role: c?.kind === "member" ? "member" : "owner", via: c?.via === "assistant" ? "assistant" : "app" };
   }
 
   /** Tell any listening agent session (events.ts) about changes you made to #agent cards. */
@@ -800,7 +806,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const board = callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" },
         () => this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent"));
       const card = board.cards.find((c) => c.id === input.id)!;
-      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG) };
+      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG, email ?? this.ownerEmail()) };
     } catch (e) {
       return { ok: false, summary: (e as Error).message };
     }
@@ -955,7 +961,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         ids = r.ids;
         return r.board;
       }, group, actor);
-      return { ok: true, summary, board: ops.describeBoard(board), ids };
+      return { ok: true, summary, board: ops.describeBoard(board, undefined, this.ownerEmail()), ids };
     } catch (e) {
       return { ok: false, summary: plainError((e as Error).message) };
     }
@@ -984,9 +990,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */
-  cardDetail(id: string): { text: string; attachments: Attachment[]; done: boolean } | null {
+  cardDetail(id: string, owner?: string): { text: string; attachments: Attachment[]; done: boolean } | null {
     if (this.state.sealed) return null;
-    const text = ops.describeCard(this.state, id);
+    // `owner` is the token's owner (mcp.ts): a card last changed by anyone else says so.
+    const text = ops.describeCard(this.state, id, owner ?? this.ownerEmail());
     if (text === null) return null;
     const card = this.state.cards.find((c) => c.id === id);
     // Done is being in the done lane, the same rule that ends a claim (endedCards in presence-shared.ts).
@@ -999,9 +1006,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** The board as plain text, the same view the chat model gets. */
-  describe(tag?: string): string {
+  describe(tag?: string, owner?: string): string {
     if (this.state.sealed) return SEALED_NOTICE;
-    return ops.describeBoard(this.state, tag ? ops.cleanTag(tag) : undefined);
+    return ops.describeBoard(this.state, tag ? ops.cleanTag(tag) : undefined, owner ?? this.ownerEmail());
   }
 
   /**
@@ -1155,8 +1162,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** What the upload endpoint may accept: files encrypted under `kid`, and plain ones only while turning encryption off. */
-  uploadPolicy(memberId?: string): { kid: string | null; plainStaging: boolean; slow?: true } {
+  uploadPolicy(memberId?: string, cardId?: string | null): { kid: string | null; plainStaging: boolean; slow?: true; refused?: string } {
     const kid = this.state.sealed?.kid ?? null;
+    // An agent's work order takes no files from a member. Said here, before the file is read
+    // or stored; the write guard would refuse it afterwards anyway.
+    const card = memberId && cardId ? this.state.cards.find((c) => c.id === cardId) : undefined;
+    if (card && isAgentCard(card)) return { kid, plainStaging: false, refused: AGENT_CARD };
     // A member's uploads draw on the same bucket as their socket, and are turned away here,
     // before the file is read or stored.
     if (memberId && !this.spend(memberId).ok) return { kid, plainStaging: false, slow: true };
@@ -1288,7 +1299,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const result = streamText({
       model: workersai(this.env.CHAT_MODEL as Parameters<typeof workersai>[0]),
       abortSignal: options?.abortSignal,
-      system: systemPrompt(this.state, today),
+      system: systemPrompt(this.state, today, this.ownerEmail()),
       messages: pruneMessages({
         messages: await convertToModelMessages(this.messages),
         reasoning: "all",
