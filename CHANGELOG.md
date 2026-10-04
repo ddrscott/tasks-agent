@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/tasks/pricing` opens the front page at its pricing section, signed in or not
 
 ### Changed
+- The privacy policy says what's kept when an agent claims a card: a session record and the claim, with or without the Claude Code hooks. It also covers the quick start's access token, questions and answers on cards, and the sign-in try counts kept by email and IP address
 - The Connect page opens on Claude Code and leads with coding agents: Claude Code, Cursor, and Codex come first, with Claude, ChatGPT, and Glean still there
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
