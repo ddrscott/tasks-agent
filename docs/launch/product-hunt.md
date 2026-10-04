@@ -236,7 +236,7 @@ Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP c
 **What about privacy?**
 
 ```
-The board holds card text and the files you attach. Session reporting is presence, not a log: session id, project folder, machine, state, and one line like "Edit: server.ts". No transcripts, prompts, or commands are stored. You can also encrypt the board with a passphrase in your browser, and then the server only has ciphertext. The catch is that an encrypted board is closed to outside agents, since the server can't read it either.
+The board holds card text and the files you attach. Session reporting is presence, not a log: session id, project folder, machine, state, one line like "Edit: server.ts", and the question an agent is waiting on. No transcripts, prompts, or commands are stored. You can also encrypt the board with a passphrase in your browser, and then the server only has ciphertext. The catch is that an encrypted board is closed to outside agents, since the server can't read it either.
 ```
 
 **Does my code leave my machine?**
