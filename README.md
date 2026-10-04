@@ -64,6 +64,10 @@ run ahead of whatever serves the zone.
   same one the Connect page shows), and `// PRICING` (see `// BILLING`). Nothing on the page
   claims users, stars, or quotes we don't have. Arriving with `?next=` (an agent's OAuth
   consent) shows only the form.
+- **Not found.** An address under `/tasks/` that isn't a page gets `src/client/NotFound.tsx`,
+  signed in or not. The pages are listed in `KNOWN` there: the board, `connect`, `privacy`,
+  `terms`, `demo`. Add a new page to that list. The response is still a 200, because the
+  Worker's assets serve the app shell for every unknown path.
 - **First run.** A board with no cards shows `// START_HERE` above its lanes
   (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
   with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
