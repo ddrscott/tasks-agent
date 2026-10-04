@@ -779,7 +779,8 @@ curl -fsSL https://askscottpierce.com/tasks/setup.mjs \
   `tasks-presence.mjs` and `tasks-events.mjs` next to it, and adds the seven hooks below to
   `~/.claude/settings.json`. Nothing else.
 - **What it keeps.** Every hook and setting already in `settings.json`, in order; its hooks go
-  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`.
+  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`
+  and prints that path: with `~` for your home folder, or in full when the file lives somewhere else.
   A second run changes nothing and makes no second backup. An event that already has a hook
   running `tasks-presence.mjs`, from any path, counts as done, so hand-added hooks pointing at
   a checkout aren't doubled. A symlinked `settings.json` is edited where it really lives.
