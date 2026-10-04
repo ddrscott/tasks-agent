@@ -356,6 +356,19 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return this.state.cards.find((c) => c.id === id)?.title ?? null;
   }
 
+  /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */
+  cardDetail(id: string): { text: string; attachments: Attachment[] } | null {
+    if (this.state.sealed) return null;
+    const text = ops.describeCard(this.state, id);
+    if (text === null) return null;
+    return { text, attachments: this.state.cards.find((c) => c.id === id)?.attachments ?? [] };
+  }
+
+  /** Lane names and card counts, for what a write tool echoes over MCP. */
+  laneCounts(): string {
+    return this.state.sealed ? "" : ops.describeLaneCounts(this.state);
+  }
+
   /** The board as plain text, the same view the chat model gets. */
   describe(tag?: string): string {
     if (this.state.sealed) return SEALED_NOTICE;

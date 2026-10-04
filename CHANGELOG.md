@@ -12,12 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sort a lane from its menu by due date, title, newest, oldest, or recently updated — Undo puts it back
 - Attach files while creating a card — they upload as soon as the card is added
 - The Tags field suggests tags you've already used; tap one to add it
+- Agents can read a card in full over MCP with `get_card`: all of the notes, plus attached screenshots and small text files
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
 - Bigger buttons on touch screens, and Theme moves into the account menu on a phone
 - Long card titles wrap in the card dialogs instead of scrolling out of view
+- Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts instead of the whole board
 
 ### Fixed
 - Tapping the search icon on a phone opens search

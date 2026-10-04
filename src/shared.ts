@@ -366,6 +366,42 @@ function validDue(due: string | null | undefined): string | null {
   return due;
 }
 
+/** How much of a card's notes the board listing shows. get_card (mcp.ts) returns the rest. */
+const NOTES_PREVIEW = 120;
+
+/** The start of a card's notes on one line, saying how much was left out so nobody mistakes the preview for the whole note. */
+function previewNotes(notes: string): string {
+  const flat = notes.replace(/\s+/g, " ").trim();
+  return flat.length <= NOTES_PREVIEW ? flat : `${flat.slice(0, NOTES_PREVIEW)}… [+${flat.length - NOTES_PREVIEW} more characters]`;
+}
+
+/** One line per lane with its card count: what a write tool echoes over MCP in place of the whole board. */
+export function describeLaneCounts(b: Board): string {
+  return b.lanes.map((l) => `${l.name} ${laneCards(b, l.id).length}`).join(" · ");
+}
+
+/** Everything on one card, as plain text: the full notes, and each attachment with its id, type, and size. */
+export function describeCard(b: Board, id: string): string | null {
+  const c = b.cards.find((x) => x.id === id);
+  if (!c) return null;
+  const lane = b.lanes.find((l) => l.id === c.laneId);
+  const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+  const lines = [
+    `[${c.id}] ${c.title}`,
+    `Lane: ${lane?.name ?? "?"} (lane id ${c.laneId})`,
+    `Tags: ${c.tags?.length ? c.tags.map((t) => `#${t}`).join(" ") : "(none)"}`,
+    `Due: ${c.due ?? "(none)"}`,
+    `Created: ${c.createdAt}${c.updatedAt && c.updatedAt !== c.createdAt ? ` · updated: ${c.updatedAt}` : ""}`,
+  ];
+  if (c.ask) lines.push(`Asking the owner: ${c.ask.question}`, ...c.ask.options.map((o, i) => `  ${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`));
+  if (c.answer) lines.push(`Owner answered: "${c.answer.answer}" to "${c.answer.question}"`);
+  lines.push(c.attachments?.length
+    ? `Attachments (${c.attachments.length}):\n${c.attachments.map((a) => `  - [${a.id}] ${a.name} (${a.type}, ${kb(a.size)})`).join("\n")}`
+    : "Attachments: (none)");
+  lines.push(c.notes ? `Notes (${c.notes.length} characters):\n${c.notes}` : "Notes: (none)");
+  return lines.join("\n");
+}
+
 /** Plain-text board for the model's context. With `tag`, only the cards carrying it. */
 export function describeBoard(b: Board, tag?: string): string {
   return b.lanes
@@ -374,7 +410,7 @@ export function describeBoard(b: Board, tag?: string): string {
       const lines = cards.map(
         (c) =>
           `  - [${c.id}] ${c.title}${c.tags?.length ? ` ${c.tags.map((t) => `#${t}`).join(" ")}` : ""}` +
-          `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${clean(c.notes, 120)}` : ""}` +
+          `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${previewNotes(c.notes)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : ""),
       );
       return `${l.name} (lane id ${l.id}, ${cards.length} ${tag ? `#${tag} ` : ""}cards)\n${lines.join("\n") || "  (empty)"}`;

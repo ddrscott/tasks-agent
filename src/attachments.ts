@@ -144,7 +144,7 @@ async function download(req: Request, env: Env, user: User, id: string): Promise
   return new Response(obj.body, { headers });
 }
 
-/** /api/attachments routes. Session only: agents see attachment names, not files. */
+/** /api/attachments routes. Session only: agents read files through the MCP get_card tool instead (mcp.ts). */
 export async function handleAttachments(req: Request, env: Env, path: string): Promise<Response | null> {
   if (path !== "/api/attachments" && !path.startsWith("/api/attachments/")) return null;
   const user = await currentUser(req, env);

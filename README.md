@@ -237,12 +237,22 @@ Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, Codex, and any other MCP c
 can work the board. The in-app page at **/tasks/connect** (user menu → Connect an
 agent) shows the server URL, setup steps for each client, connected apps, and tokens.
 
-- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`,
+- **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// SESSIONS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
   can list just its own cards (`tag: "agent"`). `add_cards` and `update_card` take `tags`,
   and `update_card` replaces the whole list.
+- **Reading a card.** `get_board` is the overview: it shows the first 120 characters of each
+  card's notes, says how many more there are (`… [+480 more characters]`), and lists file
+  names. `get_card` returns one card in full: all of the notes, lane, tags, due date, the
+  question and answer, and each attachment's id, type, and size. Attached PNG, JPEG, GIF,
+  and WebP images come back as MCP image content (4 MB each, 8 MB a call), so an agent can
+  look at a screenshot, and text, Markdown, CSV, and JSON files up to 32 KB come back as
+  text. `files: false` skips the contents. It reads R2 under the token owner's own prefix.
+- **What a write returns.** The summary of the change and one line of lane counts
+  (`Board now: To do 21 · Doing 0 · Done 3`). It used to be the whole board, which cost an
+  agent thousands of tokens a call. The in-app assistant still gets the full board.
 - **OAuth (most clients).** The client only needs the URL. It discovers the OAuth
   server, registers itself (Dynamic Client Registration, or a Client ID Metadata
   Document), and sends the person to `/tasks/oauth/authorize`. They sign in if

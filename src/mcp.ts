@@ -19,7 +19,8 @@ export const MCP_PATH = "/tasks/mcp";
 
 const INSTRUCTIONS = `This is the user's personal task board, laid out as kanban lanes. Call get_board to see
 lanes, cards, and card ids, or search_cards to find specific cards on a big board, then use the other
-tools to change it. The last lane is the
+tools to change it. get_board shows only the start of each card's notes and the names of its files:
+call get_card for the full notes and to see attached images. The last lane is the
 done lane: move a card there when the user finished it rather than deleting it. Dates
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
 search_cards to see only those cards. The user can undo any change from the app.
@@ -35,6 +36,22 @@ then shows the card as ANSWERED.`;
 
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
 
+// What get_card sends back of a card's files. Images go as MCP image content, so the agent sees the
+// screenshot; small text files go inline. Anything else is listed by name, type, and size only.
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const TEXT_TYPES = /^(text\/(plain|markdown|csv)|application\/json)$/;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGES_TOTAL_BYTES = 8 * 1024 * 1024;
+const MAX_TEXT_BYTES = 32 * 1024;
+
+function base64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+
+type Part = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
 export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, user: User): Promise<Response> {
   const agent = await getAgentByName(env.TodoAgent, user.id);
   const presence = env.Presence.get(env.Presence.idFromName(user.id));
@@ -46,7 +63,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
 
     server.registerTool("get_board", {
       title: "Get board",
-      description: "Show every lane and card on the board, with ids, due dates, tags, and notes. Pass tag to list only the cards carrying it.",
+      description: "Show every lane and card on the board, with ids, due dates, tags, the start of each card's notes, and the names of its files. Pass tag to list only the cards carrying it. Call get_card for a card's full notes and attachments.",
       inputSchema: z.object({ tag: z.string().optional().describe("Only cards with this tag, like agent") }),
       annotations: { readOnlyHint: true },
     }, async (input: { tag?: string }) => {
@@ -62,6 +79,49 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         lines.push(`  - [${c.cardId}] ${title} — claimed by ${describeSession(view.sessions.find((s) => s.id === c.sessionId) ?? null, view.now)}`);
       }
       return text(lines.length ? `${board}\nClaimed by a live session (skip these unless the session is yours):\n${lines.join("\n")}` : board);
+    });
+
+    server.registerTool("get_card", {
+      title: "Get card",
+      description:
+        "Show one card in full: the whole of its notes (get_board cuts them short), lane, tags, due date, any question " +
+        "asked of the owner and their answer, and its attachments. Attached images come back as images you can look at, " +
+        "and small text files as text. Call this before you act on a card whose notes or files you haven't read in full.",
+      inputSchema: z.object({
+        id: z.string().describe("Card id like c1a2b"),
+        files: z.boolean().optional().describe("false to list attachments without their contents. Default true"),
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { id: string; files?: boolean }) => {
+      const no = await locked();
+      if (no) return no;
+      const card = await agent.cardDetail(input.id);
+      if (!card) return text(`There is no card with id ${input.id}.`, true);
+      const content: Part[] = [{ type: "text", text: card.text }];
+      if (input.files === false) return { content };
+      let imageBytes = 0;
+      for (const a of card.attachments) {
+        const image = IMAGE_TYPES.has(a.type);
+        if (!image && !TEXT_TYPES.test(a.type)) continue;
+        if (image && (a.size > MAX_IMAGE_BYTES || imageBytes + a.size > MAX_IMAGES_TOTAL_BYTES)) {
+          content.push({ type: "text", text: `[${a.id}] ${a.name} is too large to include here. The owner can open it in the app.` });
+          continue;
+        }
+        if (!image && a.size > MAX_TEXT_BYTES) continue;
+        // Keys start with the user id (attachments.ts), so this can only reach the token owner's files.
+        const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
+        if (!obj || obj.customMetadata?.sealed === "1") {
+          content.push({ type: "text", text: `[${a.id}] ${a.name} couldn't be read.` });
+          continue;
+        }
+        if (image) {
+          imageBytes += a.size;
+          content.push({ type: "text", text: `[${a.id}] ${a.name}:` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
+        } else {
+          content.push({ type: "text", text: `[${a.id}] ${a.name}:\n${await obj.text()}` });
+        }
+      }
+      return { content };
     });
 
     server.registerTool("ask_ceo", {
@@ -149,7 +209,9 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const no = await locked();
         if (no) return no;
         const r = (await agent.runTool(name, input, undefined, "agent")) as ToolOutcome;
-        return r.ok ? text(`${r.summary}\n\nBoard now:\n${r.board}`) : text(r.summary, true);
+        // The whole board after every write cost agents thousands of tokens a call. The lane counts
+        // say the change landed; get_board and get_card are there for anything more.
+        return r.ok ? text(`${r.summary}\n\nBoard now: ${await agent.laneCounts()}`) : text(r.summary, true);
       });
     }
     return server;
