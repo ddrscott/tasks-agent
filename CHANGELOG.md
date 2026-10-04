@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A shared board shows who last changed each card, and whether an agent or the assistant did it for them
 - When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened. A removed member's tabs are closed within a moment, every one of them
 - When someone deletes a card on a shared board, everyone else with it open sees who did and what it was called, and the owner's message has Undo. The deletion goes in the audit log with the card's title and the lane it was in
+- The pricing section and the terms say what Pro buys: team boards, how many people a board holds, that members join free, what happens if Pro ends, who owns the cards, and that a viewer can copy what they can read. Members has the same answers under `// HOW_SHARING_WORKS`
 - A shared board holds up under a member's script: changes sent faster than a person could are told to slow down, a member can't grow someone's board past 1,000 cards or 1 MB, and a burst of changes reaches everyone else's tab a few times a second instead of once per change
 
 ### Changed

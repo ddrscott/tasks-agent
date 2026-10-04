@@ -10,6 +10,7 @@
 
 import { currentUser, type User } from "./auth";
 import { planChanged } from "./members";
+import { memberCap } from "./member-rules";
 
 export type Plan = "free" | "pro";
 export type Usage = { plan: Plan; used: number; limit: number; billing: boolean };
@@ -102,8 +103,12 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
 export type PlanPrice = { amount: number; currency: string; interval: string; intervalCount: number };
 export type Plans = {
   free: { dailyChats: number };
-  /** Null while billing is off: Pro isn't on sale, so there's nothing to quote. */
-  pro: { dailyChats: number; price: PlanPrice | null } | null;
+  /**
+   * Null while billing is off: Pro isn't on sale, so there's nothing to quote. `members` is how
+   * many people a Pro owner can have on their board, pending invites included (MAX_BOARD_MEMBERS),
+   * the same number the invite API enforces.
+   */
+  pro: { dailyChats: number; price: PlanPrice | null; members: number } | null;
 };
 
 type StripePrice = { unit_amount: number | null; currency: string; active: boolean; recurring: { interval: string; interval_count: number } | null };
@@ -137,7 +142,7 @@ export async function handlePlans(req: Request, env: Env, path: string): Promise
   if (path !== "/api/plans" || req.method !== "GET") return null;
   const plans: Plans = {
     free: { dailyChats: dailyLimit(env, "free") },
-    pro: billingEnabled(env) ? { dailyChats: dailyLimit(env, "pro"), price: await proPrice(env) } : null,
+    pro: billingEnabled(env) ? { dailyChats: dailyLimit(env, "pro"), price: await proPrice(env), members: memberCap((env as { MAX_BOARD_MEMBERS?: string }).MAX_BOARD_MEMBERS) } : null,
   };
   // Short at the edge and in the browser when the price is missing, so a Stripe hiccup clears quickly.
   const maxAge = plans.pro && !plans.pro.price ? 60 : 600;

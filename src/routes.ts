@@ -44,7 +44,7 @@ export const PAGE_META = {
   },
   pricing: {
     name: "Pricing",
-    description: "What Tasks costs. The board and MCP access are never capped on any plan. The only limit is assistant messages per day.",
+    description: "What Tasks costs. The board and MCP access are never capped on any plan. Pro raises the daily assistant limit and adds team boards.",
   },
   privacy: {
     name: "Privacy",

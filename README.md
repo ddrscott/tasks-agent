@@ -1192,6 +1192,10 @@ each card.
   the account button as a small badge, and the menu's Members item says "shared with N".
   It looks again when the tab gets focus, and the dialog rereads the list every 20 seconds
   while it's open, so an invite accepted elsewhere shows up without a reload.
+- **`// HOW_SHARING_WORKS`** closes the People tab: the questions a manager asks before
+  approving this (what it costs, how many people, what a lapse does, who owns a removed
+  writer's cards, two owners, whether a viewer can copy the board, who sees the log), each
+  with a short answer and a link to the terms.
 - **Encryption dialog.** On a board with members or pending invites it opens with a notice
   that a shared board can't be encrypted, how many people and invites that is, and an Open
   Members button; the passphrase form under it is disabled. If someone's invited after the
@@ -1640,7 +1644,7 @@ don't need it.
 ## // BILLING
 
 Free accounts get `FREE_DAILY_CHATS` assistant messages a day; Pro raises it to
-`PRO_DAILY_CHATS`. Upgrade from the chat (at the cap) or the user menu, which opens
+`PRO_DAILY_CHATS` and adds team boards (// TEAM_BOARDS). Upgrade from the chat (at the cap) or the user menu, which opens
 Stripe Checkout. Pro users get "Manage subscription" (the Stripe Customer Portal)
 for card changes and cancellation.
 
@@ -1654,8 +1658,9 @@ for card changes and cancellation.
 - Billing stays off until `STRIPE_PRICE_ID` (var) and the `STRIPE_SECRET_KEY` and
   `STRIPE_WEBHOOK_SECRET` secrets are all set.
 - **Pricing is public and never hard-coded.** `GET /tasks/api/plans` needs no session and
-  returns `{ free: { dailyChats }, pro: { dailyChats, price } | null }`. The caps are
-  `FREE_DAILY_CHATS` and `PRO_DAILY_CHATS`; `price` is `{ amount, currency, interval,
+  returns `{ free: { dailyChats }, pro: { dailyChats, price, members } | null }`. The caps are
+  `FREE_DAILY_CHATS` and `PRO_DAILY_CHATS`; `members` is `MAX_BOARD_MEMBERS`, the number of
+  people a Pro owner's board holds, which the pricing section and the terms print; `price` is `{ amount, currency, interval,
   intervalCount }` read from Stripe for `STRIPE_PRICE_ID` (amount in the smallest unit) and
   kept in memory for an hour. With billing off `pro` is `null`, and the landing page shows
   Free only and says Pro isn't on sale yet. If Stripe can't be reached, or the price is tiered
@@ -1682,6 +1687,14 @@ Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` pr
 `/tasks/privacy` and `/tasks/terms` (`src/client/Legal.tsx`) are public pages, linked
 from the sign-in screen and from Google's consent screen. Keep the privacy policy in
 step with what the app stores: update it when you add a table, a processor, or a cookie.
+
+The terms say what Pro buys. Their Team boards section (`/tasks/terms#team-boards`), the
+`// HOW_SHARING_WORKS` block under the pricing plans, and the one at the bottom of the Members
+dialog all print the same answers from `sharingFacts` in `src/client/sharing.ts`: what sharing
+costs and who pays, how many people (the number is `MAX_BOARD_MEMBERS`, from `/api/plans` or
+the members list, never typed in), what a lapse does, who owns the cards, that a board has one
+owner, that a viewer can copy what they can read, and who sees the audit log. Change the
+answer there and all three change.
 
 ## // LINK_PREVIEWS_AND_TITLES
 

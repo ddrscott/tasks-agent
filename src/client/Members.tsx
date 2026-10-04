@@ -10,9 +10,10 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Plans } from "../billing";
 import type { AuditAction, AuditEntry, Member, MemberRole, Sharing } from "../members";
-import { api } from "./base";
+import { api, BASE } from "./base";
 import { IconClose } from "./icons";
 import { MODAL, useModal } from "./modal";
+import { sharingFacts } from "./sharing";
 
 export type BoardInfo = {
   id: string; ownerEmail: string; plan: "free" | "pro"; sharing: Sharing;
@@ -588,6 +589,14 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
           </section>
         </>
       )}
+      {/* What a manager asks before approving this, answered where they'd look. */}
+      <section className="mem-section" aria-labelledby={`${ids}-how`}>
+        <h3 className="h" id={`${ids}-how`}>HOW_SHARING_WORKS</h3>
+        <dl className="mem-facts">
+          {sharingFacts(board.maxMembers).map((f) => <div key={f.q}><dt>{f.q}</dt><dd>{f.a}</dd></div>)}
+        </dl>
+        <p className="mem-foot">The same answers are in the <a href={`${BASE}/terms#team-boards`} target="_blank" rel="noreferrer">terms</a>.</p>
+      </section>
       <p className="mem-foot">Every invite, role change, removal, and deleted card is written to the <button type="button" className="linkish" onClick={onAudit}>audit log</button>, with who did it and when.</p>
     </>
   );

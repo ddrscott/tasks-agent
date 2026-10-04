@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { BASE } from "./base";
 import { Footer } from "./Footer";
+import { sharingFacts, usePlans } from "./sharing";
 import { useTitle } from "./title";
 
 // Privacy policy and terms at /tasks/privacy and /tasks/terms. Public (no sign-in),
@@ -13,6 +15,11 @@ export type LegalPage = "privacy" | "terms";
 
 export function Legal({ page, onBack }: { page: LegalPage; onBack(): void }) {
   useTitle(page === "privacy" ? "Privacy" : "Terms");
+  // A link to a section (/tasks/terms#team-boards) lands on it: the page is drawn after the browser looked for the anchor.
+  useEffect(() => {
+    const id = location.hash.slice(1);
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, [page]);
   return (
     <div className="connect">
       <header className="topbar">
@@ -94,6 +101,9 @@ function Privacy() {
 }
 
 function Terms() {
+  // How many people a board holds comes from the server's own setting, never typed in here.
+  const plans = usePlans();
+  const facts = sharingFacts(plans?.pro?.members ?? null);
   return (
     <>
       <section className="connect-intro">
@@ -106,14 +116,23 @@ function Terms() {
         <h3 className="subhead">The service</h3>
         <ul>
           <li>Tasks is free to use. Free accounts get a daily number of assistant messages. The board and connected agents aren't limited.</li>
-          <li>Tasks Pro is a monthly subscription, billed through Stripe, that raises the daily assistant limit. You can cancel any time under Manage subscription, and Pro lasts until the end of the period you've paid for.</li>
+          <li>Tasks Pro is a subscription, billed through Stripe. It raises the daily assistant limit and adds team boards: you can invite people to your board by email, each as a viewer or a writer. You can cancel any time under Manage subscription, and Pro lasts until the end of the period you've paid for.</li>
           <li>Limits, features, and prices may change. We'll give notice before a price change affects an active subscription.</li>
+        </ul>
+      </section>
+
+      <section id="team-boards">
+        <h3 className="subhead">Team boards</h3>
+        <p>What you're buying when you share a board, and what you're agreeing to when you join one.</p>
+        <ul>
+          {facts.map((f) => <li key={f.q}><b>{f.q}</b> {f.a}</li>)}
+          <li><b>Who's responsible for who's on it?</b> The owner. You choose who to invite and what role they get, and you can change a role or remove someone at any time. It takes effect right away, in any tab they have open. A member can leave whenever they like.</li>
         </ul>
       </section>
 
       <section>
         <h3 className="subhead">Your content</h3>
-        <p>What you put on your board is yours. You let us store and process it only to run Tasks for you, including sending it to the AI assistant when you use it.</p>
+        <p>What you put on your board is yours. You let us store and process it only to run Tasks for you, including sending it to the AI assistant when you use it. What you add to a board someone shared with you belongs to that board's owner, and stays on it if you leave.</p>
       </section>
 
       <section>

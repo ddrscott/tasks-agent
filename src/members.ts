@@ -10,7 +10,7 @@
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
 import { planFor } from "./billing";
-import { BOARD_ID, decide, inviteEmail, isMemberRole, type Access, type MemberRole } from "./member-rules";
+import { BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, type Access, type MemberRole } from "./member-rules";
 
 export type { Access, MemberRole } from "./member-rules";
 
@@ -29,7 +29,7 @@ const num = (v: string | undefined, fallback: number) => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 };
 /** People on one board, pending invites included. */
-export const maxMembers = (env: Env) => num((env as { MAX_BOARD_MEMBERS?: string }).MAX_BOARD_MEMBERS, 10);
+export const maxMembers = (env: Env) => memberCap((env as { MAX_BOARD_MEMBERS?: string }).MAX_BOARD_MEMBERS);
 /** Invite emails one owner may send in a UTC day, resends included, so an account can't be used to send spam. */
 export const maxDailyInvites = (env: Env) => num((env as { MAX_DAILY_INVITE_EMAILS?: string }).MAX_DAILY_INVITE_EMAILS, 20);
 

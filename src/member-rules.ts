@@ -197,6 +197,12 @@ export function inviteEmail(raw: unknown): string | null {
 
 export const isMemberRole = (v: unknown): v is MemberRole => v === "viewer" || v === "writer";
 
+/** People on one board, pending invites included, from the `MAX_BOARD_MEMBERS` var. The one place its default lives. */
+export function memberCap(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 10;
+}
+
 // Headers the Worker sets when it hands a request to a board's Durable Object. They mean
 // something only because the Worker is the one who set them: it deletes every one of these
 // from what the browser sent before adding its own (INTERNAL_HEADERS, server.ts).

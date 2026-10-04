@@ -1450,6 +1450,13 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .mem-foot { font-size: 12px; }
 .mem-foot .linkish { font-size: inherit; }
 
+/* // HOW_SHARING_WORKS: the same questions and answers in Members and under the pricing plans. */
+.mem-facts, .plan-facts dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px 24px; }
+.mem-facts dt, .plan-facts dt { font-size: 13px; font-weight: 600; color: var(--ink); }
+.mem-facts dd, .plan-facts dd { margin: 2px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.plan-facts { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.plan-facts dl { max-width: 900px; }
+
 .mem-invite { display: flex; flex-direction: column; gap: 12px; }
 .mem-roles { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .mem-roles legend { padding: 0; margin-bottom: 6px; font: 12px var(--font-mono); color: var(--muted); }

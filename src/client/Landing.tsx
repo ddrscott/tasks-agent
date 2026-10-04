@@ -13,6 +13,7 @@ import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
 import { IconSessions } from "./icons";
+import { sharingFacts } from "./sharing";
 import { blockedSessions, isLive, PresenceContext, SessionRow } from "./Sessions";
 import { useTitle } from "./title";
 
@@ -429,6 +430,7 @@ function Pricing() {
       <p className="landing-note">
         Your own agents can read and change the board as much as they like on either plan. The one thing
         with a daily limit is the assistant built into the board, because that's the part that runs on our model bill.
+        Pro raises that limit and lets you share your board with other people.
       </p>
       {plans === "failed" ? (
         <p className="landing-note" role="alert">The plan details didn't load. Refresh to try again.</p>
@@ -444,6 +446,7 @@ function Pricing() {
               <li><b>{chats(loaded?.free.dailyChats)}</b> assistant messages a day</li>
               <li>Unlimited cards, lanes, and MCP calls</li>
               <li>Questions, sessions, search, attachments, encryption</li>
+              <li>Join boards other people share with you</li>
             </ul>
           </div>
           {loaded?.pro && (
@@ -456,6 +459,8 @@ function Pricing() {
               </p>
               <ul>
                 <li><b>{chats(loaded.pro.dailyChats)}</b> assistant messages a day</li>
+                <li>Team boards: invite up to <b>{loaded.pro.members}</b> people to your board by email, as viewers or writers. They join free</li>
+                <li>An audit log of who was invited, who joined or left, and who deleted which card</li>
                 <li>Everything in Free, same as it is there</li>
                 <li>Upgrade or cancel from the account menu, through Stripe</li>
               </ul>
@@ -465,6 +470,15 @@ function Pricing() {
       )}
       {loaded && !loaded.pro && (
         <p className="landing-note">Pro isn't on sale yet. When it is, the price will be listed here.</p>
+      )}
+      {loaded?.pro && (
+        <div className="plan-facts">
+          <h3 className="h">HOW_SHARING_WORKS</h3>
+          <dl>
+            {sharingFacts(loaded.pro.members).map((f) => <div key={f.q}><dt>{f.q}</dt><dd>{f.a}</dd></div>)}
+          </dl>
+          <p className="landing-note">The same answers are in the <a href={`${BASE}/terms#team-boards`}>terms</a>.</p>
+        </div>
       )}
     </section>
   );
