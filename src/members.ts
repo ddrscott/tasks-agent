@@ -300,7 +300,11 @@ async function recentAdminChange(env: Env, ownerId: string): Promise<string | un
  * tell the open sockets.
  */
 export async function planChanged(env: Env, ownerId: string, admin?: string): Promise<void> {
-  if ((await syncSharing(env, ownerId, admin)) !== null) await signal(env, ownerId);
+  if ((await syncSharing(env, ownerId, admin)) !== null) return signal(env, ownerId);
+  // A board nobody was ever invited to has no members to recheck and nothing to log, but its
+  // owner may have it open, with a menu that still says "Upgrade to Pro". One try, no retries:
+  // the tab asks again by itself the next time it has a reason to.
+  await (await getAgentByName(env.TodoAgent, ownerId)).planChanged();
 }
 
 // ---------- the invite email ----------

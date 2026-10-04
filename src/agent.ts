@@ -510,6 +510,15 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
+   * The owner's plan changed on a board that was never shared (members.ts): nobody to recheck,
+   * so only the owner's open tabs are told, to read their plan again. It doesn't mark the
+   * board as shared, and the frame says nothing but that something changed.
+   */
+  planChanged() {
+    this.tellOwner();
+  }
+
+  /**
    * Tell the owner's open tabs that the members list or the plan behind it just changed, so
    * Members and "Shared with N" read it again now instead of at their next poll. Owner sockets
    * only: a member's socket never gets this frame, and it carries nothing but the fact.

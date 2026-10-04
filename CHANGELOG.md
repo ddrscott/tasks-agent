@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board a member can't drag one of your `#agent` or `#gauntlet` cards up or down inside its lane. Moving it to another lane was already refused
 - When an admin gives or takes back Pro, your audit log names the admin who did it instead of saying "system". Changes that come from billing still say system
 - Manage subscription only shows when there's a subscription to manage. With Pro an admin gave and took back, Members offered it and it answered "No subscription to manage yet"
+- When your plan changes while your board is open (Pro bought, lapsed, or given or taken back by an admin), the account menu and the assistant's limit follow right away, without a reload
 
 ## [0.2.0] - 2026-10-04
 

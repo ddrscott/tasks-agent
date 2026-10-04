@@ -1250,8 +1250,12 @@ each card.
   `paused`), the account menu's Members item says "sharing paused", and the button opens
   Members with the block that explains the pause in focus. The plan label by the assistant
   (`12/30 today · pro`) and the menu's Upgrade or Manage subscription item come from `usage()`;
-  `PlanWatch` asks for it again whenever the plan in the members list changes, so neither goes
-  on saying Pro after a lapse.
+  `PlanWatch` asks for it again whenever the plan in the members list changes, and the tab
+  asks again on every `tasks_members` frame, so neither goes on saying Pro after a lapse or
+  "Upgrade to Pro" after a grant. That frame reaches an owner who has never shared the board
+  too: `planChanged` in `src/members.ts` calls `TodoAgent.planChanged`, which tells the
+  owner's sockets and nothing else (no audit entry, and the board isn't marked as shared).
+  Before this, an admin's grant or revoke showed up only after a reload.
 - **`// HOW_SHARING_WORKS`** closes the People tab: the questions a manager asks before
   approving this (what it costs, how many people, what a lapse does, who owns a removed
   writer's cards, two owners, whether a viewer can copy the board, who sees the log), each

@@ -414,6 +414,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
     setToast({ text, action: next.steps.length ? "undo" : null, key, ms: DESTRUCTIVE_TOAST_MS, steps: next.steps.length ? next.steps : undefined, cards: next.count });
   }, [me.email, member]);
 
+  // The socket's handler below is made before `refreshUsage` exists, so it reaches it through a ref.
+  const usageRef = useRef<() => void>(() => {});
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
     basePath: "tasks/agent",
@@ -427,7 +429,9 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         if (f.type === "tasks_access" && sharedBoard) onAccess(f);
         else if (f.type === "tasks_activity") onActivity(f);
         // Your own board's members or plan changed: Members and "Shared with N" read it again now.
-        else if (f.type === "tasks_members" && !sharedBoard) membersChanged(me.id);
+        // The plan may be what changed (Pro bought, lapsed, given or taken back by an admin), so
+        // the usage call that feeds the account menu and the assistant's meter is made again too.
+        else if (f.type === "tasks_members" && !sharedBoard) { membersChanged(me.id); usageRef.current(); }
       } catch { /* not ours */ }
     },
     ...(sharedBoard ? {
@@ -480,6 +484,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
   const [usage, setUsage] = useState<Usage | null>(null);
   const refreshUsage = useCallback(() => { if (!member) agent.stub.usage().then(setUsage).catch(() => {}); }, [agent, member]);
+  usageRef.current = refreshUsage;
   useEffect(() => { if (board) refreshUsage(); }, [!!board, refreshUsage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Back from Stripe Checkout. The webhook can land a moment after the redirect, so look twice.
