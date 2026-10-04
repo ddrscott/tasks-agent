@@ -1029,7 +1029,7 @@ npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagg
 npm run check:presence   # Sessions rules: what a claim, a refused claim, and a release say, and that one decision counts once
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
-npm run check:launch     # the launch copy against its character and word limits
+npm run check:launch     # the launch copy against its limits, and the gallery's files and sizes
 ```
 
 The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
@@ -1106,26 +1106,49 @@ the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newe
   pitches for X, LinkedIn, and Hacker News. Limits and where they came from are at the top.
 - `checklist.md`: what to do before, on, and after launch day, in order.
 - `video.md`: a shot list for a short demo video.
-- `gallery/`: the gallery images and the 240x240 thumbnail.
+- `gallery/`: six gallery images and the 240x240 thumbnail.
 
 ```sh
-npm run shots                                  # shoot the gallery from http://localhost:5190
-npm run shots -- https://askscottpierce.com    # or from the live site
+npm run shots                                  # make the gallery from http://localhost:5190
 npm run shots -- http://localhost:5173 --only 03,06   # just some of them; `thumb` is the thumbnail
-npm run check:launch                           # count the copy against its limits
+npm run shots -- https://askscottpierce.com --only 01,02,03,04,06,thumb   # from the live site (not 05)
+npm run check:launch                           # count the copy against its limits, and check the gallery
 ```
 
+Each image is one idea: a crop of the real app set on a 1270x760 dark canvas with a
+`// KICKER`, a headline, and usually a line under it, saved at 2x. In order: the board with an
+agent's question on a card, the "need you" list, the Sessions list, an open card, the four-step
+quick start, and the "need you" list on a phone. The canvas is HTML in `scripts/shots.mjs`
+(`canvas()`), so a headline is changed there and the gallery is shot again. A headline says
+"one tap" only over the "need you" list, because a card on the board takes two taps on a touch
+screen (`// QUESTIONS`).
+
 `scripts/shots.mjs` drives the Chrome in `/Applications` over the DevTools protocol (`CHROME=` to
-use another), so there's no dependency to install. It shoots the demo board, the Connect page,
-and the landing page at 1270x760 and 2x. Each shot waits for the thing it's a picture of (the
-card with answer buttons, the open "need you" list, the Sessions groups, the open card's STATUS
-line and session row, the Connect steps) and fails with the reason when it isn't there, so a
-change to the demo or a page that breaks a shot shows up as a failed run. From a dev server, the
-Connect shot swaps the local address for the hosted one in the text on screen. Look at the PNGs
+use another), headless and with a throwaway profile, so there's no dependency to install and it
+never touches the Chrome you're signed in to. How the crops are made:
+
+- A list or a dialog is cropped to its own edges, with everything else on the page hidden for the
+  shot, so no sliver of the board shows around it.
+- A crop that's taller than the canvas runs off the bottom edge, and the cut is put in the gap
+  between two rows (the open card's notes, the quick start's blocks), never through one.
+- `05` is the only signed-in picture. The script signs up through the landing page's form with a
+  made-up `shots-…@example.com` address and the code a dev server shows on screen
+  (`DEV_LOGIN_CODES=1`), adds the sample card, and copies the command. So `05` comes from a dev
+  server only; against the live site it fails and says so. It finds the quick start by structure
+  (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
+  and 3, the command in a `role="status"` block), not by wording. The token in the command is
+  dotted out and the local address is swapped for the hosted one.
+
+Each shot waits for the thing it's a picture of and fails with the reason when it isn't there,
+or when the canvas wouldn't fit (a headline too wide, a list too tall), so a change to the demo
+or a page that breaks a shot shows up as a failed run. Two runs against the same build give the
+same bytes. The canvas's fonts come from Google Fonts, so it needs the network. Look at the PNGs
 after every run.
 
 The copy's limits are checked from the `<!-- count: … -->` comment above each block
-(`scripts/check-launch.mjs`). Every claim in the copy has to be true of the app as built; when a
+(`scripts/check-launch.mjs`). The same check fails when a gallery image named in `product-hunt.md`
+is missing, isn't 2540x1520 or 1270x760, or is 3 MB or more, and when `gallery/` holds a picture
+the copy doesn't name. Every claim in the copy has to be true of the app as built; when a
 feature changes, check `docs/launch/` the same way you'd check the landing page.
 
 ## // DEPLOY
