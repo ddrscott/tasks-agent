@@ -70,7 +70,7 @@ const CLIENTS: Client[] = [
       <>Prefer a token? Add <code>--header "Authorization: Bearer &lt;token&gt;"</code> to the command in step 1 and skip step 2.</>,
       <>To see this machine's sessions on the board, add the hooks under <a href="#sessions">Sessions</a> below.</>,
     ],
-    code: (url) => `claude mcp add --transport http tasks ${url}`,
+    code: (url) => claudeMcpAdd(url),
     lang: "sh",
   },
   {
@@ -154,7 +154,10 @@ function ago(ms: number | null): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+/** The one-line Claude Code setup. The signed-out landing page shows the same command. */
+export const claudeMcpAdd = (url: string) => `claude mcp add --transport http tasks ${url}`;
+
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button

@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tasks-events --require <tag>` — hear only cards that carry that tag too, so a lead and a gauntlet agent can share a repo
 - A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board
 - Each page names itself in the browser tab, like `Connect an agent · Tasks`, and Tasks has a home-screen icon on iPhone and iPad
+- Signed out, `/tasks/` is a real front page: what Tasks is, the sign-in form, and a sample board showing an agent's question, a claimed card, and the Sessions list. Below that: what's different, the `claude mcp add` command with a Copy button, and a link to the demo board
+- Pricing is on the front page, readable before you sign up: the daily assistant limits for Free and Pro, and the Pro price as Stripe has it
+- A mistyped address like `/tasks/nope` shows a not-found page with links to the pages that exist, instead of the sign-in form
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
@@ -34,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent's recommended answer on a card is marked `REC`, not only outlined
 - Clear all cards and Delete lane take two taps: the first changes the item to say what the second will do
 - After something is removed, the toast says how many and stays 10 seconds, so there's time to hit Undo
-- The sign-in screen says what Tasks is for: a board your AI agents work from. Security is shorter and says plainly that an encrypted board is closed to outside agents
+- The sign-in screen says what Tasks is for: a board your AI agents work from. It says plainly that an encrypted board is closed to outside agents
 - "Connect an agent" is the first item in the account menu, and the Sessions list links to the hook setup
 - When the top bar runs short on room, search shrinks to its icon, then the buttons drop to icon plus count, then the summary goes. On a phone the tag filter chip sits on its own row
 - Orange and gray text is darker in the light themes, and the count badges use dark ink, so small text is easier to read

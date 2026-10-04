@@ -2,7 +2,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { getAgentByName } from "agents";
 import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
-import { handleBilling } from "./billing";
+import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -54,7 +54,7 @@ const app: ExportedHandler<Env> = {
       if (sub === "/api/presence" && req.method === "POST") return handlePresenceReport(req, env);
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
-        ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
+        ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 

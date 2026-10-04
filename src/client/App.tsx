@@ -20,6 +20,7 @@ import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
+import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
@@ -63,6 +64,7 @@ export function App() {
     void load();
   }, [load]);
 
+  if (isUnknownPath()) return <NotFound />;
   // The privacy policy and terms are public; everything else needs a session.
   if (page === "privacy" || page === "terms") return <Legal page={page} onBack={() => go("board")} />;
   if (me === undefined) return <div className="splash">loading</div>;
