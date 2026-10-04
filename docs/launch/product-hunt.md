@@ -147,23 +147,31 @@ doesn't have one, so leave it empty or use your own.
 
 ## // GALLERY
 
-Shot from the running app by `npm run shots`. Files are in `docs/launch/gallery/`. Upload in this
-order; the first image is the one Product Hunt uses when the launch is shared.
+Made by `npm run shots`. Each image is a crop of the running app set on a 1270x760 canvas with
+a headline, so the headline is part of the picture and the caption is what goes under it. Files
+are in `docs/launch/gallery/`. Upload in this order; the first image is the one Product Hunt
+uses when the launch is shared.
 
-| File | Caption |
-|---|---|
-| `01-board-question.png` | An agent hit a decision it shouldn't make alone, so it asked on the card. The option it would pick is marked REC. Tap one and it goes back to work. |
-| `02-need-you.png` | "Need you" is one list: every open question, with the session that's waiting on it, and any other Claude Code session stopped at a prompt. Clear them in a row. |
-| `03-sessions.png` | Every Claude Code session that's reporting in, on any machine, grouped by project. Working, needs input, or idle, and the last thing each one did. |
-| `04-card.png` | An open card: the session that claimed it, its question, and its notes in markdown with a STATUS line the agent keeps current. |
-| `05-connect.png` | Setup is a URL and one command. There's a tab for Claude Code, Cursor, Codex, VS Code, Claude, ChatGPT, and Glean. |
-| `06-phone.png` | It's a web page, so it works on your phone. Same board, same questions, same list. |
-| `07-landing.png` | The front page. The board in it is the app's own components, not a picture. (Optional; drop it if seven is too many.) |
-| `thumbnail-240.png` | The thumbnail: the favicon's three bars. |
+| File | Headline in the image | What it shows | Caption |
+|---|---|---|---|
+| `01-board-question.png` | The task board your coding agents work from. | The demo board, three lanes, with an agent's question and its answer buttons on a card in Doing. | An agent hit a decision it shouldn't make alone, so it asked on the card. The option it would pick is marked REC. Pick one and it goes back to work. |
+| `02-need-you.png` | Everything waiting on you, in one list. | The "need you" button and the list it opens, nothing else. | "Need you" is one list: every open question, with the session that's waiting on it, and any other Claude Code session stopped at a prompt. An answer here is one tap. |
+| `03-sessions.png` | What every session is doing, by project. | The Sessions button and its list: three projects, one session each. | Every Claude Code session that's reporting in, on any machine, grouped by project. Working, needs input, or idle, and the last thing each one did. |
+| `04-card.png` | Each card says where it stands. | An open card from its title down to the end of the checklist in its notes. | An open card: the session that claimed it, its question, and its notes in markdown with a STATUS line and a checklist the agent keeps current. |
+| `05-quick-start.png` | Four steps to a working agent. | `// START_HERE` on a new account's board, with the sample card added and the command copied. The token in the command is dotted out. | Sign in, add a sample card, copy one command, paste it in a terminal. Claude Code claims the card and asks its first question on it. |
+| `06-phone.png` | Answer from your phone in one tap. | The "need you" list at 390 wide, in a plain phone outline. | It's a web page, so there's nothing to install on your phone. Open "need you" and tap an answer. |
+| `thumbnail-240.png` | | The favicon's three bars. | The thumbnail. |
 
-The pictures in this folder were shot from a local dev server, so the footer in them shows a
-branch commit and the Connect shot's address was swapped for the hosted one. Shoot them again
-from the live site after the deploy; see `checklist.md`.
+"One tap" is only said over the "need you" list, where it's true on every device. Answering
+from a card on the board is one click with a mouse and two taps on a touch screen: the first
+tap turns the option into "Send: …?" and the second sends it, so a stray tap while scrolling
+can't answer for you. An open card is one tap everywhere. If someone brings it up in the
+comments, that's the answer.
+
+The pictures in this folder came from a local dev server. None of them shows the footer, so no
+dev commit is in frame, and the address in `05`'s command was swapped for the hosted one. Shoot
+them again after the deploy so they match what's live; the exact commands are in
+`checklist.md`, step 5.
 
 ## // FIRST_COMMENT
 
@@ -254,6 +262,12 @@ Everything except a bigger assistant allowance. Cards, lanes, MCP calls, questio
 
 **SCOTT:** if Pro is on sale, add: "Pro raises that to 150 a day."
 
+**"One tap" took me two on my phone.**
+
+```
+On a touch screen, answering from a card on the board takes two taps on purpose: the first turns the option into "Send: …?" and the second sends it, so a thumb scrolling past can't answer for you. The "need you" list and an open card are one tap on any device, and a card on the board is one click with a mouse.
+```
+
 **Is the demo real?**
 
 ```
@@ -273,7 +287,7 @@ They pick up cards over MCP. When one needs a decision it asks on the card, and 
 Demo, no sign-up: https://askscottpierce.com/tasks/demo
 ```
 
-Attach `01-board-question.png`. X counts any link as 23 characters, so there's room to spare.
+Attach `01-board-question.png`; its headline says what Tasks is. X counts any link as 23 characters, so there's room to spare.
 
 ### LinkedIn
 

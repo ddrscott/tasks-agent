@@ -9,13 +9,24 @@ Do these top to bottom. Each later step assumes the earlier ones.
 
 ### 1. Ship the branch
 
-- [ ] Merge this work to `main` and run the checks: `npm run typecheck`, `npm run build`,
+- [ ] Merge this work to `main` (a merge, not a rebase or a squash that rewrites what's already
+      there) and run the checks: `npm run typecheck`, `npm run build`,
       `npm run check:markdown`, `npm run check:sort`, `npm run check:events`, `npm run check:nudge`,
       `npm run check:setup`, `npm run check:tags`, `npm run check:presence`, `npm run check:launch`.
-- [ ] `npm run deploy`, and `npm run db:migrate:remote` if `migrations/` changed since the last deploy.
+- [ ] `git push origin main`. The landing page links to GitHub for the source and the changelog
+      (`…/blob/main/CHANGELOG.md`), and those links show whatever `main` on GitHub has. Until this
+      is pushed, the page describes work the links can't back up.
+- [ ] `npm run deploy` from that same commit, and `npm run db:migrate:remote` if `migrations/`
+      changed since the last deploy.
 - [ ] Open https://askscottpierce.com/tasks/ and compare the footer with `git rev-parse --short HEAD`.
       It should read `$ v0.1.0 · <that commit>` with no `+` after it. A `+` means the build had
       uncommitted changes.
+- [ ] Recount the changelog. The landing's proof line ("N changes written up since v0.1.0", or
+      however it's worded by then) is counted from `CHANGELOG.md` when the site is built, not
+      live. Open https://askscottpierce.com/tasks/, read the number, click its link, and count
+      the entries in the file GitHub shows. They have to match. If they don't, the deploy was
+      built from a different commit than the one pushed: push, deploy again, and recount.
+- [ ] Click the landing's source link too and check it opens the repo, signed out of GitHub.
 - [ ] **Q:** `CHANGELOG.md` has a long `[Unreleased]` section on top of 0.1.0. Do you want to cut
       a release (0.2.0?) before launch so the footer and `// WHATS_NEW` show a clean version?
       The steps are in the README under `// VERSION_AND_CHANGELOG`.
@@ -64,15 +75,34 @@ Do these top to bottom. Each later step assumes the earlier ones.
       Previews are cached, so a changed image needs a new file name (README,
       `// LINK_PREVIEWS_AND_TITLES`).
 
-### 5. Shoot the gallery from the live site
+### 5. Shoot the gallery again after the deploy
 
-- [ ] `npm run shots -- https://askscottpierce.com`. The images in `docs/launch/gallery/` right
-      now came from a dev server, so their footer shows a dev build.
-- [ ] Open all eight PNGs and look at them. If the run fails, it says which thing on the page it
-      was waiting for.
-- [ ] If the landing shot (`07`) fails on the human check, Turnstile didn't pass a headless
-      browser. Skip it: `npm run shots -- https://askscottpierce.com --only 01,02,03,04,05,06,thumb`.
+The images in `docs/launch/gallery/` came from a dev server on a branch. Shoot them again so
+they show what's live. It takes two commands, because `05` is a signed-in picture:
+
+- [ ] Everything but `05`, from the live site:
+      `npm run shots -- https://askscottpierce.com --only 01,02,03,04,06,thumb`
+- [ ] `05` (the quick start on a new account's empty board) from a dev server on the deployed
+      commit. The script signs up with a made-up address and reads the code off the screen,
+      which only a dev server shows. In one terminal: `LOCAL_ONLY=1 npx vite dev --port 5190`.
+      In another: `npm run shots -- http://localhost:5190 --only 05`. The address in the
+      command is swapped for askscottpierce.com and the token is dotted out.
+- [ ] `npm run check:launch`. It fails if a picture the copy names is missing, the wrong size,
+      or 3 MB or more.
+- [ ] Open all seven PNGs (six images and the thumbnail) and look at them, and read each
+      headline against what's live. If a run fails, it says which thing on the page it was
+      waiting for. If the wording of the quick start changed, `05` still shoots (it goes by the
+      section's structure), but check the headline "Four steps to a working agent" is still true.
 - [ ] Commit the new images.
+
+### 5a. Know this before the comments start
+
+- [ ] On a phone, answering from a card on the board takes **two taps**, on purpose: the first
+      turns the option into "Send: …?" and the second sends it. The "need you" list and an open
+      card are one tap everywhere, and a card on the board is one click with a mouse. The tagline
+      says "one tap", so someone will try it on a card on their phone and say it took two. The
+      gallery only says "one tap" over the list (`02`, `06`), and there's a ready answer in
+      `product-hunt.md` ("One tap" took me two on my phone).
 
 ### 6. License
 
