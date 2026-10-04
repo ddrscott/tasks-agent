@@ -26,6 +26,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
 | Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks and by `claim_card` |
+| Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -33,6 +34,7 @@ askscottpierce.com/tasks/assets/*  ──▶ static assets (no Worker hop)
 askscottpierce.com/tasks/<page>    ──▶ Worker ──▶ the app's HTML for a page in src/routes.ts, a 404 for anything else
 askscottpierce.com/tasks/api/*     ──▶ Worker ──▶ D1 (codes, sessions), EMAIL.send
 askscottpierce.com/tasks/agent     ──▶ Worker ──session──▶ your TodoAgent (Durable Object)
+askscottpierce.com/tasks/agent?board=<id> ──▶ Worker ──session + membership──▶ the owner's TodoAgent, as a viewer or writer
                                           board state ⇄ UI · chat ─▶ Workers AI + board tools
 askscottpierce.com/tasks/api/presence ◀── Claude Code hooks ──token──▶ your Presence (Durable Object)
 askscottpierce.com/tasks/presence  ──▶ Worker ──session──▶ your Presence ─▶ the // SESSIONS list, live
@@ -47,8 +49,10 @@ run ahead of whatever serves the zone.
 ## // HOW_IT_WORKS
 
 - **One board per user.** The client connects to `/tasks/agent`, and the Worker
-  picks the Durable Object from the session cookie. No URL names a board, so there's
-  no id to guess. The cookie is scoped to `Path=/tasks`.
+  picks the Durable Object from the session cookie. The cookie is scoped to `Path=/tasks`.
+  A board someone shared with you is `/tasks/agent?board=<its id>`: the id is not a secret,
+  and a membership check decides, with one answer for "no such board" and "not yours"
+  (`// TEAM_BOARDS`).
 - **One code path for every change.** Drag and drop, buttons, the assistant's
   tools, and MCP calls all end in the pure functions in `src/shared.ts`. The board
   tools are defined once in `src/tools.ts` for both the assistant and MCP, with their
@@ -1127,6 +1131,226 @@ can't be encrypted the way card text is. And claims need MCP, which is already c
 encrypted board. So reports to an encrypted board are dropped (`X-Tasks-Presence: sealed`), the
 Sessions button is hidden, and turning encryption on erases the rows that were there.
 
+## // TEAM_BOARDS
+
+A Pro owner invites people into their board by email. Each member is a **viewer** (read only) or
+a **writer**. It's the whole board; there are no per-tag scopes yet. The server side is built and
+checked (`npm run check:members`). The app's UI for it (members panel, board switcher, banners,
+who-changed-it on a card) is not built yet: this section is what that UI builds against.
+
+**The model.**
+
+- **Invite only.** No public link, no "anyone with the link". The only way in is an invite to
+  one email address that the person accepts while signed in as that address.
+- **The board stays where it was**: in the owner's `TodoAgent` Durable Object. A board's id is
+  its owner's user id (32 hex characters). It isn't a secret and opens nothing: every request
+  that names a board goes through one function, `access` in `src/members.ts`, and every way
+  that can fail gets the same answer, so nothing says whether a board exists.
+- **Membership is in D1** (migration `0005_team_boards.sql`): `board_members` (one row per
+  person, pending or accepted; owner id, owner email, member email, member id, role, status,
+  token hash, expiry, invited/accepted times), `board_audit` (append-only; triggers refuse
+  UPDATE and DELETE), `invite_sends` (the daily email count), `board_sharing` (whether the
+  board is currently view-only because Pro lapsed). Declining, revoking, removing, and
+  leaving delete the member row; the audit log keeps what happened.
+- **Emails** are lower-cased and trimmed exactly as sign-in does it, because the account id is
+  a hash of that string. Plus addressing is kept (`a+x@` and `a@` are two accounts). Invites
+  take plain ASCII addresses only, so a look-alike letter can't put a stranger in the members
+  list under a familiar-looking name (`inviteEmail` in `src/member-rules.ts`).
+- **Sharing is Pro only and the owner pays.** Members join free. With billing off
+  (`STRIPE_PRICE_ID` empty) nobody is Pro, so nobody can share.
+- **When the owner's Pro lapses** nothing is deleted. Members stay listed and become view only
+  (`effective: "viewer"`, `reason: "plan_lapsed"`), new invites and resends are refused
+  (`pro_required`), and it all comes back when Pro does. The owner can still change roles,
+  remove people, and revoke invites while lapsed. A pending invite can still be accepted.
+- **An encrypted board can't be shared, and a shared board can't be encrypted.** Inviting on
+  an encrypted board is refused (`board_encrypted`). `enableEncryption` on a board with any
+  member or pending invite throws an error whose message starts with `[board_shared]`.
+- **Limits.** `MAX_BOARD_MEMBERS` (10) people per board, pending invites included, expired
+  ones too until they're revoked. `MAX_DAILY_INVITE_EMAILS` (20) invite emails per owner per
+  UTC day, resends included. An invite link works once, for 7 days.
+- **Not in v1:** transferring ownership, more than one owner, tag scopes, and member access
+  over MCP. A member's token, OAuth grant, event feed, and Sessions reach only their own board.
+
+**Roles.** `role` is what the invite granted; `effective` is what it's worth right now.
+
+| | owner | writer | viewer |
+|---|---|---|---|
+| See the board, live | yes | yes | yes |
+| Search (`search`) | yes | yes | yes |
+| Download files on the board | yes | yes | yes |
+| Add, edit, move, delete cards; tags, notes, checkboxes, due dates | yes | yes | no |
+| Attach and remove files (they count against the owner's quota) | yes | yes | no |
+| In-browser assistant (Needle, `applyLocal`) | yes | card changes only | no |
+| Lanes: add, rename, delete, reorder, sort, roles, Clear all cards | yes | no | no |
+| Drag a card inside a sorted lane (`setLaneManual` changes the lane's sort) | yes | no | no |
+| Answer or take back a question (`ask_ceo`); delete or finish a card with an open question | yes | no | no |
+| Undo, redo, and the undo labels | yes | no | no |
+| Cloud assistant chat, its transcript, the daily usage meter | yes | no | no |
+| Theme, encryption, tokens, connected apps, billing, Sessions, event feed, MCP | yes | no | no |
+| Members, invites, roles, audit log | yes | no | no |
+| Leave the board | n/a | yes | yes |
+
+Members see a question and its answer on the card. They never see who claimed a card: claims
+and Sessions live in the owner's `Presence` object, which members don't reach.
+
+**How a member reaches the board.**
+
+- The client opens the same socket as always, plus the board's id:
+  `useAgent({ agent: "TodoAgent", basePath: "tasks/agent", query: { board: "<owner id>" } })`,
+  which is `wss://…/tasks/agent?board=<owner id>`. Without `board` (or with your own id) you
+  get your own board, as before. `Workspace` in `App.tsx` already passes `?board=` from the
+  page's address through; that's all the client does so far.
+- The Worker (`memberConnect` in `src/server.ts`) checks the session, calls `access`, and for
+  a member hands the owner's Durable Object a request it built from scratch: no browser
+  headers, no path, only `x-tasks-member` with the member it just checked. On the owner's own
+  path it deletes `x-tasks-user`, `x-tasks-email`, `x-tasks-member`, `x-user`, and the Agents
+  SDK's internal headers from what the browser sent before setting its own. The client never
+  sends a role, and nothing it sends is read as one.
+- A member gets a WebSocket and nothing else. Any HTTP request with someone else's `board`
+  (`/tasks/agent/get-messages?board=…`, any path under `/agent/`) is a 404.
+- Refusals: signed out 401, another origin 403, everything else **404 `Not found`**: a
+  stranger, a pending invitee, a removed member, an encrypted board, a made-up or malformed id.
+- **Member sockets are not Agents SDK connections.** `TodoAgent.fetch` accepts them itself as
+  plain hibernating WebSockets (`acceptMember` in `src/agent.ts`) and answers a small part of
+  the same wire protocol, so `useAgent` works unchanged. The SDK and the chat SDK only handle
+  sockets they accepted, so none of their broadcasts (chat messages, stream chunks, MCP server
+  lists) reach a member, and no frame a member sends reaches their handlers.
+
+**What a member's socket receives.** Exactly three frame types, plus replies to its own calls:
+
+```jsonc
+{ "type": "cf_agent_identity", "name": "<owner id>", "agent": "todo-agent" }
+{ "type": "tasks_access", "board": "<owner id>", "ownerEmail": "owner@example.com",
+  "role": "writer", "effective": "viewer", "reason": "plan_lapsed", "plan": "free" }
+{ "type": "cf_agent_state", "state": { "lanes": [], "cards": [], "theme": "paper" } }
+```
+
+- `tasks_access` comes on connect and again whenever the answer changes (read it in
+  `useAgent`'s `onMessage`). `role` is `"writer" | "viewer"`, `effective` is
+  `"writer" | "viewer"`, `reason` is `null | "plan_lapsed"`, `plan` is the owner's.
+- Before the socket is closed it gets one last frame with `"closed": "removed"` (removed, or
+  left) or `"closed": "encrypted"`, and `role: null`, `effective: "none"`, `ownerEmail: null`.
+  Then the server closes it with code **4403**. Treat the frame as the end and close the
+  socket from the client too: under the dev server a socket that never sent a frame doesn't
+  always see the close event. A reconnect is refused with the 404 above.
+- `cf_agent_state` is the same `Board` the owner gets, on connect and after every change. Its
+  `theme` is the owner's: a member's app should keep using the theme from their own board.
+- Never sent to a member: the chat transcript, chat stream frames, the undo stack or its
+  labels, usage, tokens, billing, the MCP server list, Sessions, claims.
+- The owner's own socket gets no `tasks_access` frame. The owner's state is the board they own.
+
+**What a member's socket may send.** One thing: an RPC call, `{"type":"rpc","id":"…","method":"…","args":[…]}`
+(what `agent.stub.x()` sends), to a method on the list in `MEMBER_CALLS` (`src/member-rules.ts`):
+
+| Method | Least role |
+|---|---|
+| `search` | viewer |
+| `addCard`, `updateCard`, `moveCard`, `deleteCard`, `removeAttachment`, `applyLocal` | writer |
+
+Everything else answers `{"type":"rpc","id":"…","success":false,"error":"…","done":true}`: `Only the board's owner can do that.`
+for a method that isn't on the list, `You can view this board, not change it.` for a viewer,
+`This board is view only until its owner's Pro plan is back.` during a lapse. A new callable is
+the owner's until it's added to the list. A `cf_agent_use_chat_request` gets an error
+`cf_agent_use_chat_response` saying the cloud assistant is the owner's. State pushes, chat
+messages, tool results, and anything else are dropped. A member's `applyLocal` changes the board
+and writes nothing into the owner's chat transcript.
+
+**The write guard.** One place, `guard` in `src/agent.ts`, run twice on every change: in
+`mutate` before anything is written, and in the `setState` override that every path ends in.
+Who's calling comes from an `AsyncLocalStorage` set where the request entered the object, never
+from an argument. For a member it calls `assertMayChange` (`src/member-rules.ts`), which
+compares the board before and after instead of trusting which action ran: lanes and every
+board setting must come out identical, and a card's `ask` and `answer` must be untouched. So
+the assistant's lane tools fail for a writer the same way the lane callables do.
+
+**Live effect.** A member's access is read from D1 again before every call they make, so a
+removal or a downgrade holds from their very next frame. On top of that:
+
+- Removing a member, a role change, and leaving call `TodoAgent.membersChanged` before the
+  request answers; the Stripe webhook does the same when the owner's plan changes. Every member
+  socket is rechecked then: closed, or sent a new `tasks_access`.
+- The backstop: while any member is connected the board rechecks them all every
+  `MEMBER_RECHECK_SECONDS` (30), and a state push to a socket not checked within that window
+  waits for a recheck. 30 seconds because it only matters when the signal was lost (a failed
+  RPC, a plan that ran out with no webhook), and it costs one small D1 read per connected
+  member per run. With nobody connected it stops.
+
+**Attribution.** Every card carries who last changed it: `by?: { email: string; via?: "assistant" | "agent" }`
+on `Card` (`src/shared.ts`), next to `updatedAt`. `email` is the owner or the member; `via` is
+`"assistant"` when the in-app assistant did it on their message and `"agent"` for an outside
+agent on the owner's token (MCP). The Durable Object stamps it from the connection (`stampBy`);
+nothing in a payload is read into it. A card that wasn't changed keeps its mark. Undo and redo
+mark the cards they change as the owner's. Cards from before this have no `by`, and an
+encrypted board never has one. Show it on the card's last change; it's not a history.
+
+**Attachments.** Add `?board=<owner id>` to both calls: `POST /tasks/api/attachments?card=<id>&board=<owner id>`
+and `GET /tasks/api/attachments/<attachment id>?board=<owner id>`. A viewer's upload is
+`403 {"error":"…","code":"read_only"}`. Anyone without access, a bad id, and a staged upload
+(`stage=1`) by a member are `404 {"error":"not found"}`. A member can download only files on
+the board right now (not ones undo could bring back), and their copies are `Cache-Control: no-store`.
+Uploads land under the owner's prefix and count against the owner's quota.
+
+**The API.** All of it takes the session cookie, and non-GET calls from another origin are
+refused like the rest of `/api`. Bodies and answers are JSON. Signed out is `401 {"error":"signed out"}`.
+Errors are `{"error": "<a sentence to show>", "code": "<code>"}`. `/api/board/*` is always the
+signed-in user's own board, so a member who calls it gets their own, empty, lists.
+
+`Member` is `{ email, role: "viewer"|"writer", status: "pending"|"accepted", invitedAt, acceptedAt: number|null, expiresAt: number|null, expired: boolean }` (times in ms).
+
+| Call | Body | Answer |
+|---|---|---|
+| `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday }, members: Member[] }` |
+| `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit`, `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
+| `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above |
+| `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
+| `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
+| `POST /api/board/members/remove` | `{ email }` | `200 { ok: true }`, `404 not_found` |
+| `GET /api/board/audit?limit=50&before=<id>` | | `{ entries: AuditEntry[], next: number\|null }`, newest first; pass `next` as `before`. `limit` up to 200 |
+| `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. CSV columns: `id,time,actor,action,target,from_role,to_role` |
+| `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
+| `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found` |
+| `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
+| `POST /api/invites/lookup` | `{ token }` | `200 { invite: { board, ownerEmail, email, role, expiresAt } }`, `404 invite_invalid`, `429 too_many` |
+| `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
+| `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
+
+`AuditEntry` is `{ id, at, actor, action, target: string|null, from: role|null, to: role|null }`.
+`actor` is the signed-in email that did it, or `system`. Actions: `invite_sent`, `invite_resent`,
+`invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
+late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
+`sharing_restored`. The plan entries are written when the webhook arrives, when the board
+rechecks with members connected, or when the owner opens the members list, whichever is first.
+The log is kept for as long as the account exists; nothing prunes it.
+
+**Invite links.** `https://askscottpierce.com/tasks/invite#t=<token>`. The token is 32 random
+bytes and sits in the fragment, so it never reaches the server in a URL, a log, or a Referer.
+D1 holds only `SHA-256("invite:" + token)`, and the invite is found by that hash. One refusal,
+`invite_invalid` ("This invite isn't for this account, or it's no longer valid."), covers a
+wrong account, a used, expired, revoked, declined, or made-up token. Accepting clears the hash
+in the same statement, so a link works once. Lookups are limited to 30 an hour per account and
+120 per IP. `/tasks/invite` is a page (`src/client/Invite.tsx`, plain for now, `noindex`):
+signed out it links to `/tasks/?next=/tasks/invite%23t%3D<token>`, and sign-in comes back to it.
+`next` only ever takes paths inside the app (`safeNext`).
+
+**The email** goes out the same way sign-in codes do (`sendInvite` in `src/members.ts`): who
+invited you, the role, the link, when it expires, and that you can ignore it. With
+`DEV_LOGIN_CODES=1` nothing is sent: the link is printed in the terminal and returned as
+`devLink`. In production the API never returns it.
+
+**`ALLOWED_EMAILS`.** An address with a live invite or a membership may sign in even when the
+list would refuse it (`maySignIn` in `src/auth.ts`). Nothing else about the list changes.
+
+**For whoever builds the UI.**
+
+- The upgrade prompt belongs on the Invite button when `board.sharing` is `pro_required`.
+  `suspended` and `encrypted` each need their own line; so does a member's `plan_lapsed`.
+- `Workspace` isn't member-aware yet. On a shared board: don't mount the cloud chat (its
+  history fetch is a 404), don't call `usage`, `undoRedo`, `setTheme`, or the lane and
+  encryption actions, pass `board` to the attachment calls, and skip the "this board was
+  encrypted on this device" check, which is keyed to your own account.
+- A writer dragging a card inside a sorted lane is refused (`setLaneManual`); moving between
+  lanes works.
+
 ## // SEARCH
 
 Search covers card titles and notes (not attachments yet). It runs inside each user's
@@ -1162,7 +1386,7 @@ name, size, and type go into the board, so agents and the assistant see file nam
 - **Limits.** `ATTACHMENT_MAX_MB` (25) per file and `ATTACHMENT_QUOTA_MB` (250) per user,
   counted from R2. At most 20 files per card.
 - **Downloads** (`GET /tasks/api/attachments/<id>`) only look under the signed-in user's
-  own prefix. Images, PDFs, and plain text open inline; everything else downloads as
+  own prefix, unless `?board=` names a board they're a member of (`// TEAM_BOARDS`). Images, PDFs, and plain text open inline; everything else downloads as
   `application/octet-stream`. Every response has `nosniff`, and everything but PDFs
   gets a sandboxing CSP, so an uploaded HTML or SVG file can't run on this origin.
 - **Removal is undoable.** Removing a file, or deleting its card or lane, drops only the
@@ -1344,10 +1568,20 @@ npm run check:nudge      # "No agent connected yet": when it shows, and that und
 npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
 npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
 npm run check:presence   # Sessions rules: what a claim, a refused claim, and a release say, and that one decision counts once
+npm run check:members    # team boards, against a running local dev server: five-plus real accounts attack every way in (// TEAM_BOARDS)
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
 npm run check:launch     # the launch copy against its limits, and the gallery's files and sizes
 ```
+
+`check:members` is the one check that needs a server. Start `npm run dev:local -- --port 5231
+--strictPort` first (or pass another address: `npm run check:members -- http://localhost:5173`).
+It only runs against localhost with `DEV_LOGIN_CODES=1`: it signs up throwaway
+`tb-…@example.com` accounts, edits the local D1 through `wrangler d1 execute --local` (to make
+an owner Pro, age an invite, and confirm only a token hash is stored), and waits for the
+board's own recheck in the plan-lapse rows, so it takes a minute or two. Under the dev server
+a refused WebSocket upgrade arrives as a dropped connection with no status; the check accepts
+that and checks the status when one comes through.
 
 The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
 `src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
@@ -1480,9 +1714,14 @@ feature changes, check `docs/launch/` the same way you'd check the landing page.
 ## // DEPLOY
 
 ```sh
+npm run db:migrate:remote    # FIRST, whenever migrations/ changed
 npm run deploy               # vite build && wrangler deploy
-npm run db:migrate:remote    # only when migrations/ changes
 ```
+
+**Migrate before you deploy.** `0005_team_boards.sql` adds the team-board tables, and the new
+Worker reads them on every sign-in under `ALLOWED_EMAILS`, every Stripe webhook, and every
+`/api/board*` call. Deployed without the migration, those fail. The migration only adds
+tables, so the old Worker runs fine on top of it: migrate, then deploy.
 
 Secrets (`npx wrangler secret put <NAME>`): `TURNSTILE_SECRET`, `STRIPE_SECRET_KEY`,
 `STRIPE_WEBHOOK_SECRET`, `GOOGLE_CLIENT_SECRET`, and optionally `MICROSOFT_CLIENT_ID` and
@@ -1510,3 +1749,6 @@ for Email Sending.
 | `STRIPE_PRICE_ID` | empty (billing off) | the Pro subscription's recurring price |
 | `ATTACHMENT_MAX_MB` | `25` | largest single attachment |
 | `ATTACHMENT_QUOTA_MB` | `250` | attachment storage per user |
+| `MAX_BOARD_MEMBERS` | `10` | people on one shared board, pending invites included |
+| `MAX_DAILY_INVITE_EMAILS` | `20` | invite emails one owner can send in a UTC day, resends included |
+| `MEMBER_RECHECK_SECONDS` | `30` | how often a board rechecks its connected members against D1 (at least 5) |
