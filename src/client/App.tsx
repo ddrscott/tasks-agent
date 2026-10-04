@@ -30,7 +30,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { MemberChat } from "./MemberChat";
-import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
+import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
@@ -603,6 +603,9 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       let pieces = 0;
       let why: string | null = null;
       const left: string[] = [];
+      // Each distinct reason the server gave, with the lines it was given for, in the order they came.
+      const reasons = new Map<string, string[]>();
+      let untried = 0;
       for (let i = 0; i < lines.length && !left.length;) {
         const piece: { title: string; tags?: string[] }[] = [];
         let size = 0;
@@ -619,8 +622,12 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           added += r.ids.length;
           pieces += 1;
           if (r.left.length) {
-            why = plainError(r.left[0].error);
+            for (const x of r.left) {
+              const reason = plainError(x.error);
+              reasons.set(reason, [...(reasons.get(reason) ?? []), lines[i + x.index] ?? ""]);
+            }
             const not = new Set(r.left.map((x) => x.index));
+            untried = lines.length - (i + piece.length);
             left.push(...lines.slice(i, i + piece.length).filter((_, n) => not.has(n)), ...lines.slice(i + piece.length));
           }
         } catch (e) {
@@ -631,6 +638,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       }
       // One piece is one undo step, so the toast can offer it. More than one isn't, so it doesn't.
       if (added > 1) say(`Added ${added} cards`, pieces === 1);
+      if (reasons.size) why = leftReasons(reasons, untried);
       return { added, left, why };
     },
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index).catch(refused),

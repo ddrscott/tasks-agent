@@ -86,6 +86,20 @@ export function accessChangeText(was: MemberAccess, now: MemberAccess): string |
   return null;
 }
 
+/**
+ * Why the lines of a pasted list that didn't become cards were left, for the note under the
+ * box. One reason reads as one sentence. Lines held back for different reasons each get
+ * theirs, with the line it's about, one to a row: "5 added, 2 left" used to explain only the
+ * first. `untried` is how many lines after a stopped piece were never sent.
+ */
+export function leftReasons(reasons: Map<string, string[]>, untried = 0): string {
+  const rest = untried > 0 ? `${untried} more ${untried === 1 ? "line wasn't" : "lines weren't"} tried. Add again once the ${reasons.size > 1 ? "others are" : "rest is"} sorted out.` : "";
+  if (reasons.size === 1 && !rest) return [...reasons.keys()][0];
+  const short = (line: string) => (line.length > 40 ? `${line.slice(0, 40)}…` : line);
+  const rows = [...reasons].map(([reason, lines]) => `“${short(lines[0])}”${lines.length > 1 ? ` and ${lines.length - 1} more` : ""}: ${reason}`);
+  return [reasons.size > 1 ? "They were left for different reasons." : "", ...rows, rest].filter(Boolean).join("\n");
+}
+
 /** Why the server turned a writer's change down, when the app can say it before they try. */
 export const ASK_HOLDS = (owner: string) => `This card has a question waiting on ${owner}. It can't be finished or deleted until they answer.`;
 

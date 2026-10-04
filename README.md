@@ -1440,7 +1440,11 @@ own. The owner's all land. A member's land while they fit (`takeRoom` in `src/me
 the same card limits and board ceilings as the write guard, asked one card at a time), and the
 answer is `{ ids, left: [{ index, error }] }`: `left` is every line that didn't become a card,
 by its place in the list, with the reason. The app leaves exactly those lines in the box under
-one sentence ("10 added, 20 left. This board has 1,000 cards, the most a member can add to. …")
+one sentence ("10 added, 20 left. This board has 1,000 cards, the most a member can add to. …"),
+or, when lines were left for different reasons, a row per reason with the line it's about
+(`leftReasons` in `src/client/member.tsx`: "5 added, 2 left. They were left for different
+reasons." then `“bad line #gauntlet”: Only … can put #gauntlet on a card …` and the same for
+`#needs-ceo`; it used to give the first reason only),
 and doesn't empty the box until the server has answered, so nothing is dropped and nothing has
 to be pasted twice. One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
 member's frame under 24 KB, so a longer paste goes up in pieces: each piece is one change, the
