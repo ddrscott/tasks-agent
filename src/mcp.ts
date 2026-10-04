@@ -45,12 +45,13 @@ Several agent sessions can share this board. Before you start work on a card, ca
 a session id (get_started hands you one; without it, make one up once and keep it), what you are
 (agent), your hostname if you know it (machine), and the name of the folder you're in (project). If it's refused, another live session has
 the card: leave it and take the next one. get_board lists the cards that are claimed. Call
-release_card when you finish a card or give up on it.
+release_card when you finish a card or give up on it. Pass the same session id to ask_ceo:
+the board shows that session as waiting on the owner until they answer.
 
 When you need the owner to decide something, call ask_ceo with a one-line question and 2 to 4
 options instead of writing the question into the notes. They answer with one tap, and get_board
-then shows the card as ANSWERED. Nothing calls you when that happens: call wait_for_answer with the
-card's id, which holds until the answer lands. If you can't go on with a card (a tool was refused, or
+then shows the card as ANSWERED. Keep your claim on the card while you wait. Nothing calls you when
+the answer comes: call wait_for_answer with the card's id, which holds until the answer lands. If you can't go on with a card (a tool was refused, or
 something is missing), ask with ask_ceo too, so the owner sees it on the board.`;
 
 /** How often wait_for_answer looks at the board while it holds. */
@@ -169,13 +170,24 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         question: z.string().min(1).max(240).describe("One line, ending in a question mark"),
         options: z.array(z.string().min(1).max(140)).min(2).max(4).describe("2 to 4 answers to choose from. The owner can also type something else"),
         recommended: z.number().int().min(1).max(4).optional().describe("Which option you recommend, counting from 1"),
+        session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, the one you claimed the card with. The board shows that session as waiting on the owner"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    }, async (input: { id: string; question: string; options: string[]; recommended?: number }) => {
+    }, async (input: { id: string; question: string; options: string[]; recommended?: number; session_id?: string }) => {
       const no = await locked();
       if (no) return no;
-      const r = (await agent.askCeo({ ...input, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
-      return r.ok ? text(`${r.summary}\n\nWaiting on the owner:\n${r.board}`) : text(r.summary, true);
+      const { session_id, ...ask } = input;
+      const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 })) as ToolOutcome;
+      if (!r.ok) return text(r.summary, true);
+      // Presence is told who asked, so the card and Sessions say that session needs input until the
+      // owner answers. With no session_id it's whoever holds the card, which is the asker when the
+      // agent claimed first, as the rules have it.
+      const title = (await agent.cardTitle(input.id)) ?? undefined;
+      const asker = await presence.asked(user.id, { cardId: input.id, sessionId: session_id, question: input.question, title });
+      const shown = asker
+        ? `The board shows session ${asker} waiting on the owner. Keep your claim on this card: don't call release_card.`
+        : "No session is shown waiting on this: claim the card with claim_card and the board will say who asked.";
+      return text(`${r.summary}\n${shown}\n\nWaiting on the owner:\n${r.board}`);
     });
 
     // Holding a request open is how every client gets to wait, with no shell and no feed. The MCP
@@ -207,7 +219,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
           if (card && state === "asking" && card.done) ready.push(`[${id}] was moved to the last lane with its question still open: the owner finished it, so stop waiting on it.`);
           else if (state === "asking") waiting.push(id);
           else if (!card) ready.push(`[${id}] is gone: the owner deleted it, so stop working on it.`);
-          else if (state === "answered") ready.push(`ANSWERED. Claim it again with claim_card and act on the answer:\n${card.text}`);
+          else if (state === "answered") ready.push(`ANSWERED. Call claim_card on it (that renews your claim, or takes it back if it lapsed) and act on the answer:\n${card.text}`);
           else ready.push(`[${id}] has no open question and no answer. Call get_card to see where it stands.`);
         }
         if (ready.length) {

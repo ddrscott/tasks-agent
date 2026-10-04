@@ -20,7 +20,12 @@ export type Session = {
   seenAt: number;
 };
 
-export type Claim = { cardId: string; sessionId: string; agent: string; claimedAt: number };
+export type Claim = {
+  cardId: string; sessionId: string; agent: string; claimedAt: number;
+  /** The question this session asked on the card (ask_ceo), while it's open. Gone once it's answered or taken back. */
+  asked?: string;
+  askedAt?: number;
+};
 
 export type PresenceView = { sessions: Session[]; claims: Claim[]; now: number };
 
@@ -28,6 +33,14 @@ export type PresenceView = { sessions: Session[]; claims: Claim[]; now: number }
 export const STALE_MS = 5 * 60 * 1000;
 
 export const isStale = (s: Session, now: number) => now - s.seenAt > STALE_MS;
+
+/**
+ * Whether a session counts in "N live sessions". Stale ones don't. Neither does an idle session
+ * that only ever spoke MCP (no folder, so no hooks): it holds no card and waits on nothing, and
+ * with no hooks nothing says its agent is still running. A one-shot agent that released its last
+ * card and exited would otherwise sit in the count for five more minutes.
+ */
+export const isLive = (s: Session, now: number) => !isStale(s, now) && !(s.state === "idle" && !s.cwd);
 
 /** A project or machine nobody told us. Older rows hold the word "unknown"; newer ones hold nothing. */
 export const known = (v: string) => (v && v !== "unknown" ? v : "");
@@ -39,20 +52,51 @@ export const projectName = (s: Pick<Session, "project">) => known(s.project) || 
 export const whoWhere = (s: Pick<Session, "agent" | "machine">, agent = s.agent) =>
   [agent, known(s.machine)].filter(Boolean).join(" · ") || "agent";
 
+// ── A session that asked ─────────────────────────────────────────────────────────────────────
+// A session with a question open is waiting on you, whatever its last tool call was. Its row
+// keeps what hooks or claims wrote underneath, and reads like this for as long as the question
+// is open. Presence.view applies it, and so do the demo and the front page's sample board.
+
+/** What a waiting session's row says in place of its last action. */
+export const askedLine = (question: string) => `asked: ${question}`;
+
+/** The sessions as they read: one with a question open says needs input and the question (its newest, with several). */
+export function withAsks(sessions: Session[], claims: Claim[]): Session[] {
+  const newest = new Map<string, Claim>();
+  for (const c of claims) {
+    if (!c.asked) continue;
+    const had = newest.get(c.sessionId);
+    if (!had || (c.askedAt ?? 0) >= (had.askedAt ?? 0)) newest.set(c.sessionId, c);
+  }
+  if (!newest.size) return sessions;
+  return sessions.map((s) => {
+    const c = newest.get(s.id);
+    return c ? { ...s, state: "needs-input" as const, last: askedLine(c.asked!).slice(0, 250) } : s;
+  });
+}
+
+/** How long a question has been open, for the line under it: "waiting 40s", "waiting 4m", "waiting 2h". */
+export function waitingFor(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `waiting ${s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`}`;
+}
+
 // ── What's waiting on you ────────────────────────────────────────────────────────────────────
 
 /** As much of a card as the count needs. */
 type Asked = { id: string; ask?: unknown };
 
 /**
- * The session behind a card's open question, when that session is itself stopped at a prompt.
- * That's one decision, not two: it shows as the question, with the session under it.
+ * The session behind a card's open question: the one holding the card that's stopped until you
+ * answer, which is the session that asked (withAsks). That's one decision, not two: it shows as
+ * the question, with the session under it. A stale one is still shown, marked stale, since
+ * "nobody is listening for this answer anymore" is worth knowing before you tap.
  */
-export function askingSession(card: Asked, sessions: Session[], claims: Claim[], now: number): Session | null {
+export function askingSession(card: Asked, sessions: Session[], claims: Claim[]): Session | null {
   if (!card.ask) return null;
   const claim = claims.find((c) => c.cardId === card.id);
   const s = claim && sessions.find((x) => x.id === claim.sessionId);
-  return s && s.state === "needs-input" && !isStale(s, now) ? s : null;
+  return s && s.state === "needs-input" ? s : null;
 }
 
 /**
@@ -96,6 +140,53 @@ export function afterClaim(prev: ClaimRow | null, said: Said, title: string, won
     agent: said.agent || prev?.agent || "",
     state: holds > 0 ? "working" : "idle",
     last: won ? `claimed ${named(title)}` : `asked for ${named(title)}, which another session holds`,
+  };
+}
+
+/**
+ * The row under a session that just asked a question (ask_ceo). It keeps the card, so it's still
+ * working underneath; while the question is open the row reads needs input instead (withAsks).
+ */
+export function afterAsk(prev: ClaimRow | null, title: string, holds: number): ClaimRow {
+  return {
+    project: prev?.project ?? "", machine: prev?.machine ?? "", agent: prev?.agent ?? "",
+    state: holds > 0 ? "working" : "idle",
+    last: `asked a question on ${named(title)}`,
+  };
+}
+
+/** A card whose question just closed: you answered it, or it was taken off the card with no answer. */
+export type Settled = { cardId: string; title: string; how: "answered" | "withdrawn" };
+
+/** As much of a board as that rule needs. */
+type AskedCards = { cards: { id: string; title: string; ask?: unknown; answer?: { at: string } }[] };
+
+/**
+ * The questions a change closed. A card that had one and now has none: answered when the card
+ * carries a new answer, withdrawn otherwise (#needs-ceo taken off by hand, or the ask undone). A
+ * deleted card isn't here; endedCards has it. A question replaced by another is still open.
+ */
+export function settledAsks(before: AskedCards, after: AskedCards): Settled[] {
+  if (before.cards === after.cards) return [];
+  const now = new Map(after.cards.map((c) => [c.id, c]));
+  const out: Settled[] = [];
+  for (const c of before.cards) {
+    const next = now.get(c.id);
+    if (!c.ask || !next || next.ask) continue;
+    out.push({ cardId: c.id, title: next.title, how: next.answer && next.answer.at !== c.answer?.at ? "answered" : "withdrawn" });
+  }
+  return out;
+}
+
+/**
+ * The row of a session that only claims, once its question closed. It still holds the card, so
+ * it's working again; nobody was heard from, so its last-seen time doesn't move.
+ */
+export function afterSettled(prev: ClaimRow, e: Pick<Settled, "title" | "how">, holds: number): ClaimRow {
+  return {
+    ...prev,
+    state: holds > 0 ? "working" : "idle",
+    last: e.how === "answered" ? `got your answer on ${named(e.title)}` : `its question on ${named(e.title)} was taken back`,
   };
 }
 

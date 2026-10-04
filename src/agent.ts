@@ -8,7 +8,7 @@ import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type C
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type TaskEvent } from "./events";
-import { endedCards } from "./presence-shared";
+import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -138,6 +138,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /**
    * A card that just reached the last lane, or was deleted, can't still be "working": tell
    * Presence so its claim ends now instead of 15 minutes later (endedCards in presence-shared.ts).
+   * A question that was answered or taken back is told the same way, so the session that asked
+   * stops reading "needs input" (settledAsks).
    * This is the one place the board talks to Presence about a change, and it only ever sends:
    * nothing comes back into board state, so it adds no undo step, flashes no card, and publishes
    * no agent event. An encrypted board keeps no presence, so there's nothing to tell.
@@ -145,9 +147,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private endClaims(before: Board, after: Board, by: Actor) {
     if (after.sealed) return;
     const ended = endedCards(before, after, by);
-    if (!ended.length) return;
+    // A question that was answered or taken back: the session that asked stops reading needs input.
+    const settled = settledAsks(before, after);
+    if (!ended.length && !settled.length) return;
     const presence = this.env.Presence.get(this.env.Presence.idFromName(this.name));
-    this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
+    if (settled.length) this.ctx.waitUntil(presence.settle(settled).catch((e: Error) => console.warn("settling questions failed", e.message)));
+    if (ended.length) this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
   }
 
   /** Tell any listening agent session (events.ts) about changes you made to #agent cards. */

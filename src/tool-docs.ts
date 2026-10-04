@@ -72,7 +72,9 @@ export const TOOL_DOCS = {
       "Ask the board's owner to decide something, as a multiple-choice question on a card. The card gets #needs-ceo and " +
       "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
       "the notes, and when you can't go on with a card: say what you need. The answer shows in get_board as ANSWERED. Keep the question to " +
-      "one line, make the options complete actions, and put the reasoning in the card's notes. Move on to other work, and call wait_for_answer when none is left.",
+      "one line, make the options complete actions, and put the reasoning in the card's notes. Pass session_id, the one you claimed the card with: " +
+      "the board then shows your session as needs input, with the question, until the owner answers. Keep your claim on the card while you wait, " +
+      "move on to other work, and call wait_for_answer when none is left.",
     about: "Ask you a multiple-choice question on a card. You answer with one tap.",
   },
   wait_for_answer: {
@@ -91,7 +93,7 @@ export const TOOL_DOCS = {
     about: "Claim a card for one agent session, so two agents never take the same one.",
   },
   release_card: {
-    description: "Give up your claim on a card, when you finish it or stop working on it. Only the session holding the claim can release it.",
+    description: "Give up your claim on a card, when you finish it or stop working on it. Don't release a card you asked a question on: it's waiting on the owner, and releasing it takes your session off the card. Only the session holding the claim can release it.",
     about: "Give a claimed card back.",
   },
 } satisfies Record<string, ToolDoc>;
