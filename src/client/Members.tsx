@@ -18,6 +18,8 @@ import { sharingFacts } from "./sharing";
 export type BoardInfo = {
   id: string; ownerEmail: string; plan: "free" | "pro"; sharing: Sharing;
   maxMembers: number; used: number; maxInvitesPerDay: number; invitesToday: number;
+  /** Whether "Manage subscription" has a Stripe subscription to open. False for Pro an admin gave, or took back. */
+  manage: boolean;
 };
 
 // ---------- the members list, shared by the top-bar button, this dialog, and Encryption ----------
@@ -499,10 +501,11 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
           </p>
           {billingOn === false
             ? <p>Pro isn't for sale on this server right now, so there's nothing to buy yet.</p>
-            : <p>It all comes back the moment Pro does.{plans?.pro ? price(plans.pro.price) : ""}</p>}
+            : <p>It all comes back the moment Pro does.{plans?.pro ? price(plans.pro.price) : ""}{!board.manage && " There's no subscription on this account: Pro here was given by an admin, or never started."}</p>}
           <div className="mem-actions">
             {upgrade}
-            {billingOn && <button type="button" className="linkish" disabled={!!busy} onClick={() => void goBilling("portal")}>Manage subscription</button>}
+            {/* Only with a Stripe subscription behind it. Pro an admin gave and took back has none, and the portal would answer "No subscription to manage yet." */}
+            {billingOn && board.manage && <button type="button" className="linkish" disabled={!!busy} onClick={() => void goBilling("portal")}>Manage subscription</button>}
           </div>
         </div>
       )}

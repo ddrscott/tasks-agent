@@ -825,8 +825,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
                     {usage?.billing && usage.plan === "free" && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
                     )}
-                    {/* Pro an admin gave has no subscription behind it, so there's nothing to manage. */}
-                    {usage?.billing && usage.plan === "pro" && !usage.granted && (
+                    {/* Offered only when there's a Stripe subscription to open (`manage`, from the server). Pro an admin gave has none. */}
+                    {usage?.billing && usage.manage && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
                     )}
                     {/* The admin page is about accounts, not boards, so it sits with what's yours and never on a board shared with you. */}

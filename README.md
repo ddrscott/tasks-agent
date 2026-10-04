@@ -1201,7 +1201,14 @@ each card.
   price from `GET /api/plans`; with billing off (`plans.pro` is null) it says Pro isn't
   available yet and shows no button. A lapsed plan (`suspended`) gets a `view only` block
   above the list: nothing was deleted, members can only look, invites and resends are off,
-  roles and removals still work, with Upgrade to Pro and Manage subscription. An encrypted
+  roles and removals still work, with Upgrade to Pro and, when there's a subscription to
+  manage, Manage subscription. **Manage subscription is offered on one rule everywhere**
+  (this block and the account menu): billing is on and the account has a Stripe customer,
+  which the server reports as `manage` on `usage()` and on `board` in `GET /api/board/members`
+  (`canManage` in `src/billing.ts`, the same lookup `POST /api/billing/portal` does before it
+  calls Stripe). An owner whose Pro was given by an admin and taken back has no customer, so
+  the block shows Upgrade to Pro alone and says there's no subscription on the account; the
+  button used to be there and answered "No subscription to manage yet." An encrypted
   board (`encrypted`) shows only that sharing is off and why, with a button to the
   Encryption dialog. A full board and a spent day of invite emails disable Invite (and
   Resend) and say the number. They're two caps and can both be hit: then the form shows both
@@ -1751,7 +1758,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 
 | Call | Body | Answer |
 |---|---|---|
-| `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday }, members: Member[] }` |
+| `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday, manage: boolean }, members: Member[] }` |
 | `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit` (with `also: ["invite_limit"]` when the day's emails are spent too), `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
 | `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above, plus `409 already_member` when they accepted in the meantime (inviting a pending address again can answer this too) |
 | `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
@@ -2044,8 +2051,10 @@ Pro plan without a subscription. Admins see the link in the account menu.
   last sign-in. Every sign-in writes the row (`noteSignIn`), which is what gives the page a
   list. An admin can add an email that has never signed in; the flags are waiting when it does.
 - **Pro is a live Stripe subscription or a grant** (`planSource` in `src/billing.ts`). A
-  granted account's `usage()` carries `granted: true`, so the app doesn't offer Manage
-  subscription for a subscription that isn't there. It can still subscribe. Team boards
+  granted account's `usage()` carries `granted: true`, and every account's carries `manage`:
+  whether there's a Stripe customer for the portal to open. The app offers Manage
+  subscription on `manage` alone, in the account menu and in Members, so it's never there for
+  a subscription that isn't. A granted account can still subscribe. Team boards
   follow the same answer (`// TEAM_BOARDS`): a granted owner can share, and flipping the Pro
   switch tells that owner's board at once (`planChanged`), so taking a grant back from an
   owner who isn't paying turns their members view only on the tabs they have open.

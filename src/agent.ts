@@ -3,7 +3,7 @@ import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable, type Connection } from "agents";
 import { convertToModelMessages, isStepCount, pruneMessages, streamText, tool } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
-import { billingEnabled, dailyLimit, planFor, planSource, type Usage } from "./billing";
+import { billingEnabled, canManage, dailyLimit, planFor, planSource, type Usage } from "./billing";
 import * as ops from "./shared";
 import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type By, type Card, type SealInfo } from "./shared";
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
@@ -1394,7 +1394,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async usage(): Promise<Usage> {
     const { plan, granted } = await planSource(this.env, this.name);
     const used = this.sql<{ chats: number }>`SELECT chats FROM usage WHERE day = ${this.today()}`[0]?.chats ?? 0;
-    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env), ...(granted ? { granted } : {}) };
+    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env), ...(granted ? { granted } : {}), manage: await canManage(this.env, this.name) };
   }
 
   /** A cloud turn's tool calls: the assistant, on the owner's behalf. Only the owner's socket can start one. */

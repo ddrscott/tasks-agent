@@ -10,7 +10,7 @@
 import { waitUntil } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
-import { planFor } from "./billing";
+import { canManage, planFor } from "./billing";
 import {
   BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, MEMBER_HTTP_RATE, retryAfter, SIGNAL_WAITS_MS, SLOW_DOWN_HTTP, spendToken, withRetries,
   type Access, type Bucket, type MemberRole,
@@ -387,6 +387,8 @@ async function listMembers(env: Env, owner: User): Promise<Response> {
       id: owner.id, ownerEmail: owner.email, plan, sharing,
       maxMembers: maxMembers(env), used: results.length,
       maxInvitesPerDay: maxDailyInvites(env), invitesToday: sent?.sent ?? 0,
+      // Whether there's a Stripe subscription for "Manage subscription" to open (canManage in billing.ts).
+      manage: await canManage(env, owner.id),
     },
     members: results.map(toMember),
   });

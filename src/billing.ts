@@ -14,8 +14,13 @@ import { memberCap } from "./member-rules";
 import { proGranted } from "./users";
 
 export type Plan = "free" | "pro";
-/** `granted` is Pro an admin gave (users.ts): there's no subscription behind it to manage. */
-export type Usage = { plan: Plan; used: number; limit: number; billing: boolean; granted?: boolean };
+/**
+ * `granted` is Pro an admin gave (users.ts). `manage` is whether "Manage subscription" has
+ * anything to open: billing is on and this account has a Stripe customer (`canManage`). The
+ * app offers the button on that and nothing else, so it never leads to "No subscription to
+ * manage yet."
+ */
+export type Usage = { plan: Plan; used: number; limit: number; billing: boolean; granted?: boolean; manage: boolean };
 
 // past_due keeps Pro while Stripe retries the card; Stripe moves it to canceled or
 // unpaid if the retries fail, and the webhook downgrades then.
@@ -239,9 +244,19 @@ async function webhook(req: Request, env: Env): Promise<Response> {
 
 // ---------- Checkout and the customer portal ----------
 
-async function customerFor(env: Env, user: User): Promise<string | null> {
+async function customerFor(env: Env, user: Pick<User, "id">): Promise<string | null> {
   const row = await env.DB.prepare("SELECT customer_id FROM subscriptions WHERE user_id = ?").bind(user.id).first<{ customer_id: string }>();
-  return row?.customer_id ?? null;
+  return row?.customer_id || null;
+}
+
+/**
+ * Whether the customer portal has something to open for this account: the same question
+ * `portal` below asks before it calls Stripe. Pro an admin gave, taken back or not, has no
+ * customer behind it, and neither does an account that never subscribed.
+ */
+export async function canManage(env: Env, userId: string): Promise<boolean> {
+  if (!billingEnabled(env)) return false;
+  try { return !!(await customerFor(env, { id: userId })); } catch (e) { console.error("billing", (e as Error).message); return false; }
 }
 
 async function checkout(req: Request, env: Env, user: User): Promise<Response> {
