@@ -127,18 +127,34 @@ run ahead of whatever serves the zone.
   (`src/client/Demo.tsx`). It renders before the sign-in check and never opens the agent or
   presence sockets: the board is React state in the tab, changed through the same functions in
   `src/shared.ts`, with undo and redo kept in memory. The seed board, its three sessions, and the
-  script one pretend agent follows are in `src/client/demoData.ts`. Answer its question and it
-  goes back to working, updates the card's `STATUS:` line, moves the card to Done, then picks up
-  the next card and asks again. Where the agent is comes from the board itself, so undoing an
-  answer puts it back to waiting. A strip under the top bar says it's a demo and nothing is
-  saved, with links to sign up and to Connect; a reload or Start over resets it. The seed has
-  `agentSeenAt` set, so "No agent connected yet" never shows there. The only
-  request the page makes is the `GET /tasks/api/me` every page starts with. What needs an
-  account says so instead of failing: the Assistant button explains itself, and the card dialogs
-  show a note where Attachments go. There's no account menu, encryption, or billing there.
-  Search is the in-tab keyword search an encrypted board uses (`localSearch.ts`). The top bar is
-  written out again in `Demo.tsx`, so a button added to the real one in `App.tsx` needs adding
-  there too.
+  script one pretend agent follows are in `src/client/demoData.ts`. Answer its question and its
+  session goes back to working in the same moment; it then updates the card's `STATUS:` line,
+  ticks the checklist, moves the card to Done, picks up the next card, and asks again. When the
+  script runs out, the strip under the top bar says "That's the loop" and offers Start over.
+  - **Undo there is the visitor's.** Unlike a real board, where an agent's MCP call is an undo
+    step, the scripted agent's steps never go on the stack. Each remembered board is saved with
+    how far the agent had got on it (`World` in `Demo.tsx`), and each agent step is also made on
+    every remembered board where the agent was at the same point. So undoing "Add card" leaves
+    what the agent did since, and undoing an answer puts the question back and the agent back
+    to waiting, along with anything it did because of that answer.
+  - **The lead session can't disagree with its card.** It says needs input exactly while the
+    card it's on has a question open; nothing else is stored.
+  - **It follows what the visitor does to its card.** Finish the card before answering and it
+    takes its question back and moves on. Take `#needs-ceo` off and it goes with its own
+    recommendation. Delete the card and it takes the next one; undo that and it's back on it.
+    A card dialog that's open when the agent changes the card is redrawn from the new card,
+    which drops anything typed in it and not saved.
+  - **On a phone** it opens on the lane that holds the open question, not the first lane, and
+    the Theme button stays in the top bar, since there's no account menu to put it in.
+
+  A strip under the top bar says it's a demo and nothing is saved, with links to sign up and to
+  Connect; a reload or Start over resets it. The seed has `agentSeenAt` set, so "No agent
+  connected yet" never shows there. The only request the page makes is the `GET /tasks/api/me`
+  every page starts with. What needs an account says so instead of failing: the Assistant
+  button (and `/`) explains itself, and the card dialogs show a note where Attachments go.
+  There's no account menu, encryption, or billing there. Search is the in-tab keyword search an
+  encrypted board uses (`localSearch.ts`). The top bar is written out again in `Demo.tsx`, so a
+  button added to the real one in `App.tsx` needs adding there too.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
