@@ -161,7 +161,7 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
         <h2 className="h">ASSISTANT</h2>
         <span className="spacer" />
         {messages.length > 0 && <button className="btn ghost" onClick={() => clearHistory()} disabled={busy}>New chat</button>}
-        <button className="btn ghost icon" title="Close" onClick={onClose}><IconClose /></button>
+        <button className="btn ghost icon" title="Close" aria-label="Close the assistant" onClick={onClose}><IconClose /></button>
       </header>
 
       <div className="chat-log" ref={logRef} aria-live="polite">
@@ -229,9 +229,9 @@ export function Chat({ agent, board, vault, open, model, onClose, onBusy, inputR
             }}
           />
           {busy ? (
-            <button type="button" className="btn icon" title="Stop" onClick={() => stop()}><IconStop /></button>
+            <button type="button" className="btn icon" title="Stop" aria-label="Stop" onClick={() => stop()}><IconStop /></button>
           ) : (
-            <button className="btn primary icon" title="Send" disabled={!text.trim() || (capped && !localReady && !vault)}><IconSend /></button>
+            <button className="btn primary icon" title="Send" aria-label="Send" disabled={!text.trim() || (capped && !localReady && !vault)}><IconSend /></button>
           )}
         </form>
         <div className="foot">

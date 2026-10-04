@@ -24,6 +24,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
+import { fitTopbar } from "./topbarFit";
 
 type Me = { email: string; id: string; model: string };
 type Page = "board" | "connect" | "privacy" | "terms";
@@ -398,11 +399,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     <AskContext.Provider value={answerAsk}>
     <div className="app">
       <div className="main">
-        <header className="topbar">
+        <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
           {board.sealed && (
-            <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" onClick={() => setEncOpen(true)}>
-              <IconLock /><span className="hide-sm">encrypted</span>
+            <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
+              <IconLock /><span className="hide-sm label">encrypted</span>
             </button>
           )}
           <div className="stats" aria-label="Summary">
@@ -419,8 +420,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
             <div className="btn-pair">
-              <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"}>
-                <IconUndo /><span className="hide-sm">Undo</span>
+              <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"} aria-label="Undo">
+                <IconUndo /><span className="hide-sm label">Undo</span>
               </button>
               <button className="btn icon" onClick={() => void redo()} disabled={!stack.redo} title={stack.redo ? `Redo ${stack.redo.toLowerCase()} (⇧⌘Z)` : "Nothing to redo"} aria-label="Redo">
                 <IconRedo />
@@ -434,28 +435,28 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
               />
             )}
             <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => void agent.stub.setTheme(t)} />
-            <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)">
-              <IconChat />Assistant
+            <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
+              <IconChat /><span className="label">Assistant</span>
             </button>
             <div className="anchor">
-              <button className="btn icon" title={me.email} aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser /></button>
+              <button className="btn icon account-btn" title={me.email} aria-label="Account" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser /></button>
               {menuOpen && (
-                <Popover onClose={() => setMenuOpen(false)}>
+                <Popover menu label={`Account, ${me.email}`} onClose={() => setMenuOpen(false)}>
                   <div className="menu">
                     <div className="who">{me.email}</div>
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
-                    <button onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
-                    <button onClick={() => { setMenuOpen(false); setQuickAddLane(board.lanes[0]?.id ?? null); }}>New card <kbd>n</kbd></button>
-                    <button onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
-                    <button onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
-                    <button onClick={() => { setMenuOpen(false); setEncOpen(true); }}>{board.sealed ? "Encryption" : "Encrypt with a passphrase…"}</button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(board.lanes[0]?.id ?? null); }}>New card <kbd>n</kbd></button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setEncOpen(true); }}>{board.sealed ? "Encryption" : "Encrypt with a passphrase…"}</button>
                     {usage?.billing && usage.plan === "free" && (
-                      <button onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
+                      <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("checkout"); }}>Upgrade to Pro</button>
                     )}
                     {usage?.billing && usage.plan === "pro" && (
-                      <button onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
+                      <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
                     )}
-                    <button className="danger" onClick={() => void signOut()}>Sign out</button>
+                    <button className="danger" role="menuitem" onClick={() => void signOut()}>Sign out</button>
                   </div>
                 </Popover>
               )}

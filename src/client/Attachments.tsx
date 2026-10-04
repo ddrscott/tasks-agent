@@ -133,7 +133,7 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }
               <a className="att-name" href={fileUrl(a)} target="_blank" rel="noreferrer">{a.name}</a>
               <span className="att-size">{formatBytes(a.size)}</span>
               <a className="btn ghost" href={fileUrl(a, true)} download={a.name} title="Download">↓</a>
-              <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
+              <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
             </li>
           ))}
           {pending.map((name, i) => (
@@ -182,13 +182,13 @@ function SealedFile({ a, vault, onRemove, onError }: { a: Attachment; vault: Vau
 
   return (
     <li>
-      <button type="button" className="att-thumb" onClick={() => void open(false)} title={`Open ${a.name}`}>
+      <button type="button" className="att-thumb" onClick={() => void open(false)} title={`Open ${a.name}`} aria-label={`Open ${a.name}`}>
         {isImage(a) && url ? <img src={url} alt="" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
       </button>
       <button type="button" className="att-name linkish" onClick={() => void open(false)}>{a.name}</button>
       <span className="att-size">{formatBytes(a.size)}</span>
-      <button type="button" className="btn ghost" onClick={() => void open(true)} title="Download">↓</button>
-      <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
+      <button type="button" className="btn ghost" onClick={() => void open(true)} title="Download" aria-label={`Download ${a.name}`}>↓</button>
+      <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
     </li>
   );
 }

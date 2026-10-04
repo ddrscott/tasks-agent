@@ -9,9 +9,9 @@ export function ThemePicker({ current, onPick, open, setOpen }: { current: strin
   const close = () => { applyTheme(current); setOpen(false); };
   return (
     <div className="anchor theme-anchor">
-      <button className="btn icon" title="Theme (t)" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}><IconPalette /></button>
+      <button className="btn icon" title="Theme (t)" aria-label="Theme" aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}><IconPalette /></button>
       {open && (
-        <Popover onClose={close}>
+        <Popover label="Theme" onClose={close}>
           <div className="theme-grid" role="radiogroup" aria-label="Theme" onMouseLeave={() => applyTheme(current)}>
             <h2 className="h">THEME</h2>
             {THEMES.map((t) => (

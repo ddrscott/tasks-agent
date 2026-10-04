@@ -44,8 +44,18 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
   const latest = useRef({ title, notes, due, tags, lane });
   latest.current = { title, notes, due, tags, lane };
 
+  // showModal() puts focus on the first control, which is the X ("Close without saving"). The
+  // title is the better place to land: it says which card this is, and it's what gets edited
+  // most. On a touch screen a focused text field pops the keyboard over a card someone may
+  // only want to read, so focus goes to the dialog itself there.
   useEffect(() => {
-    ref.current?.showModal();
+    const dialog = ref.current;
+    if (!dialog) return;
+    dialog.showModal();
+    const field = dialog.querySelector<HTMLTextAreaElement>(".title-input");
+    if (!field || matchMedia("(hover: none) and (pointer: coarse)").matches) { dialog.focus(); return; }
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
   }, []);
 
   // CSS `field-sizing: content` grows the notes to fit. Where it's missing (Firefox), size it by hand;
@@ -97,7 +107,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
 
   return (
     <dialog
-      ref={ref} className="card-dialog" aria-label="Edit card"
+      ref={ref} className="card-dialog" aria-label="Edit card" tabIndex={-1}
       onCancel={(e) => { e.preventDefault(); cancel(); }}
       // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
       onClick={(e) => {

@@ -75,14 +75,14 @@ export function AsksButton({ cards, open, setOpen, onOpenCard }: ButtonProps) {
   return (
     <div className="anchor">
       <button
-        className="btn asks-btn" aria-expanded={open} onClick={() => setOpen(!open)}
+        className="btn asks-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
         title="Questions waiting on you" aria-label={`${asking.length} question${asking.length === 1 ? "" : "s"} waiting on you`}
       >
         <span className="asks-count">?{asking.length}</span>
-        <span className="hide-sm">need{asking.length === 1 ? "s" : ""} you</span>
+        <span className="hide-sm label">need{asking.length === 1 ? "s" : ""} you</span>
       </button>
       {open && (
-        <Popover onClose={() => setOpen(false)}>
+        <Popover label="Questions waiting on you" onClose={() => setOpen(false)}>
           <div className="asks">
             <h2 className="h">NEEDS_YOU</h2>
             {asking.map((c) => (

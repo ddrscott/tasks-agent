@@ -3,6 +3,13 @@
    Signal and Paper are the house style: square edges, Signal Orange,
    JetBrains Mono for data. The rest exist because people differ;
    Sakura and Ocean round their corners on purpose, as the soft options.
+
+   --accent is for fills, borders, the // slashes and the $ marker. As small text it's too
+   faint in most themes (Signal Orange on Paper is 3.5:1), so text under 18px takes
+   --accent-text, the same hue moved until it reads at 4.5:1 on --bg and --surface.
+   --badge-ink is the ink for small text on an accent fill, like the count badges; white on
+   orange is 3.5:1, so those themes use dark ink. --muted has to read at 4.5:1 on --bg and
+   --surface too. Every theme sets all of these.
    ============================================================ */
 
 :root,
@@ -11,10 +18,12 @@
   --surface: #242424;
   --surface-2: #2e2e2e;
   --ink: #e0e0e0;
-  --muted: #8a8a8a;
+  --muted: #909090;
   --line: #363636;
   --accent: #e85d00;
   --accent-ink: #ffffff;
+  --accent-text: #ff6a00;
+  --badge-ink: #1a1a1a;
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --danger: #ef5350;
   --ok: #4ade80;
@@ -44,6 +53,8 @@
   --line: #dddad2;
   --accent: #e85d00;
   --accent-ink: #ffffff;
+  --accent-text: #b24800;
+  --badge-ink: #1a1a1a;
   --danger: #cc3333;
   --ok: #3d7a4a;
   --warn: #b7791f;
@@ -61,10 +72,12 @@
   --surface: #3b4252;
   --surface-2: #434c5e;
   --ink: #eceff4;
-  --muted: #a3acbd;
+  --muted: #a9b2c2;
   --line: #4c566a;
   --accent: #88c0d0;
   --accent-ink: #2e3440;
+  --accent-text: var(--accent);
+  --badge-ink: var(--accent-ink);
   --danger: #bf616a;
   --ok: #a3be8c;
   --warn: #ebcb8b;
@@ -89,6 +102,8 @@
   --line: #44475a;
   --accent: #ff79c6;
   --accent-ink: #282a36;
+  --accent-text: var(--accent);
+  --badge-ink: var(--accent-ink);
   --danger: #ff5555;
   --ok: #50fa7b;
   --warn: #f1fa8c;
@@ -109,10 +124,12 @@
   --surface: #eee8d5;
   --surface-2: #e6dfc8;
   --ink: #3b4d53;
-  --muted: #748a91;
+  --muted: #536368;
   --line: #d8d0b8;
   --accent: #268bd2;
   --accent-ink: #ffffff;
+  --accent-text: #1c669a;
+  --badge-ink: #001a21;
   --danger: #dc322f;
   --ok: #859900;
   --warn: #b58900;
@@ -138,6 +155,8 @@
   --line: #2f4136;
   --accent: #8bc34a;
   --accent-ink: #14200f;
+  --accent-text: var(--accent);
+  --badge-ink: var(--accent-ink);
   --danger: #e57373;
   --ok: #8bc34a;
   --warn: #e6c068;
@@ -158,10 +177,12 @@
   --surface: #ffffff;
   --surface-2: #ffe9ef;
   --ink: #4a2b36;
-  --muted: #9a7582;
+  --muted: #85616e;
   --line: #f5d5df;
   --accent: #e0457b;
   --accent-ink: #ffffff;
+  --accent-text: #cb225d;
+  --badge-ink: #14060b;
   --danger: #d6336c;
   --ok: #2f9e6e;
   --warn: #d9822b;
@@ -184,10 +205,12 @@
   --surface: #ffffff;
   --surface-2: #e3f0f5;
   --ink: #16323f;
-  --muted: #5f7d8a;
+  --muted: #546e79;
   --line: #d3e4eb;
   --accent: #0e9aa7;
   --accent-ink: #ffffff;
+  --accent-text: #0b757f;
+  --badge-ink: #031e25;
   --danger: #e03e3e;
   --ok: #1e9e6a;
   --warn: #d98a1c;
@@ -212,6 +235,8 @@
   --line: #3d2a6b;
   --accent: #ff2e97;
   --accent-ink: #ffffff;
+  --accent-text: var(--accent);
+  --badge-ink: #1b1033;
   --danger: #ff5c7a;
   --ok: #3cf2c7;
   --warn: #ffd166;
@@ -237,6 +262,8 @@
   --line: #d9cfbd;
   --accent: #9b2c1f;
   --accent-ink: #ffffff;
+  --accent-text: var(--accent);
+  --badge-ink: var(--accent-ink);
   --danger: #9b2c1f;
   --ok: #3f6b3a;
   --warn: #9a6a12;
@@ -262,6 +289,8 @@
   --line: #ffffff;
   --accent: #ffd400;
   --accent-ink: #000000;
+  --accent-text: var(--accent);
+  --badge-ink: var(--accent-ink);
   --danger: #ff6b6b;
   --ok: #7dff7d;
   --warn: #ffd400;
@@ -341,14 +370,16 @@ kbd {
 .main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 
 .topbar {
+  /* The opened search box and the filter chip's own row are placed against the bar. */
+  position: relative; --bar-pad: 24px;
   display: flex; align-items: center; gap: 16px;
-  padding: 14px 24px; border-bottom: var(--border-w) solid var(--line);
+  padding: 14px var(--bar-pad); border-bottom: var(--border-w) solid var(--line);
 }
 .wordmark { font: 700 22px/1 var(--font-display); letter-spacing: -.01em; margin: 0; }
 .wordmark span { color: var(--accent); }
 .stats { font: 12px var(--font-mono); color: var(--muted); display: flex; gap: 12px; white-space: nowrap; }
 .stats b { color: var(--ink); font-weight: 600; }
-.stats .due-today b { color: var(--accent); }
+.stats .due-today b { color: var(--accent-text); }
 .stats .overdue b { color: var(--danger); }
 .search { position: relative; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; width: min(320px, 34vw); background: var(--surface); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); transition: border-color .15s; }
 .search:focus-within { border-color: var(--accent); }
@@ -365,7 +396,23 @@ kbd {
 .search mark, .search-results mark { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
 .search-note { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); }
 .topbar .spacer { flex: 1; }
-.topbar .actions { display: flex; gap: 6px; align-items: center; }
+.topbar .actions { display: flex; gap: 6px; align-items: center; flex: none; }
+
+/* When the buttons don't fit, the bar gives up space a step at a time (topbarFit.ts measures it and
+   lists the steps taken in data-tight). First the search box becomes its icon; the input lies over
+   the icon so a click focuses it, and focus opens it across the bar. */
+.topbar[data-tight~="search"] .search { width: 34px; padding: 0; justify-content: center; flex: none; }
+.topbar[data-tight~="search"] .search:not(:focus-within) input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.topbar[data-tight~="search"] .search:not(:focus-within) kbd { display: none; }
+.topbar[data-tight~="search"] .search:focus-within { position: absolute; left: var(--bar-pad); right: var(--bar-pad); width: auto; padding: 0 10px; z-index: 20; }
+.topbar[data-tight~="search"] .search:focus-within input { width: auto; }
+/* Then the button labels go, leaving icon plus count. */
+.topbar[data-tight~="labels"] .label { display: none; }
+/* Then the summary. */
+.topbar[data-tight~="stats"] .stats { display: none; }
+/* Last, the tag filter chip takes a row of its own under the bar. A phone always does this. */
+.topbar[data-tight~="chip"]:has(.filter-chip) { padding-bottom: 50px; }
+.topbar[data-tight~="chip"] .filter-chip { position: absolute; left: var(--bar-pad); bottom: 12px; max-width: calc(100% - 2 * var(--bar-pad)); }
 
 /* ============================================================ board */
 
@@ -453,19 +500,19 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .ask-opt:hover { border-color: var(--accent); background: var(--accent-soft); }
 .ask-opt.rec { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
 .ask-n { flex: none; font: 600 11px var(--font-mono); color: var(--muted); }
-.ask-opt.rec .ask-n { color: var(--accent); }
+.ask-opt.rec .ask-n { color: var(--accent-text); }
 .ask-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); }
 .ask.compact .ask-rec { display: none; }
 .ask-other { display: flex; gap: 6px; }
 .ask-other .field { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px; }
 .asks-btn { border-color: var(--accent); }
-.asks-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--accent); color: var(--accent-ink); border-radius: var(--radius-sm); }
+.asks-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--accent); color: var(--badge-ink); border-radius: var(--radius-sm); }
 .asks { width: 420px; max-width: calc(100vw - 32px); max-height: min(72dvh, 640px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .asks section { display: flex; flex-direction: column; gap: 8px; }
 .asks section + section { padding-top: 14px; border-top: var(--border-w) solid var(--line); }
 .asks-card { align-self: flex-start; max-width: 100%; background: none; border: 0; padding: 0; text-align: left; font: 12px var(--font-mono); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
-.asks-card:hover { color: var(--accent); }
+.asks-card:hover { color: var(--accent-text); }
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
@@ -476,12 +523,13 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
   font: 11px/1 var(--font-mono); padding: 4px 6px;
   border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted);
 }
-.chip.today { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.chip.today { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .chip.overdue { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
 .chip svg { width: 11px; height: 11px; }
 button.chip.tag { background: none; cursor: pointer; color: var(--ink); }
 button.chip.tag:hover { border-color: var(--accent); }
-.chip.tag.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+/* The tint behind an active tag is too close to the accent for accent text, so the border and tint carry it. */
+.chip.tag.active { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
 .filter-chip { height: 28px; padding: 0 8px; }
 .card.faded { opacity: 0.35; }
 .card.faded:hover, .card.faded:focus-within { opacity: 0.7; }
@@ -602,7 +650,7 @@ button.chip.tag:hover { border-color: var(--accent); }
 .cap-note p { margin: 0; }
 .cap-note b { color: var(--ink); }
 .meter { font-family: var(--font-mono); }
-.meter.full { color: var(--accent); }
+.meter.full { color: var(--accent-text); }
 .chat-fab { display: none; }
 
 /* ============================================================ dialogs, popovers, toast */
@@ -634,7 +682,7 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .notes-read { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
 .notes-head { display: flex; align-items: baseline; justify-content: space-between; font: 12px var(--font-mono); color: var(--muted); }
 .notes-edit { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
-.notes-edit:hover { color: var(--accent); }
+.notes-edit:hover { color: var(--accent-text); }
 .md-view { min-height: 110px; max-height: 55dvh; overflow-y: auto; overscroll-behavior: contain; cursor: text; }
 .md-view:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .md { font: 15px/1.55 var(--font-ui); color: var(--ink); overflow-wrap: anywhere; }
@@ -656,7 +704,7 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .md li.md-task > input { margin: 5px 0 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
 .md li.md-task > input[readonly] { cursor: default; }
 .md li.md-task.done > span { color: var(--muted); text-decoration: line-through; }
-.md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .md a:hover { text-decoration-thickness: 2px; }
 .md code { font: 13px/1.5 var(--font-mono); background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); padding: 1px 5px; }
 .md pre { background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; overflow-x: auto; }
@@ -688,9 +736,9 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .att-thumb { width: 36px; height: 36px; display: grid; place-items: center; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); text-decoration: none; }
 .att-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .att-thumb span { font: 600 9px var(--font-mono); text-transform: uppercase; color: var(--muted); }
-.pending .att-thumb span { color: var(--accent); font-size: 13px; }
+.pending .att-thumb span { color: var(--accent-text); font-size: 13px; }
 .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); text-decoration: none; }
-a.att-name:hover { color: var(--accent); }
+a.att-name:hover { color: var(--accent-text); }
 .att-size { font: 11px var(--font-mono); color: var(--muted); }
 .attachments li .btn { height: 28px; width: 28px; padding: 0; justify-content: center; text-decoration: none; }
 
@@ -700,6 +748,8 @@ a.att-name:hover { color: var(--accent); }
   box-shadow: var(--shadow-lift); animation: pop .15s ease-out;
 }
 .anchor { position: relative; }
+/* A popover or dialog takes focus itself when nothing inside should. It just appeared, so it needs no ring. */
+.popover:focus, dialog:focus { outline: none; }
 
 .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px; width: 390px; max-width: calc(100vw - 32px); }
 .theme-grid .h { grid-column: 1 / -1; margin-bottom: 2px; }
@@ -721,7 +771,7 @@ a.att-name:hover { color: var(--accent); }
 .sess-btn { position: relative; }
 .sess-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
 .sess-btn.waiting { border-color: var(--accent); }
-.sess-btn.waiting .sess-count { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.sess-btn.waiting .sess-count { background: var(--accent); border-color: var(--accent); color: var(--badge-ink); }
 .sessions { width: 400px; max-width: calc(100vw - 32px); max-height: min(70dvh, 620px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 .sessions section { display: flex; flex-direction: column; gap: 6px; }
 .sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -736,7 +786,7 @@ a.att-name:hover { color: var(--accent); }
 .sess-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .sess-state { flex: none; display: inline-flex; gap: 6px; font-weight: 600; color: var(--ink); }
 .sess-mark { color: var(--accent); }
-.sess-state.is-needs-input { color: var(--accent); }
+.sess-state.is-needs-input { color: var(--accent-text); }
 .sess-state.is-idle, .sess-state.is-stale { color: var(--muted); font-weight: 400; }
 .sess-state.is-idle .sess-mark, .sess-state.is-stale .sess-mark { color: var(--muted); }
 .sess-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
@@ -745,7 +795,7 @@ a.att-name:hover { color: var(--accent); }
 .sess-card { color: var(--muted); }
 .sess-links { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .sess-links a, .sess-resume { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.sess-links a:hover, .sess-resume:hover { color: var(--accent); }
+.sess-links a:hover, .sess-resume:hover { color: var(--accent-text); }
 .sess-id { color: var(--muted); }
 
 .menu { min-width: 220px; padding: 6px; display: flex; flex-direction: column; }
@@ -787,7 +837,7 @@ a.att-name:hover { color: var(--accent); }
 .code-input { font: 600 28px var(--font-mono); letter-spacing: .5em; text-align: center; padding: 12px 0 12px .5em; }
 .login-error { color: var(--danger); font-size: 13px; }
 .login-note { font: 12px var(--font-mono); color: var(--muted); }
-.login-note b { color: var(--accent); }
+.login-note b { color: var(--accent-text); }
 .linkish { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; }
 .linkish:hover { color: var(--ink); }
 .linkish:disabled { text-decoration: none; cursor: default; }
@@ -807,11 +857,11 @@ a.att-name:hover { color: var(--accent); }
 }
 .login-security ol { margin: 0; padding: 0; list-style: none; counter-reset: sec; display: flex; flex-direction: column; gap: 10px; }
 .login-security li { counter-increment: sec; display: grid; grid-template-columns: 22px 1fr; font-size: 13px; line-height: 1.5; color: var(--muted); }
-.login-security li::before { content: counter(sec, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent); }
+.login-security li::before { content: counter(sec, decimal-leading-zero); font: 600 11px/1.9 var(--font-mono); color: var(--accent-text); }
 .login-security li b { color: var(--ink); font-weight: 600; }
 .login-security .sorry { margin: 0; padding-top: 12px; border-top: 1px dashed var(--line); font: 12px/1.6 var(--font-mono); color: var(--muted); }
 .login-security .sorry .prompt { color: var(--accent); }
-.login-security .sorry b { color: var(--accent); font-weight: 600; }
+.login-security .sorry b { color: var(--accent-text); font-weight: 600; }
 
 .splash { height: 100%; display: grid; place-items: center; font: 13px var(--font-mono); color: var(--muted); }
 .splash::before { content: "$ "; color: var(--accent); }
@@ -824,7 +874,7 @@ a.att-name:hover { color: var(--accent); }
 .connect .topbar a.btn { text-decoration: none; }
 .connect-body { max-width: 760px; margin: 0 auto; padding: 40px 24px 80px; display: flex; flex-direction: column; gap: 36px; }
 .connect-body p { margin: 0; }
-.connect-body a:not(.btn) { color: var(--accent); }
+.connect-body a:not(.btn) { color: var(--accent-text); }
 .connect-body code:not(.mono-box) { font: 12.5px var(--font-mono); padding: 1px 5px; background: var(--surface-2); border-radius: var(--radius-sm); }
 .connect-intro { display: flex; flex-direction: column; gap: 12px; }
 .connect-intro .lede { font: 700 clamp(24px, 4vw, 32px)/1.15 var(--font-display); letter-spacing: -.01em; }
@@ -851,10 +901,10 @@ a.att-name:hover { color: var(--accent); }
 .legal b { color: var(--ink); font-weight: 600; }
 .site-footer { flex: none; padding: 6px 24px 10px; font: 11px/1.4 var(--font-mono); color: var(--muted); }
 .site-footer a { color: var(--muted); text-underline-offset: 2px; }
-.site-footer a:hover { color: var(--accent); }
+.site-footer a:hover { color: var(--accent-text); }
 .version { display: inline-block; }
 .version-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
-.version-btn:hover { color: var(--accent); }
+.version-btn:hover { color: var(--accent-text); }
 .version-mark { color: var(--accent); margin-right: 4px; text-decoration: none; display: inline-block; }
 /* The footer sits at the bottom of the screen, so its list opens upward. */
 .popover:has(> .changes) { top: auto; bottom: calc(100% + 8px); right: auto; left: 0; text-align: left; }
@@ -866,7 +916,7 @@ a.att-name:hover { color: var(--accent); }
 .changes h4 { margin: 4px 0 0; font: 600 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .changes code { font: 12px var(--font-mono); background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); padding: 0 4px; }
 .changes-foot a { color: var(--muted); }
-.changes-foot a:hover { color: var(--accent); }
+.changes-foot a:hover { color: var(--accent-text); }
 .changes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .changes li::marker { color: var(--accent); }
 .changes p { margin: 0; color: var(--muted); }
@@ -894,7 +944,7 @@ a.att-name:hover { color: var(--accent); }
 .client-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 .client-panel { display: flex; flex-direction: column; gap: 12px; }
 .client-panel ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
-.client-panel li::marker { font-family: var(--font-mono); color: var(--accent); }
+.client-panel li::marker { font-family: var(--font-mono); color: var(--accent-text); }
 .snippet { border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
 .snippet-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 6px 12px; border-bottom: var(--border-w) solid var(--line); }
 .snippet-head .mono { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
@@ -919,7 +969,7 @@ a.att-name:hover { color: var(--accent); }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .topbar { padding: 12px 16px; gap: 10px; }
+  .topbar { --bar-pad: 16px; padding: 12px var(--bar-pad); gap: 10px; }
   .stats .hide-sm, .topbar .hide-sm { display: none; }
   .board { padding: 16px; gap: 12px; scroll-snap-type: x mandatory; scroll-padding: 16px; }
   /* Stacked, with the numeral beside each step, so the lanes still get most of a phone screen. */
@@ -954,8 +1004,11 @@ a.att-name:hover { color: var(--accent); }
   .sessions, .asks { width: auto; max-width: none; }
   .asks-btn, .sess-btn { padding: 0 8px; }
   /* Room for the questions and sessions buttons beside the rest of the bar on a phone. */
-  .topbar { gap: 6px; padding: 12px; }
+  .topbar { gap: 6px; --bar-pad: 12px; }
   .topbar .actions { gap: 4px; }
+  /* A tag filter chip doesn't fit beside the buttons, so it gets a row of its own under them. */
+  .topbar:has(.filter-chip) { padding-bottom: 48px; }
+  .topbar .filter-chip { position: absolute; left: var(--bar-pad); bottom: 10px; max-width: calc(100% - 2 * var(--bar-pad)); }
   .ask-opt { min-height: 42px; }
   .search { width: 34px; padding: 0; justify-content: center; flex: none; }
   .search:focus-within { position: absolute; left: 12px; right: 12px; width: auto; padding: 0 10px; z-index: 20; }
@@ -1003,7 +1056,8 @@ a.att-name:hover { color: var(--accent); }
 @media (hover: none) and (pointer: coarse) {
   /* Fingers need about 40px. */
   .btn { height: 40px; }
-  .btn.icon, .search { width: 40px; }
+  .btn.icon, .search, .topbar[data-tight~="search"] .search { width: 40px; }
+  .topbar[data-tight~="search"] .search:focus-within { width: auto; }
   .search { height: 40px; }
   .lane-head { padding: 6px 4px 4px 14px; gap: 4px; }
   .lane-head .btn { height: 40px; width: 40px; }
@@ -1024,7 +1078,7 @@ a.att-name:hover { color: var(--accent); }
 /* ============================================================ end-to-end encryption */
 .sealed-chip {
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px;
-  font: 600 11px var(--font-mono); text-transform: lowercase; color: var(--accent);
+  font: 600 11px var(--font-mono); text-transform: lowercase; color: var(--accent-text);
   background: transparent; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); cursor: pointer;
 }
 .sealed-chip svg { width: 13px; height: 13px; }

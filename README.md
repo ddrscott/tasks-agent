@@ -88,6 +88,23 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
+- **The top bar.** Open questions, a session count, due stats, and a tag filter all add to
+  the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
+  guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
+  gives up space one step at a time and stops at the first step that fits: the search box
+  becomes its icon (click it or press `⌘K` and it opens across the bar), then Undo, "need
+  you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
+  summary goes, and last the tag filter chip moves to its own row under the bar. A phone
+  always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
+  attribute, and `styles.css` does the rest.
+- **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
+  `aria-label` (the account button is "Account", not the email address). The account and
+  lane menus are `role="menu"` with `menuitem` children, the other popovers are
+  `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
+  popover moves focus into it, Esc or a click outside gives focus back to its button, and in
+  a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
+  `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
+  it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
@@ -127,6 +144,12 @@ run ahead of whatever serves the zone.
   page never flashes the wrong theme. Each sign-in email is its own account, so a
   new one keeps the theme this browser already uses until you pick one there
   (`themeChosen` on the board).
+- **Readable color.** Each theme's `--accent` is for fills, borders, the `//` slashes, and
+  the `$` marker. Accent-colored text under 18px uses `--accent-text` instead, the same hue
+  moved until it reads at 4.5:1 on the theme's `--bg` and `--surface` (Paper: `#B24800`
+  where Signal Orange `#E85D00` is 3.5:1). Small text on an accent fill, like the count
+  badges, uses `--badge-ink`, which is dark ink in the themes where white falls short.
+  `--muted` holds 4.5:1 on `--bg` and `--surface` too. A new theme sets all four.
 - **Two assistants, one transcript.** The first time the chat opens, the tab downloads
   Needle 3 (35 MB, once; Cache Storage after that) and runs it in a Web Worker. A message
   goes to it first: the board's lane names and a handful of verb tools (finished, started,
@@ -350,7 +373,8 @@ When an agent needs you to decide something, it asks on the card and you answer 
 - **Answering.** The card face shows the question with a button per option, the recommended one
   outlined. The card editor shows the same plus a box for a typed answer. While anything is
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
-  they can be cleared in a row. On a phone the count is all that shows.
+  they can be cleared in a row. When the bar is short on room, and always on a phone, the
+  count is all that shows.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
