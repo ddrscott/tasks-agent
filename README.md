@@ -92,7 +92,7 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
-- **The top bar.** Open questions, a session count, due stats, and a tag filter all add to
+- **The top bar.** "Need you", a session count, due stats, and a tag filter all add to
   the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
   guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
   gives up space one step at a time and stops at the first step that fits: the search box
@@ -100,7 +100,9 @@ run ahead of whatever serves the zone.
   you", Sessions, and Assistant drop to icon plus count, then the open / due / overdue
   summary goes, and last the tag filter chip moves to its own row under the bar. A phone
   always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
-  attribute, and `styles.css` does the rest.
+  attribute, and `styles.css` does the rest. There's one count of what's waiting on you: "need
+  you" adds up the open questions (`// QUESTIONS`) and the sessions stopped at a prompt
+  (`// SESSIONS`), and the Sessions button next to it only says how many sessions are live.
 - **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
   `aria-label` (the account button is "Account", not the email address). The account and
   lane menus are `role="menu"` with `menuitem` children, the other popovers are
@@ -411,6 +413,11 @@ When an agent needs you to decide something, it asks on the card and you answer 
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. When the bar is short on room, and always on a phone, the
   count is all that shows.
+- **One count for everything waiting on you.** "Need you" also counts the sessions that are
+  stopped at a prompt (state needs input, heard from in the last 5 minutes; see `// SESSIONS`),
+  and lists them under the questions: project, what it wants, machine, and Copy resume command.
+  Those can't be answered from the board, so the row is the way back to the terminal. Three
+  questions and one blocked session read "4 need you" (`AsksButton` in `src/client/Ask.tsx`).
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the
   question comes off, `#needs-ceo` comes off, the answer is kept on the card (`answer`), and
   `ANSWER: … (asked: …)` becomes the first line of the notes so the history stays readable.
@@ -477,7 +484,12 @@ The Sessions button in the top bar lists every Claude Code session that's report
 machine: grouped by project, the ones waiting on you first. A row shows the state (working,
 needs input, idle), the agent and machine, one line about its last action, and how long ago it
 was heard from. After 5 quiet minutes a row is marked stale. "Copy resume command" copies
-`cd <folder> && claude --resume <id>` for the machine it runs on. A card that a lead agent has
+`cd <folder> && claude --resume <id>` for the machine it runs on. The button's count is the
+sessions that are live, and it never turns orange: the ones that need input are counted on
+"need you" beside it, in one list with the open questions (`// QUESTIONS`), so there's one
+number to watch. A stale session isn't counted there. Claude Code's "waiting for your input"
+notice puts every finished session in needs input after a minute, so without that cutoff the
+count would only ever go up. A card that a lead agent has
 claimed shows the same state line under its title, and its editor shows the session's whole
 row, resume command included.
 

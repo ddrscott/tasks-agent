@@ -522,6 +522,8 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .asks section + section { padding-top: 14px; border-top: var(--border-w) solid var(--line); }
 .asks-card { align-self: flex-start; max-width: 100%; background: none; border: 0; padding: 0; text-align: left; font: 12px var(--font-mono); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .asks-card:hover { color: var(--accent-text); }
+/* A session stopped at a prompt, in the same list: its project where a question has its card. */
+.asks-project { margin: 0; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
@@ -792,8 +794,6 @@ a.att-name:hover { color: var(--accent-text); }
    orange $ on the rows that are live. */
 .sess-btn { position: relative; }
 .sess-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
-.sess-btn.waiting { border-color: var(--accent); }
-.sess-btn.waiting .sess-count { background: var(--accent); border-color: var(--accent); color: var(--badge-ink); }
 .sessions { width: 400px; max-width: calc(100vw - 32px); max-height: min(70dvh, 620px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 .sessions section { display: flex; flex-direction: column; gap: 6px; }
 .sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
