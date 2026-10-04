@@ -7,11 +7,12 @@ type Props = {
   value: string;
   onChange(value: string): void;
   onEnter(): void;
+  onBlur?(): void;
   placeholder?: string;
   autoFocus?: boolean;
 };
 
-export function TitleInput({ value, onChange, onEnter, placeholder, autoFocus }: Props) {
+export function TitleInput({ value, onChange, onEnter, onBlur, placeholder, autoFocus }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // CSS `field-sizing: content` grows it to fit. Where that's missing, size it by hand.
@@ -25,7 +26,7 @@ export function TitleInput({ value, onChange, onEnter, placeholder, autoFocus }:
   return (
     <textarea
       ref={ref} className="field title-input" rows={1} value={value} maxLength={200} aria-label="Title"
-      placeholder={placeholder} autoFocus={autoFocus} enterKeyHint="done"
+      placeholder={placeholder} autoFocus={autoFocus} enterKeyHint="done" onBlur={onBlur}
       // A title is one line: a pasted line break becomes a space.
       onChange={(e) => onChange(e.target.value.replace(/\s*\n\s*/g, " "))}
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter(); } }}

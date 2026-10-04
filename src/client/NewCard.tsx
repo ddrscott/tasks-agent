@@ -4,7 +4,7 @@
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
 import { useEffect, useRef, useState } from "react";
-import { cleanTag, type Lane } from "../shared";
+import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { IconClip, IconClose, IconPlus } from "./icons";
@@ -82,6 +82,20 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   // there's nothing left to lose but a retry, so they just close.
   const guard = useDiscardGuard(() => dirty && !addedId, onClose);
 
+  // "Write a haiku #agent" in the title: the #agent moves down into the Tags field, where it can be
+  // seen and taken back out. It happens on leaving the title, and again on Add card in case Enter
+  // was hit straight from the title.
+  function moveTitleTags() {
+    const have = [...new Set(tags.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
+    const split = splitTitleTags(title, have);
+    if (split.title !== title) {
+      setTitle(split.title);
+      const fresh = split.tags.slice(have.length);
+      if (fresh.length) setTags(`${tags.trim() ? `${tags.trimEnd()} ` : ""}${fresh.join(" ")} `);
+    }
+    return split;
+  }
+
   async function add() {
     if ((!title.trim() && !addedId) || busy) return;
     setBusy(true);
@@ -89,10 +103,11 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
     let id = addedId;
     try {
       if (!id) {
+        const split = moveTitleTags();
         id = await onAdd({
           laneId: lanes.some((l) => l.id === lane) ? lane : laneId,
-          title, notes, due: due || null,
-          tags: [...new Set(tags.split(/[\s,]+/).map(cleanTag).filter(Boolean))],
+          title: split.title, notes, due: due || null,
+          tags: split.tags,
         });
         setAddedId(id);
       }
@@ -127,7 +142,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
           <h2 className="h">NEW_CARD</h2>
           <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={guard.requestClose}><IconClose /></button>
         </div>
-        <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} placeholder="What needs doing?" autoFocus />
+        <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} onBlur={() => { if (!busy && !addedId) moveTitleTags(); }} placeholder="What needs doing?" autoFocus />
         <label>
           Notes
           <textarea

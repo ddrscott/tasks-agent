@@ -139,6 +139,40 @@ export function tidyTags(tags: string[]): string[] {
   return out;
 }
 
+/**
+ * Pull trailing #tags off a title a person typed: "Write a haiku #agent" is the title "Write a haiku"
+ * with the tag agent. `have` is the tags the card already has; the tags come back as `have` plus the new ones.
+ *
+ * Only the end of the title is read, one word at a time, and it stops at the first word that isn't a
+ * tag, so a title meant literally stays as typed. A word is a tag when it:
+ *   - follows a space ("C#", "foo#bar", and a title that is only "#agent" are left alone),
+ *   - is # plus letters, digits, - or _ and nothing else, 32 at most (so cleanTag only lower-cases it),
+ *   - has a letter in it ("#123" is an issue number),
+ *   - isn't #needs-ceo, which ask_ceo sets,
+ *   - and still fits under the tag cap. Past the cap, the words left over stay in the title.
+ * A line that is nothing but tags stays a title. Sealed text is ciphertext and passes through.
+ * This is for titles typed in the app. Agents and the assistant pass `tags`, so their titles are never parsed.
+ */
+export function splitTitleTags(text: string, have: string[] = []): { title: string; tags: string[] } {
+  const asTyped = { title: text, tags: have };
+  if (isSealed(text)) return asTyped;
+  let title = text.trimEnd();
+  const found: string[] = [];
+  for (;;) {
+    const m = /^(.*\S)\s+#([\p{L}\p{N}_-]{1,32})$/su.exec(title);
+    if (!m || !/\p{L}/u.test(m[2])) break;
+    const tag = cleanTag(m[2]);
+    if (tag === NEEDS_CEO_TAG) break;
+    if (!have.includes(tag) && !found.includes(tag)) {
+      if (have.length + found.length >= MAX_TAGS_PER_CARD) break;
+      found.unshift(tag);
+    }
+    title = m[1];
+  }
+  if (title === text.trimEnd() || /^#[\p{L}\p{N}_-]+$/u.test(title)) return asTyped;
+  return { title, tags: [...have, ...found] };
+}
+
 /** Set a card's tags, leaving the field off when there are none. */
 function withTags(c: Card, tags: string[]): Card {
   const { tags: _, ...rest } = c;

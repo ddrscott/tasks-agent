@@ -115,6 +115,10 @@ run ahead of whatever serves the zone.
   pasted wait in the dialog and upload once the card exists; if one fails, the card stays
   and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
   still the quick way: type a title and hit Enter, or paste a list to add one card per line.
+  A title that ends in `#tags` is tagged as it's added: "Write a haiku #agent" becomes the card
+  "Write a haiku" with the tag `agent` (see Tags for the rule). That goes for quick add, each
+  line of a pasted list, and the dialog's title, where the tags move down into the Tags field
+  when you leave the title (or hit Add card), so you can see them and take them back out.
 - **Editing a card.** Nothing changes until Save (or Enter in the title or tags). The X in
   the top corner and Esc close the editor and throw the edits away, so opening a card to
   read it can't change it by accident; that covers the title, notes, due date, tags, and
@@ -190,6 +194,20 @@ run ahead of whatever serves the zone.
   the top bar, to clear. While a filter is on, each lane's count reads matches / total
   ("2 / 22"). The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
+- **Tags typed in a title.** `splitTitleTags` in `src/shared.ts` pulls trailing `#tags` off a
+  title a person types for a new card. It reads only the end of the title, one word at a time,
+  and stops at the first word that isn't a tag, so a title meant literally stays as typed. A
+  word counts as a tag when it follows a space, is `#` plus only letters, digits, `-` or `_`
+  (32 at most), and has a letter in it. So "Fix login #agent #shop-api" is "Fix login" with two
+  tags, and these are left alone: `#123` (an issue number), `C#`, `foo#bar`, "Tag a card #agent
+  first" (not at the end), `#agent.` (punctuation), and a title that is nothing but tags. Tags
+  are lower-cased and repeats dropped. Past 10 tags the words left over stay in the title, and
+  `#needs-ceo` stays in the title because only `ask_ceo` sets it. It runs in the tab
+  (`App.tsx`, `Demo.tsx`, `NewCard.tsx`) before anything is saved, so the demo board gets it
+  and an encrypted board seals the title and each tag separately. It does not run on a title
+  being edited (the card editor has a Tags field right there, and a saved title shouldn't
+  change shape under you), and it never runs on titles from agents over MCP or from the
+  assistant: those pass `tags`. `npm run check:tags` covers the rule.
 - **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
   numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
   bold, italic, strikethrough, quotes, and `---` rules. A single line break stays a line break.
@@ -875,6 +893,7 @@ npm run check:sort       # lane sorting: each order, and that only the sorted la
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
+npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 ```
 
