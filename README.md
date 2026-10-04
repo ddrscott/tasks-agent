@@ -306,6 +306,12 @@ run ahead of whatever serves the zone.
   being edited (the card editor has a Tags field right there, and a saved title shouldn't
   change shape under you), and it never runs on titles from agents over MCP or from the
   assistant: those pass `tags`. `npm run check:tags` covers the rule.
+- **Notes stay small until you need them.** In the card dialogs the notes box starts about
+  three lines tall and grows with what's in it, up to about a third of the screen (260px at
+  most on a desktop), then scrolls, so Lane, Due, Tags, and files stay in view. The expander
+  icon next to the Notes label (`src/client/NotesFull.tsx`) gives the notes the whole dialog:
+  everything but the title and the notes steps aside, and Save stays in the foot. The same
+  icon shrinks it back. It works while reading or editing, and in the new-card dialog too.
 - **Markdown notes.** Open a card and its notes read as markdown: `#` headings, bullet and
   numbered lists, `- [ ]` checkboxes, links and bare URLs, `` `code` ``, fenced code blocks,
   bold, italic, strikethrough, quotes, and `---` rules. A single line break stays a line break.

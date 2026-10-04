@@ -20,3 +20,5 @@ export const IconSearch = svg(<><circle cx="11" cy="11" r="7" /><path d="m20 20-
 export const IconClip = svg(<path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7" />);
 export const IconTrash = svg(<><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></>);
 export const IconLock = svg(<><rect x="5" y="11" width="14" height="10" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>);
+export const IconExpand = svg(<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7" />);
+export const IconCollapse = svg(<path d="M20 10h-6V4M14 10l7-7M4 14h6v6M10 14l-7 7" />);

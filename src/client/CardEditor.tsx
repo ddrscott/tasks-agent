@@ -6,6 +6,7 @@ import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { MODAL, useModal } from "./modal";
 import { Markdown, toggleTask } from "./Markdown";
+import { NotesFullButton } from "./NotesFull";
 import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
@@ -50,6 +51,8 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
   const [editing, setEditing] = useState(!card.notes.trim());
   const [lane, setLane] = useState(card.laneId);
+  // Notes take the whole dialog while this is on (the expander next to the Notes label).
+  const [full, setFull] = useState(false);
   const latest = useRef({ title, notes, due, tags, lane });
   latest.current = { title, notes, due, tags, lane };
 
@@ -77,7 +80,7 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
     if (!el || CSS.supports("field-sizing", "content")) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-  }, [notes, editing]);
+  }, [notes, editing, full]);
 
   // When the person asks to edit, focus the textarea with the cursor at the end of the note.
   // A card that opens with no notes shows the textarea too, but leaves focus on the title.
@@ -130,7 +133,7 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
 
   return (
     <dialog
-      ref={ref} className="card-dialog" {...MODAL} aria-label={`Edit card: ${title.trim() || "no title"}`} tabIndex={-1}
+      ref={ref} className={full ? "card-dialog notes-full" : "card-dialog"} {...MODAL} aria-label={`Edit card: ${title.trim() || "no title"}`} tabIndex={-1}
       {...guard.dialogProps}
       // A stray click outside closes an untouched card, but shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !edited()) onClose(); }}
@@ -159,27 +162,26 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
         )}
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={save} />
-        {editing ? (
-          <label>
-            Notes
+        <div className="notes-read">
+          <div className="notes-head">
+            <span id="notes-label">Notes</span>
+            {!editing && <button type="button" className="notes-edit" onClick={edit}>Edit</button>}
+            <NotesFullButton full={full} onToggle={() => setFull((f) => !f)} />
+          </div>
+          {editing ? (
             <textarea
-              ref={notesRef} className="field" value={notes} placeholder="Details, links, anything…"
+              ref={notesRef} className="field" value={notes} placeholder="Details, links, anything…" aria-labelledby="notes-label"
               onChange={(e) => setNotes(e.target.value)}
               onBlur={(e) => {
                 // A click on Close, Mark done, or Delete is about to end the dialog; swapping the
-                // view first would move the button out from under the pointer.
-                if (e.relatedTarget instanceof Element && e.relatedTarget.closest(".dialog-foot")) return;
+                // view first would move the button out from under the pointer. The expander only
+                // resizes the box, so typing carries on in it.
+                if (e.relatedTarget instanceof Element && e.relatedTarget.closest(".dialog-foot, .notes-full-btn")) return;
                 if (latest.current.notes.trim()) setEditing(false);
               }}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && latest.current.notes.trim()) setEditing(false); }}
             />
-          </label>
-        ) : (
-          <div className="notes-read">
-            <div className="notes-head">
-              <span id="notes-label">Notes</span>
-              <button type="button" className="notes-edit" onClick={edit}>Edit</button>
-            </div>
+          ) : (
             <div
               className="field md-view" tabIndex={0} role="group" aria-labelledby="notes-label"
               title="Click to edit"
@@ -196,8 +198,8 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
             >
               <Markdown text={notes} onToggle={(line) => setNotes((n) => toggleTask(n, line))} />
             </div>
-          </div>
-        )}
+          )}
+        </div>
         <div className="dialog-row">
           <label>
             Lane

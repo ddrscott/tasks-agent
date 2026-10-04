@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it
+- A card's notes box starts smaller and grows with what you type up to a limit, so the lane, due date, tags, and files under it stay in view. The expand icon next to Notes gives the notes the whole dialog, and shrinks them back
 
 ## [0.2.0] - 2026-10-04
 

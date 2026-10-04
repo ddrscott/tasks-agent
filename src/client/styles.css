@@ -714,16 +714,26 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .dialog-x:hover:not(:disabled) { color: var(--ink); }
 .dialog-body label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 .dialog-body .title-input { font-size: 18px; font-weight: 600; font-family: var(--font-display); }
-.dialog-body textarea { field-sizing: content; flex: none; min-height: 110px; max-height: 55dvh; resize: vertical; }
+/* Notes start a few lines tall and grow with what's in them, up to a cap, so the fields under them stay in view. The expander gives them the whole dialog. */
+.dialog-body textarea { field-sizing: content; flex: none; min-height: 68px; max-height: min(32dvh, 260px); resize: vertical; }
 /* The title is a textarea so it can wrap (TitleInput.tsx), but it starts one line tall. */
 .dialog-body textarea.title-input { min-height: 0; max-height: 40dvh; resize: none; line-height: 1.3; }
 
 /* Notes, read as markdown. Clicking the box swaps in the textarea above. */
 .notes-read { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
-.notes-head { display: flex; align-items: baseline; justify-content: space-between; font: 12px var(--font-mono); color: var(--muted); }
+.notes-head { display: flex; align-items: center; gap: 10px; min-height: 24px; font: 12px var(--font-mono); color: var(--muted); }
+.notes-head > :first-child { margin-right: auto; }
+.btn.notes-full-btn { width: 24px; height: 24px; color: var(--muted); }
+.btn.notes-full-btn:hover:not(:disabled), .btn.notes-full-btn[aria-pressed="true"] { color: var(--ink); }
+.notes-full-btn svg { width: 14px; height: 14px; }
+/* Expanded: the dialog goes as tall as it's allowed, and everything but the title and the notes steps aside. Save stays in the foot. */
+dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
+.notes-full .dialog-body > :not(.dialog-top, .title-input, .notes-read) { display: none; }
+.notes-full .notes-read { flex: 1 1 0; min-height: 0; }
+.notes-full .notes-read textarea, .notes-full .md-view { flex: 1 1 0; min-height: 0; max-height: none; field-sizing: fixed; resize: none; }
 .notes-edit { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .notes-edit:hover { color: var(--accent-text); }
-.md-view { min-height: 110px; max-height: 55dvh; overflow-y: auto; overscroll-behavior: contain; cursor: text; }
+.md-view { min-height: 68px; max-height: min(32dvh, 260px); overflow-y: auto; overscroll-behavior: contain; cursor: text; }
 .md-view:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .md { font: 15px/1.55 var(--font-ui); color: var(--ink); overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
@@ -1245,7 +1255,9 @@ a.att-name:hover { color: var(--accent-text); }
   @keyframes sheet-in { from { opacity: 0; transform: translateY(12px); } }
   .card-dialog .dialog-body { padding: max(12px, env(safe-area-inset-top)) 12px 12px; gap: 10px; }
   .card-dialog .dialog-body label { gap: 4px; }
-  .card-dialog .dialog-body textarea, .card-dialog .md-view { min-height: 84px; }
+  .card-dialog .dialog-body textarea, .card-dialog .md-view { min-height: 64px; max-height: 30dvh; }
+  dialog.card-dialog.notes-full { height: var(--vvh, 100dvh); }
+  .card-dialog.notes-full .notes-read textarea, .card-dialog.notes-full .md-view { min-height: 0; max-height: none; }
   .card-dialog .dialog-body textarea.title-input { min-height: 0; }
   .card-dialog .dialog-row { gap: 8px; }
   .card-dialog .dialog-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
@@ -1268,6 +1280,7 @@ a.att-name:hover { color: var(--accent-text); }
   .quick-add .btn, .attachments-head .btn { height: 40px; }
   .menu button { padding: 11px 10px; font-size: 14px; }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
+  .btn.notes-full-btn { width: 40px; height: 40px; margin: -8px -10px -8px -6px; }
   .move-row { display: flex; }
   .card-session .sess-resume, .card-session .sess-links a { padding: 12px 0; margin: -6px 0; }
   .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }

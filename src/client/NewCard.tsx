@@ -8,6 +8,7 @@ import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { MODAL, useModal } from "./modal";
+import { NotesFullButton } from "./NotesFull";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
@@ -34,6 +35,8 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  // Notes take the whole dialog while this is on (the expander next to the Notes label).
+  const [full, setFull] = useState(false);
   const [lane, setLane] = useState(laneId);
   const [due, setDue] = useState("");
   const [tags, setTags] = useState("");
@@ -132,7 +135,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
 
   return (
     <dialog
-      ref={ref} className="card-dialog" {...MODAL} aria-label="New card"
+      ref={ref} className={full ? "card-dialog notes-full" : "card-dialog"} {...MODAL} aria-label="New card"
       {...guard.dialogProps}
       // A stray click outside shouldn't throw away something already typed.
       onClick={(e) => { if (e.target === ref.current && !dirty) onClose(); }}
@@ -143,14 +146,17 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
           <button type="button" className="btn ghost icon dialog-x" aria-label={addedId ? "Close" : "Cancel"} title={addedId ? "Close (Esc)" : "Cancel (Esc)"} onClick={guard.requestClose}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} onBlur={() => { if (!busy && !addedId) moveTitleTags(); }} placeholder="What needs doing?" autoFocus />
-        <label>
-          Notes
+        <div className="notes-read">
+          <div className="notes-head">
+            <label htmlFor="new-notes">Notes</label>
+            <NotesFullButton full={full} onToggle={() => setFull((f) => !f)} />
+          </div>
           <textarea
-            className="field" value={notes} maxLength={4000} placeholder="Details, links, anything… Markdown works."
+            id="new-notes" className="field" value={notes} maxLength={4000} placeholder="Details, links, anything… Markdown works."
             onChange={(e) => setNotes(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void add(); } }}
           />
-        </label>
+        </div>
         <div className="dialog-row">
           <label>
             Lane
