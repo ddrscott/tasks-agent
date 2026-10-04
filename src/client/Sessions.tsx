@@ -4,7 +4,7 @@
 // the board's, and "stale" is worked out here from how long a session has been quiet.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { blockedSessions, isStale, projectName, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
+import { blockedSessions, isStale, known, projectName, waitingFor, whoWhere, type Claim, type PresenceView, type Session } from "../presence-shared";
 import { BASE } from "./base";
 import { Popover } from "./Board";
 import { IconSessions } from "./icons";
@@ -78,13 +78,18 @@ export function CardPresence({ cardId }: { cardId: string }) {
   return <PresenceLine session={session} agent={claim.agent} now={now} />;
 }
 
-/** A session in one line. Under a claimed card's title, and under a question its session is waiting on. */
-export function PresenceLine({ session, agent, now }: { session: Session; agent?: string; now: number }) {
+/**
+ * A session in one line. Under a claimed card's title, and under a question its session is
+ * waiting on. Under a question (`askedAt`) the line also names the
+ * project and says how long the question has been open, in place of when it was last heard from.
+ */
+export function PresenceLine({ session, agent, now, askedAt }: { session: Session; agent?: string; now: number; askedAt?: string }) {
+  const who = whoWhere(session, agent || session.agent);
   return (
     <div className="card-presence" title={`${session.last || "claimed"} · session ${session.id}`}>
       <StateMark session={session} now={now} />
-      <span className="sess-where">{whoWhere(session, agent || session.agent)}</span>
-      <span className="sess-seen">{ago(now - session.seenAt)}</span>
+      <span className="sess-where">{askedAt && known(session.project) ? `${who} · ${session.project}` : who}</span>
+      <span className="sess-seen">{askedAt ? waitingFor(now - Date.parse(askedAt)) : ago(now - session.seenAt)}</span>
     </div>
   );
 }
