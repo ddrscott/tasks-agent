@@ -8,7 +8,7 @@
 
 import { build } from "esbuild";
 import { spawn } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +72,13 @@ const EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRe
 const ASYNC = ["UserPromptSubmit", "PostToolUse"];
 const COMMAND = `TASKS_PRESENCE_URL=${origin}/tasks/api/presence node ~/.config/tasks/tasks-presence.mjs`;
 const ours = (settings, event) => (settings.hooks[event] ?? []).flatMap((g) => g.hooks).filter((h) => h.command?.includes("tasks-presence.mjs"));
+/** The backup path the script printed, with ~ put back to home and links followed. null when it names no file. */
+function printedBackup(out, home) {
+  const printed = /^saved (.+)$/m.exec(out)?.[1];
+  if (!printed) return null;
+  const path = printed === "~" || printed.startsWith("~/") ? join(home, printed.slice(1)) : printed;
+  return existsSync(path) ? realpathSync(path) : null;
+}
 function writeSettings(home, text) {
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(settingsPath(home), text);
@@ -125,6 +132,9 @@ function writeSettings(home, text) {
   check("existing settings: nothing else was added", Object.keys(s.hooks).sort(), [...EVENTS, "PreToolUse"].sort());
   check("existing settings: one backup", backupsIn(home).length, 1);
   check("existing settings: the backup is the old file, byte for byte", readFileSync(join(home, ".claude", backupsIn(home)[0]), "utf8"), original);
+  // The temp HOME is under /var on a Mac, which is really /private/var: the path once printed as "/private~/.claude/…".
+  check("existing settings: the printed backup path is a file that exists", printedBackup(r.out, home), realpathSync(join(home, ".claude", backupsIn(home)[0])));
+  check("existing settings: the backup is printed with ~ for home", /^saved ~\/\.claude\/settings\.json\.tasks-backup-\d{14}$/m.test(r.out));
 
   const afterFirst = readFileSync(settingsPath(home), "utf8");
   const again = await run(home); // no TASKS_TOKEN: it uses the one it saved
@@ -163,6 +173,22 @@ function writeSettings(home, text) {
   check("symlinked settings: still a symlink", lstatSync(settingsPath(home)).isSymbolicLink());
   check("symlinked settings: the real file got the hooks and kept its setting", [settingsOf(home).model, Object.keys(settingsOf(home).hooks).length], ["opus", 7]);
   check("symlinked settings: the real file keeps its mode", mode(join(home, "dotfiles/settings.json")), "600");
+  const saved = readdirSync(join(home, "dotfiles")).filter((f) => f.includes(".tasks-backup-"));
+  check("symlinked settings: the printed backup path is the backup beside the real file", printedBackup(r.out, home), saved.length === 1 ? realpathSync(join(home, "dotfiles", saved[0])) : "one backup in dotfiles");
+}
+
+// A settings.json that lives outside the home folder: the backup's path is printed in full, not with a ~ in the middle.
+{
+  const home = newHome();
+  const elsewhere = newHome();
+  mkdirSync(join(home, ".claude"));
+  writeFileSync(join(elsewhere, "settings.json"), "{}\n");
+  symlinkSync(join(elsewhere, "settings.json"), settingsPath(home));
+  const r = await run(home, { token: GOOD });
+  const saved = readdirSync(elsewhere).filter((f) => f.includes(".tasks-backup-"));
+  check("settings outside home: exits 0", r.code, 0);
+  check("settings outside home: the printed backup path is a file that exists", printedBackup(r.out, home), saved.length === 1 ? realpathSync(join(elsewhere, saved[0])) : "one backup beside the real file");
+  check("settings outside home: no ~ in the printed backup path", /^saved \/[^~]*$/m.test(r.out));
 }
 
 // Things that stop it, each before anything is written.

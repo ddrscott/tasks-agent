@@ -24,7 +24,7 @@
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 // The Worker swaps this line for the two scripts and its own origin when it serves the file
 // (src/setup.ts), so one download holds everything that gets installed.
@@ -47,6 +47,7 @@ function stop(why) {
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const readOr = (path) => { try { return readFileSync(path, "utf8"); } catch { return null; } };
+const realOr = (path) => { try { return realpathSync(path); } catch { return path; } };
 
 /** The scripts to install: the ones the Worker put in this file, or the ones next to it in a checkout. */
 function scriptFiles() {
@@ -105,7 +106,17 @@ async function main() {
   const dir = join(home, ".config", "tasks");
   const tokenPath = join(dir, "token");
   const settingsLink = join(home, ".claude", "settings.json");
-  const show = (path) => path.replace(home, "~");
+  // Paths are printed with ~ for the home folder. A path can name home two ways (on a Mac,
+  // /var/… is really /private/var/…), so both are tried, and only at the start of the path.
+  // Anything outside home is printed in full.
+  const homes = [...new Set([home, realOr(home)])];
+  const show = (path) => {
+    for (const h of homes) {
+      if (path === h) return "~";
+      if (path.startsWith(h.endsWith(sep) ? h : h + sep)) return "~" + sep + path.slice(h.length).replace(/^[\\/]+/, "");
+    }
+    return path;
+  };
 
   // The token: the one handed in, or the one already on this machine.
   const given = (process.env.TASKS_TOKEN ?? "").trim();

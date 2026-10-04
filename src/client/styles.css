@@ -433,6 +433,17 @@ kbd {
   display: flex; flex-direction: column; gap: 12px;
 }
 .first-run p { margin: 0; }
+/* The steps keep their place in the block's column; the wrapper is only there to be hidden. */
+.first-run-steps { display: contents; }
+.first-run-steps[hidden] { display: none; }
+.first-run-top { display: flex; align-items: center; gap: 6px 16px; }
+.first-run-top .h { flex: none; margin: 0; }
+.first-run-more { flex: none; margin-left: auto; }
+/* Folded, once the command is copied: one line saying what's left, so the lanes are in view. */
+.first-run.slim { padding-top: 8px; padding-bottom: 8px; }
+.first-run-next { flex: 1; min-width: 0; font-size: 13px; line-height: 1.45; }
+.first-run-next::before { content: "$ "; font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.first-run-next b { font-weight: 600; }
 .first-run-lede { font-weight: 600; }
 .first-run ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .first-run li { counter-increment: step; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13px; line-height: 1.5; }
@@ -1152,6 +1163,9 @@ a.att-name:hover { color: var(--accent-text); }
   .board { padding: 16px; gap: 12px; scroll-snap-type: x mandatory; scroll-padding: 16px; }
   /* Stacked, with the numeral beside each step, so the lanes still get most of a phone screen. */
   .first-run { margin: 12px 16px 0; padding: 12px 14px; gap: 8px; max-height: 55%; overflow-y: auto; }
+  .first-run-top { flex-wrap: wrap; }
+  .first-run.slim .first-run-next { order: 3; flex-basis: 100%; }
+  .first-run-more { min-height: 36px; }
   .first-run ol { grid-template-columns: 1fr; gap: 10px; }
   .first-run li { display: grid; grid-template-columns: 44px 1fr; gap: 0 4px; }
   .first-run li::before { grid-row: span 3; font-size: 13px; line-height: 1.6; }
@@ -1333,13 +1347,16 @@ a.chip.no-agent:hover { border-style: solid; }
 }
 @media (max-width: 560px) {
   .demo-strip { padding: 8px 12px; }
-  .demo-strip p { flex-basis: 60%; font-size: 12px; }
-  .demo-links { flex: 1 1 100%; }
-  .demo-links .btn { flex: 1; justify-content: center; }
-  .demo-reset { display: none; }
-  /* Once the script has run out, Start over is the next thing to do, so it comes back. */
-  .demo-strip.over .demo-reset { display: inline-flex; }
+  .demo-strip p { flex: 1 1 0; font-size: 12px; }
+  /* The three buttons join the strip's own rows: Start over sits at the end of the first, beside
+     the line that says it's a demo, so it's there the whole time. The other two share the next. */
+  .demo-links { display: contents; }
+  .demo-links .btn { flex: 1 1 40%; justify-content: center; }
+  .demo-links .demo-reset { flex: none; }
+  /* Once the script has run out, the strip's line is longer and Start over is the next thing to
+     do, so the line takes a row and the three buttons share one. */
   .demo-strip.over p { flex-basis: 100%; }
+  .demo-strip.over .demo-links .btn { flex: 1 1 0; padding-inline: 6px; }
   /* The real board moves Theme into the account menu on a phone. The demo has no account menu,
      and no account button in the bar, so the Theme button keeps that place. */
   .demo .theme-anchor > .btn { display: inline-flex; }

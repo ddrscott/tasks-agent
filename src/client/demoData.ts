@@ -159,6 +159,32 @@ export function seedBoard(theme: string): Board {
 
 const LEAD = "7c1e4f2a-93b6-4d0e-a5c8-2f6b1d9e0a41";
 
+/**
+ * What the shop-web session is seen doing, over and over: each tool call and how many seconds
+ * until the next. A real session reports after every tool call, so its row reads a few seconds
+ * old, goes back to 0, and says something new. A row stuck on one number looks dead.
+ */
+const SHOP_WEB: [last: string, seconds: number][] = [
+  ["Bash: npm test -- cart", 13],
+  ["Read: cart.test.ts", 6],
+  ["Read: usePrice.ts", 8],
+  ["Edit: cart.test.ts", 15],
+  ["Bash: npm test -- cart", 11],
+  ["Edit: usePrice.ts", 9],
+  ["Bash: Run the cart test 200 times", 22],
+];
+const SHOP_WEB_LOOP = SHOP_WEB.reduce((n, [, s]) => n + s, 0) * 1000;
+
+/** The shop-web session's last action at `now`, and when it reported it. It opens 4 seconds into the first one. */
+function shopWebNow(now: number, startedAt: number): Pick<Session, "last" | "seenAt"> {
+  let into = (Math.max(0, now - startedAt) + 4000) % SHOP_WEB_LOOP;
+  for (const [last, seconds] of SHOP_WEB) {
+    if (into < seconds * 1000) return { last, seenAt: now - into };
+    into -= seconds * 1000;
+  }
+  return { last: SHOP_WEB[0][0], seenAt: now };
+}
+
 /** Which point of the script the lead session is at, worked out from the board (Demo.tsx). */
 export type Scene =
   | { at: "idle" } // nothing left in the script
@@ -167,7 +193,10 @@ export type Scene =
   | { at: "reading" | "waiting" | "heard" | "working"; beat: Beat; card: Card };
 
 /**
- * The three sessions the Sessions list shows. Two never change: one working, one idle. The lead
+ * The three sessions the Sessions list shows. Two run on the clock alone: the one in shop-web
+ * keeps working through a short loop of tool calls, and the idle one in infra was last heard
+ * from a minute before the demo opened and gets older from there, so it's marked stale four
+ * minutes in, the way a real quiet session is. The lead
  * session in shop-api follows the scene: it says needs input exactly while its card has a
  * question open, so answering one puts it back to working in the same moment.
  */
@@ -186,11 +215,11 @@ export function demoPresence(scene: Scene, now: number, startedAt: number): Pres
     { id: LEAD, project: "shop-api", machine: "macbook", agent: "lead", cwd: "~/code/shop-api", link: "", startedAt: startedAt - 52 * MIN, ...leadNow() },
     {
       id: "b40a9d17-5e2c-4c7f-8a31-6d0f3e5b7c92", project: "shop-web", machine: "macbook", agent: "lead", cwd: "~/code/shop-web", link: "",
-      state: "working", last: "Bash: npm test -- cart", startedAt: startedAt - 18 * MIN, seenAt: now - 4000,
+      state: "working", startedAt: startedAt - 18 * MIN, ...shopWebNow(now, startedAt),
     },
     {
       id: "e2f8c630-1a7d-4b95-b0e4-9c5a7d3f1e68", project: "infra", machine: "build-box", agent: "", cwd: "~/code/infra", link: "",
-      state: "idle", last: "finished its turn", startedAt: startedAt - 140 * MIN, seenAt: recent(startedAt - 3 * MIN),
+      state: "idle", last: "finished its turn", startedAt: startedAt - 140 * MIN, seenAt: startedAt - MIN,
     },
   ];
   const claims: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];

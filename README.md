@@ -131,6 +131,16 @@ run ahead of whatever serves the zone.
     still there after step 2 (`quickStartOpen`). It goes away when an agent connects, when the
     sample is deleted or done, or when the board has cards and none is the sample. An encrypted
     board never shows it.
+  - **It folds once the command is copied.** With the sample on the board and the command on the
+    clipboard, steps 1 to 3 are done and the rest happens in a terminal, then on the card. So the
+    block folds to one line: "Copied. Paste it in a terminal, and pick Yes if Claude Code asks to
+    trust the folder (Enter alone exits). Your agent's question will show up on the sample
+    card.", with a **Show the steps** button that opens it again (and **Hide the
+    steps** to fold it back). That keeps the lanes and the sample card in view at 1280x800 and on
+    a phone, where the open block takes up to 55% of the screen and scrolls inside itself. The
+    steps stay mounted while folded, since they hold the command and its token is shown once. A
+    command the browser wouldn't put on the clipboard doesn't fold the block: it has to be copied
+    from there by hand. A reload brings the open block back, without the command.
   - Its last line says how to tag your own cards: `#agent` at the end of the title, or the Tags field.
 - **No agent connected yet.** From the first card on, a board no agent has ever reached says
   so (`src/client/AgentNudge.tsx`): one line above the lanes (not while `// START_HERE` is up,
@@ -167,8 +177,14 @@ run ahead of whatever serves the zone.
     recommendation. Delete the card and it takes the next one; undo that and it's back on it.
     A card dialog that's open when the agent changes the card is redrawn from the new card,
     which drops anything typed in it and not saved.
+  - **The other two sessions run on the clock** (`demoPresence`, redrawn every second). The
+    working one in shop-web steps through a short loop of tool calls: its "seen" time counts up
+    a few seconds, then starts over with a new last-action line, the way a session with hooks
+    reports after each tool. The idle one in infra was last heard from a minute before the demo
+    opened and only gets older, so four minutes in it's marked stale like any quiet session.
   - **On a phone** it opens on the lane that holds the open question, not the first lane, and
-    the Theme button stays in the top bar, since there's no account menu to put it in.
+    the Theme button stays in the top bar, since there's no account menu to put it in. Start
+    over is in the strip the whole time there too, at the end of its first row.
 
   A strip under the top bar says it's a demo and nothing is saved, with links to sign up and to
   Connect; a reload or Start over resets it. The seed has `agentSeenAt` set, so "No agent
@@ -231,8 +247,15 @@ run ahead of whatever serves the zone.
   `role="dialog"`, and each button says which it opens with `aria-haspopup`. Opening a
   popover moves focus into it, Esc or a click outside gives focus back to its button, and in
   a menu the arrow keys, Home, and End move between items and Tab closes it (`Popover` in
-  `src/client/Board.tsx`). The card editor opens with focus on the title. On a touch screen
-  it focuses the dialog instead, so the keyboard doesn't cover a card you only meant to read.
+  `src/client/Board.tsx`). The card editor, New card, and Encryption are modal: native
+  `<dialog>` elements opened with `showModal()`, each with `role="dialog"`, `aria-modal="true"`,
+  and a name (the editor's is "Edit card: " plus the card's title). The browser keeps Tab
+  inside an open one. Closing it gives focus back to what opened it: the card for the editor
+  (found again by id when a move redrew it in another lane), the lane's + for New card
+  (`useModal` in `src/client/modal.ts`; React takes these dialogs off the page instead of
+  closing them, and the browser only hands focus back on a close). The card editor and New card
+  open with focus on the title. On a touch screen the editor focuses the dialog instead, so the
+  keyboard doesn't cover a card you only meant to read.
 - **Moving a card on a phone.** Two ways. Open the card and tap a lane in the **Move to** row
   under the title (touch screens only; the current lane is marked): that moves it right away,
   keeps any other edits, and closes the card, so it's two taps from the board. Or long-press
@@ -465,7 +488,9 @@ strip, and the not-found page link to it too.
   ```
 
   - No `/mcp` Authenticate and Allow round trip: the token is the sign-in. It's shown once, in
-    the command, and the page says so and says what the command changes. OAuth, which leaves no
+    the command, and the page says so and says what the command changes. The token is typed on
+    the command line, so it also stays in the shell's history; the page says that too, and that
+    it can be revoked under Connected apps. OAuth, which leaves no
     token on disk, is the Claude Code tab under `#add`.
   - `claude mcp add` refuses a name that's already there, so the local-scope entry is removed
     first; that fails quietly when there isn't one. The new entry is local scope (the folder
@@ -478,7 +503,8 @@ strip, and the not-found page link to it too.
     Undo takes back, and writing files and running commands aren't pre-approved. Write, Edit,
     and Bash stay out of `--allowedTools` on purpose; the sample card is built to not need them.
   - Step 4 says what happens and no more: Claude Code may ask once whether you trust the
-    folder, a question lands on the card, and an answer gets a plan in the notes and the card
+    folder, and to pick Yes there, because that prompt starts on "No, exit" and Enter alone
+    quits (the folded line says the same); a question lands on the card, and an answer gets a plan in the notes and the card
     in Done. The lede after step 2 says two steps are left, not that Claude Code is working.
   - The front page tells the same four steps under `// CONNECT_AN_AGENT`, without the buttons
     (a signed-out page can't mint a token), with a Sign in to start button. The OAuth command
@@ -779,7 +805,8 @@ curl -fsSL https://askscottpierce.com/tasks/setup.mjs \
   `tasks-presence.mjs` and `tasks-events.mjs` next to it, and adds the seven hooks below to
   `~/.claude/settings.json`. Nothing else.
 - **What it keeps.** Every hook and setting already in `settings.json`, in order; its hooks go
-  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`.
+  after yours. Before it rewrites the file it copies it to `settings.json.tasks-backup-<time>`
+  and prints that path: with `~` for your home folder, or in full when the file lives somewhere else.
   A second run changes nothing and makes no second backup. An event that already has a hook
   running `tasks-presence.mjs`, from any path, counts as done, so hand-added hooks pointing at
   a checkout aren't doubled. A symlinked `settings.json` is edited where it really lives.
@@ -1273,7 +1300,8 @@ never touches the Chrome you're signed in to. How the crops are made:
   between two rows (the open card's notes, the quick start's blocks), never through one.
 - `05` is the only signed-in picture. The script signs up through the landing page's form with a
   made-up `shots-…@example.com` address and the code a dev server shows on screen
-  (`DEV_LOGIN_CODES=1`), adds the sample card, and copies the command. So `05` comes from a dev
+  (`DEV_LOGIN_CODES=1`), adds the sample card, copies the command, and presses Show the steps,
+  since the block folds after a copy. So `05` comes from a dev
   server only; against the live site it fails and says so. It finds the quick start by structure
   (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
   and 3, the command in a `role="status"` block), not by wording. The token in the command is

@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Attach files while creating a card — they upload as soon as the card is added
 - The Tags field suggests tags you've already used; tap one to add it
 - Agents can read a card in full over MCP with `get_card`: all of the notes, plus attached screenshots and small text files
-- An empty board shows `// START_HERE`, four steps that end with Claude Code working a card: sign in, Add a sample agent card, Copy the command, paste it in a terminal
+- An empty board shows `// START_HERE`, four steps that end with Claude Code working a card: sign in, Add a sample agent card, Copy the command, paste it in a terminal. Once the command is copied the steps fold down to one line, so the lanes and the sample card stay in view while you wait for the agent's question; Show the steps opens them again
 - Add a sample agent card puts a real `#agent` card on the board. It has the agent read the folder you start it in, ask you which of a few small improvements to plan, write that plan on the card as a checklist, and move the card to Done. It only reads, so the terminal has nothing to approve. One undo removes it
-- Copy the command gives one line that connects Claude Code to your board with a new access token and starts it on your `#agent` cards, with no Authenticate and Allow step. It pre-approves the board's tools, deleting cards included, and not file writes or shell commands, and the page says so. The Connect page has the same quick start at the top, and a one-line command for Codex
+- Copy the command gives one line that connects Claude Code to your board with a new access token and starts it on your `#agent` cards, with no Authenticate and Allow step. It pre-approves the board's tools, deleting cards included, and not file writes or shell commands, and the page says so. It also says the token ends up in your shell history and where to revoke it. The Connect page has the same quick start at the top, and a one-line command for Codex
 - Agents can call `get_started` over MCP to read the rules for working the board. The rules have an agent say what it is, its machine, and its folder when it claims a card, keep your `ANSWER:` lines when it updates its status, and ask you on the card when it's stuck instead of stopping quietly. It hands the agent a session id to claim with, so nothing needs a shell
 - Agents wait for your answer with `wait_for_answer` over MCP: it holds until you answer and hands the card back, in any MCP client. Delete the card or move it to the last lane instead, and the agent is told to stop waiting on it
 - A card shows its agent's `STATUS:` line on its face, so you can see what it's doing without opening it
@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A card an agent session is working on shows that session in the card: its state, machine, last action, and a Copy resume command button
 - With a tag filter on, each lane's count shows matches out of the total, like `2 / 22`
 - Menus and popovers work from the keyboard: opening one puts you inside it, Esc puts you back on its button, and the arrow keys move through the account and lane menus
+- Closing a card puts keyboard focus back on that card, and closing New card puts it back on the lane's +. Screen readers hear both as dialogs, and the card's by its title
 - Tag a card `#gauntlet` to have an agent build and critique it round after round overnight without asking; `tasks-gauntlet` starts one per repo
 - `tasks-events --require <tag>` — hear only cards that carry that tag too, so a lead and a gauntlet agent can share a repo
 - A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board. Each page previews as itself: a link to `/tasks/demo` says it's a live demo board with no sign-up, and Connect, Pricing, Privacy, and Terms show their own titles and descriptions
@@ -33,14 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pricing is on the front page, readable before you sign up: the daily assistant limits for Free and Pro, and the Pro price as Stripe has it
 - A mistyped address like `/tasks/nope` answers 404 Not Found and shows a not-found page with links to the pages that exist, instead of the sign-in form
 - Until your first agent connects, the board says "No agent connected yet" above the lanes, and each `#agent` card says nothing will pick it up, with a link to Connect. With no `#agent` card yet, it says how to hand one over: add `#agent` to a card's title, or use the Tags field. It all goes away the moment an agent connects
-- A demo board at `/tasks/demo` you can try without signing up: drag cards, answer an agent's question, and watch a scripted agent pick it up. It lives in your browser tab and nothing is saved
+- A demo board at `/tasks/demo` you can try without signing up: drag cards, answer an agent's question, and watch a scripted agent pick it up. Its other sessions keep moving too: one works through its tool calls, one goes quiet. It lives in your browser tab and nothing is saved, and Start over is always in the strip under the top bar, on a phone too
 - The Connect page has a one-line starter prompt to copy into a newly connected agent, so it works `#agent` cards the right way from the first message
-- One command sets up Sessions on a machine: it saves your token, installs the two scripts, and adds the hooks to `~/.claude/settings.json` without touching what's already there. The Connect page shows it with a new token filled in
+- One command sets up Sessions on a machine: it saves your token, installs the two scripts, and adds the hooks to `~/.claude/settings.json` without touching what's already there. It saves a backup of that file first and prints where it put it. The Connect page shows it with a new token filled in
 - End a new card's title with `#agent` and it's tagged: "Write a haiku #agent" adds the card "Write a haiku" with the tag. Works in quick add, on each line of a pasted list, and in the new-card dialog, with several tags too. `#123`, `C#`, and a `#tag` in the middle of a title are left as typed
 - The front page has `// CHECK_IT_YOURSELF`: links to the public code, the changelog with how many changes it holds, the encryption format, what Sessions stores, and who makes Tasks and why
 - `/tasks/pricing` opens the front page at its pricing section, signed in or not
 
 ### Changed
+- The privacy policy says what's kept when an agent claims a card: a session record and the claim, with or without the Claude Code hooks. It also covers the quick start's access token, questions and answers on cards, and the sign-in try counts kept by email and IP address
 - The Connect page opens on Claude Code and leads with coding agents: Claude Code, Cursor, and Codex come first, with Claude, ChatGPT, and Glean still there
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable

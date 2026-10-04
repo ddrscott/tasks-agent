@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { agentConnected, AGENT_TAG, hasTag, type Board } from "../shared";
 import { QuickStart, SAMPLE_INTENT } from "./Connect";
 import type { NewCardInput } from "./NewCard";
@@ -8,7 +8,9 @@ import type { NewCardInput } from "./NewCard";
 // says nothing about agents, which are the reason to use this one.
 //
 // It shows on a board with no cards, and stays while the sample card it adds is the thing being
-// set up, so step 3 is still there after step 2. It's gone the moment an agent connects, or when
+// set up, so step 3 is still there after step 2. Once the command is copied it folds down to one
+// line, the step that's left, so the lanes and the sample card are in view when the agent's
+// question lands on it. It's gone the moment an agent connects, or when
 // the board has cards and the sample isn't one of them ("No agent connected yet" in
 // AgentNudge.tsx takes over there). An encrypted board never shows it: agents can't reach one.
 
@@ -71,20 +73,53 @@ export function FirstRun({ board, onConnect, add, say }: {
     addSample();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Steps 1 to 3 are done once the sample is on the board and the command is on the clipboard.
+  // What's left happens in a terminal, and then on the card, so the block folds to one line and
+  // gets out of the card's way. The steps stay mounted underneath: they hold the command, which
+  // is shown only once. A command the browser wouldn't copy never folds, since it has to be
+  // copied from the block by hand.
+  const [copied, setCopied] = useState(false);
+  const [shown, setShown] = useState(false);
+  const slim = copied && hasSample && !shown;
+  const toggle = useRef<HTMLButtonElement>(null);
+  const folded = useRef(false);
+  useEffect(() => {
+    // Folding hides the button that was just pressed, so focus goes to the one that brings it back.
+    if (slim && !folded.current) toggle.current?.focus({ preventScroll: true });
+    folded.current = slim;
+  }, [slim]);
+
   if (!quickStartOpen(board)) return null;
   return (
-    <section className="first-run" aria-labelledby="first-run-h">
-      <h2 className="h" id="first-run-h">START_HERE</h2>
-      <QuickStart
-        signedIn hasSample={hasSample} onAddSample={addSample} onConnect={onConnect}
-        lede={board.cards.length === 0
-          ? "This board is empty. Four steps put Claude Code to work on it."
-          : "Your sample card is on the board. Two steps left: copy the command and paste it in a terminal."}
-      />
-      <p className="first-run-foot">
-        For your own work, add <code>#agent</code> to the end of a card's title, or use its Tags field.
-        {board.cards.length === 0 ? " This goes away once the board has a card of yours." : " This goes away when an agent connects, or when you delete the sample card."}
-      </p>
+    <section className={`first-run${slim ? " slim" : ""}`} aria-labelledby="first-run-h">
+      <div className="first-run-top">
+        <h2 className="h" id="first-run-h">START_HERE</h2>
+        {slim && (
+          <p className="first-run-next" role="status">
+            <b>Copied.</b> Paste it in a terminal, and pick Yes if Claude Code asks to trust the folder (Enter alone exits). Your agent's question will show up on the sample card.
+          </p>
+        )}
+        {copied && hasSample && (
+          <button ref={toggle} type="button" className="btn first-run-more" aria-expanded={!slim} aria-controls="first-run-steps" onClick={() => setShown((s) => !s)}>
+            {slim ? "Show the steps" : "Hide the steps"}
+          </button>
+        )}
+      </div>
+      <div className="first-run-steps" id="first-run-steps" hidden={slim}>
+        <QuickStart
+          signedIn hasSample={hasSample} onAddSample={addSample} onConnect={onConnect}
+          onCopied={() => { setCopied(true); setShown(false); }}
+          lede={board.cards.length === 0
+            ? "This board is empty. Four steps put Claude Code to work on it."
+            : copied
+              ? "Your sample card is on the board and the command is copied. One step left: paste it in a terminal."
+              : "Your sample card is on the board. Two steps left: copy the command and paste it in a terminal."}
+        />
+        <p className="first-run-foot">
+          For your own work, add <code>#agent</code> to the end of a card's title, or use its Tags field.
+          {board.cards.length === 0 ? " This goes away once the board has a card of yours." : " This goes away when an agent connects, or when you delete the sample card."}
+        </p>
+      </div>
     </section>
   );
 }

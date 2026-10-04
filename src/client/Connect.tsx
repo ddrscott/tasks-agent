@@ -241,7 +241,7 @@ type Quick = { command: string; copied: boolean } | null;
  * it (FirstRun.tsx) and so does the top of the Connect page. `sample` is how step 2 is done from
  * where this is drawn: the board adds the card, the Connect page goes to the board to add it.
  */
-export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, lede }: {
+export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConnect, onCopied, lede }: {
   signedIn: boolean;
   hasSample: boolean;
   onAddSample(): void;
@@ -249,6 +249,8 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
   onMinted?(info: TokenInfo, dropped: string[]): void;
   /** On the board: open the Connect page without leaving the app. */
   onConnect?(): void;
+  /** Told each time the command lands on the clipboard, so the board can fold the steps away. */
+  onCopied?(): void;
   lede: string;
 }) {
   const [quick, setQuick] = useState<Quick>(null);
@@ -265,6 +267,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
     if (quick) {
       const copied = await copyLater(Promise.resolve(quick.command));
       setQuick({ ...quick, copied });
+      if (copied) onCopied?.();
       return;
     }
     setBusy(true);
@@ -275,6 +278,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
       const r = await minted;
       setQuick({ command: await command, copied });
       onMinted?.(r.info, r.dropped);
+      if (copied) onCopied?.();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -312,7 +316,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         </li>
         <li>
           <b>Paste it in a terminal</b>
-          <span>In any folder. Say yes if Claude Code asks whether you trust it, then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
+          <span>In any folder. If Claude Code asks whether you trust it, pick Yes (Enter alone exits), then come back here. A question lands on the card. Tap an answer, and the plan goes in the card's notes and the card moves to Done. Nothing else needs approving in the terminal.</span>
         </li>
       </ol>
       {error && (
@@ -335,7 +339,7 @@ export function QuickStart({ signedIn, hasSample, onAddSample, onMinted, onConne
         it starts Claude with a one-line prompt, allowed to use the board's tools without asking each
         time. That includes deleting cards and lanes; Undo on the board takes back anything an agent
         does. The command doesn't approve writing files or running commands: for anything that changes
-        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command; revoke it under {connectLink("#apps", "Connected apps")}.
+        your machine, Claude Code still asks you in the terminal first. The token is shown once, in the command. It's on the command line, so your shell history keeps it too; revoke it any time under {connectLink("#apps", "Connected apps")}.
         OAuth is the other way, with no token on disk: {connectLink("#add", "the full steps")}, with Cursor and Codex too.
       </p>
     </>

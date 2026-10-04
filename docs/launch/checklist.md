@@ -91,6 +91,16 @@ they show what's live. It takes two commands, because `05` is a signed-in pictur
       which only a dev server shows. In one terminal: `LOCAL_ONLY=1 npx vite dev --port 5190`.
       In another: `npm run shots -- http://localhost:5190 --only 05`. The address in the
       command is swapped for askscottpierce.com and the token is dotted out.
+- [ ] Run the quick start once for real on the live site, with a real agent, and hold the
+      board up against the pictures. `01` to `04` and `06` are the demo board, where the agent
+      is scripted, so nothing proves they match a real run until you look. New account, Add a
+      sample agent card, Copy the command, paste it in a terminal with Claude Code. Then compare
+      what the board shows with each picture: the question and its answer buttons on the card
+      (`01`), the "need you" list (`02`), the Sessions list (`03`), the open card with its session
+      row, question, and notes (`04`), and the "need you" list on your phone (`06`). The words
+      on the cards will differ; the parts, their order, and what they're called shouldn't. If
+      the real board shows something a picture doesn't, or the other way around, fix the demo
+      (`src/client/demoData.ts`) and shoot again before anything else.
 - [ ] `npm run check:launch`. It fails if a picture the copy names is missing, the wrong size,
       or 3 MB or more.
 - [ ] Open all seven PNGs (six images and the thumbnail) and look at them, and read each
