@@ -425,8 +425,8 @@ kbd {
      (four lanes with the assistant open) snaps the first lane flush against the edge. */
   scroll-snap-type: x proximity; scroll-padding: 0 24px;
 }
-/* // START_HERE: the three steps an empty board shows above its lanes. Numbered like the Connect
-   page, with a full outline rather than a colored edge. */
+/* // START_HERE and the Connect page's // QUICK_START (QuickStart in Connect.tsx): four numbered
+   steps, a full outline rather than a colored edge. A finished step's number turns into a check. */
 .first-run {
   flex: none; margin: 20px 24px 0; padding: 16px 20px;
   border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
@@ -434,14 +434,28 @@ kbd {
 }
 .first-run p { margin: 0; }
 .first-run-lede { font-weight: 600; }
-.first-run ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.first-run ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 .first-run li { counter-increment: step; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 13px; line-height: 1.5; }
 .first-run li::before { content: counter(step, decimal-leading-zero); font: 700 16px/1.4 var(--font-mono); color: var(--accent); }
+.first-run li.done::before { content: counter(step, decimal-leading-zero) " ✓"; }
+.first-run li.done > b { color: var(--muted); }
 .first-run li b { font-size: 14px; font-weight: 600; }
 .first-run li span { color: var(--muted); }
-.first-run li code { font: 13px var(--font-mono); }
-.first-run li .btn { margin-top: 6px; text-decoration: none; }
-.first-run-foot { font-size: 12px; color: var(--muted); }
+.first-run code { font: 12.5px var(--font-mono); }
+.first-run li .btn { margin-top: auto; text-decoration: none; }
+.first-run li > span { margin-bottom: 6px; }
+.first-run-foot { font-size: 12px; line-height: 1.55; color: var(--muted); max-width: 110ch; }
+.first-run-foot b { font-weight: 600; color: var(--ink); }
+.first-run a:not(.btn) { color: var(--accent-text); text-underline-offset: 3px; }
+/* The command, once it's made. Outlined in the accent like a fresh token: it holds one. */
+.quick-cmd { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); }
+.quick-cmd p { font-size: 13px; }
+.quick-cmd .snippet { background: var(--bg); }
+.quick-cmd .snippet pre { max-height: 132px; overflow-y: auto; }
+.first-run.quick-start { margin: 0; }
+.connect .first-run { scroll-margin-top: 72px; }
+.connect-rest { color: var(--muted); font-size: 14px; max-width: 68ch; margin-top: -16px; }
+.connect .first-run ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .lane {
   flex: 1 0 250px; max-width: 360px; max-height: 100%;
   display: flex; flex-direction: column;
@@ -981,6 +995,7 @@ a.att-name:hover { color: var(--accent-text); }
 .connect .topbar { position: sticky; top: 0; z-index: 10; background: var(--bg); }
 .connect .topbar a.btn { text-decoration: none; }
 .connect-body { max-width: 760px; margin: 0 auto; padding: 40px 24px 80px; display: flex; flex-direction: column; gap: 36px; }
+.connect-intro + .first-run { margin-top: -12px; }
 .connect-body p { margin: 0; }
 .connect-body a:not(.btn) { color: var(--accent-text); }
 .connect-body code:not(.mono-box) { font: 12.5px var(--font-mono); padding: 1px 5px; background: var(--surface-2); border-radius: var(--radius-sm); }
@@ -1096,9 +1111,13 @@ a.att-name:hover { color: var(--accent-text); }
   /* Stacked, with the numeral beside each step, so the lanes still get most of a phone screen. */
   .first-run { margin: 12px 16px 0; padding: 12px 14px; gap: 8px; max-height: 55%; overflow-y: auto; }
   .first-run ol { grid-template-columns: 1fr; gap: 10px; }
-  .first-run li { display: grid; grid-template-columns: 28px 1fr; gap: 0 4px; }
+  .first-run li { display: grid; grid-template-columns: 44px 1fr; gap: 0 4px; }
   .first-run li::before { grid-row: span 3; font-size: 13px; line-height: 1.6; }
   .first-run li > * { grid-column: 2; justify-self: start; }
+  .first-run li > span { margin-bottom: 0; }
+  .first-run li .btn { margin-top: 6px; min-height: 40px; }
+  .first-run.quick-start { max-height: none; padding: 14px; }
+  .connect .first-run ol { grid-template-columns: 1fr; }
   .lane { flex-basis: min(86vw, 320px); }
   .chat {
     position: fixed; inset: auto 0 0 0; z-index: 40; width: 100%; height: min(78vh, 640px);

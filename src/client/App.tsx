@@ -481,7 +481,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           </div>
         </header>
 
-        {board.cards.length === 0 && !board.sealed && <FirstRun onConnect={onConnect} />}
+        {/* // START_HERE decides for itself when to show (quickStartOpen in FirstRun.tsx). */}
+        {!board.sealed && <FirstRun board={board} onConnect={onConnect} add={addFullCard} say={say} />}
         <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash}
