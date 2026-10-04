@@ -323,7 +323,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   return (
     <AskContext.Provider value={answerAsk}>
     <PresenceContext.Provider value={presence}>
-    <div className="app">
+    <div className="app demo">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
