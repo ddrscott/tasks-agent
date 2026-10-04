@@ -689,6 +689,30 @@ Locally: `stripe listen --forward-to localhost:5173/tasks/api/stripe/webhook` pr
 from the sign-in screen and from Google's consent screen. Keep the privacy policy in
 step with what the app stores: update it when you add a table, a processor, or a cookie.
 
+## // LINK_PREVIEWS_AND_TITLES
+
+`index.html` carries what a shared link shows: the title, description, canonical URL, `og:*`
+and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. It's static, so every path
+serves the same tags and they all point at `https://askscottpierce.com/tasks/`. Only put
+true facts in there: no ratings, no user counts, and no price until billing is on.
+
+- **The share image** is `public/tasks/og.png` (1200x630), and the home-screen icon is
+  `public/tasks/apple-touch-icon.png` (180x180). Both are screenshots of HTML kept in
+  `scripts/og/` (`og.html`, `icon.html`). To change one, edit the HTML, run `npm run og`, look
+  at the PNG, and commit both. The script drives headless Chrome from
+  `/Applications/Google Chrome.app`; set `CHROME=` to use another Chrome or Chromium. It needs
+  a network connection for the Google Fonts, and fails if a PNG comes out the wrong size.
+- **Static files go in `public/tasks/`**, so their path matches their URL and the asset layer
+  serves them. A file anywhere else under `public/` isn't reachable on the `/tasks` routes,
+  and a missing one gets the app's HTML back with a 200. After adding one, check
+  `curl -sI localhost:5173/tasks/og.png` says `image/png`.
+- X, Slack, and iMessage cache previews. After changing the image, rename it (and the URLs in
+  `index.html`) if the old one has to stop showing.
+- **Tab titles** come from `useTitle` in `src/client/title.ts`: `useTitle("Connect an agent")`
+  gives "Connect an agent · Tasks". Each page calls it once at the top of its component. The
+  sign-in screen calls it with no name and gets the full default title, because that's the
+  page a shared link lands on. `DEFAULT_TITLE` there has to match `<title>` in `index.html`.
+
 ## // SIGN_IN_WITH_GOOGLE_AND_MICROSOFT
 
 The sign-in screen (and the OAuth consent flow) offers "Continue with Google" and
@@ -737,6 +761,7 @@ npm run typecheck
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
+npm run og               # re-render the share image and home-screen icon from scripts/og/
 ```
 
 The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
