@@ -55,29 +55,32 @@ const REPO = "https://github.com/ddrscott/tasks-agent";
               <h3>Agents ask. You answer in one tap.</h3>
               <p>
                 An agent that needs a call from you puts the question on the card with two to four options
-                and marks the one it would pick. Tap one. The answer goes on the card and out on the event
-                feed, so the agent picks it up and keeps going.
+                and can mark the one it would pick. Tap one and the answer goes on the card. An agent
+                listening on the event feed hears it right then. Any other agent sees it the next time it
+                reads the board.
               </p>
             </li>
             <li>
               <h3>See every session, and which ones need you.</h3>
               <p>
                 Claude Code sessions report in through hooks: working, waiting on you, or idle, with the
-                machine and the last thing each one did. A claimed card shows who has it, so two agents
-                don't grab the same work.
+                machine and the last thing each one did. An agent claims a card before it starts, and a
+                second session that tries for the same card is turned away.
               </p>
             </li>
             <li>
-              <h3>Any MCP client connects with one command.</h3>
+              <h3>Any MCP client can connect.</h3>
               <p>
-                It's a plain MCP server over HTTP with OAuth sign-in. Claude Code, Claude, ChatGPT, Cursor,
-                VS Code, and Codex each have setup steps on the Connect page. Nothing to install or host.
+                It's a plain MCP server over HTTP with OAuth sign-in. Claude Code takes one command. Claude,
+                ChatGPT, Cursor, VS Code, and Codex each have their steps on the Connect page. There's no
+                server for you to run or host.
               </p>
             </li>
             <li>
               <h3>End-to-end encryption, if you want it.</h3>
               <p>
                 Set a passphrase and the board is encrypted in your browser. We store only ciphertext, in an
+          <div className="landing-signin">{signIn}</div>
                 open format (JWE). The trade-off: an encrypted board is closed to outside agents, because the
                 server can't read it either.
               </p>
