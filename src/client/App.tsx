@@ -74,7 +74,7 @@ export function App() {
   // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
   if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   // An invite link (// TEAM_BOARDS). Signed out, it sends you to sign in and back.
-  if (page === "invite") return <Invite me={me} onBoard={(board) => { location.assign(`${BASE}/?board=${board}`); }} />;
+  if (page === "invite") return <Invite me={me} onSignedOut={() => setMe(null)} />;
   if (me === null) return <Login onSignedIn={load} />;
   // /tasks/pricing is the front page at its pricing section, for someone signed in too.
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
