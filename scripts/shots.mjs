@@ -549,19 +549,27 @@ const shots = {
     const whole = await inPage((s) => { const pre = document.querySelector(`${s} [role="status"] pre`); pre.scrollTop = 0; return pre.scrollHeight <= pre.clientHeight + 1 && /Bearer .{4}•/.test(pre.textContent); }, sec);
     if (!whole) die("the quick start's command is scrolled inside its box or still shows a token; the picture would be wrong.");
     await inPage(() => { scrollTo(0, 0); document.activeElement?.blur?.(); return true; });
-    // As big as its width allows, running off the bottom edge. The cut goes in the gap under
-    // the last block of the section that fits, and the command has to be above it. The steps
-    // say what a line under the headline would, so this canvas has none and the room goes to them.
-    const all = await boxAround([sec]);
-    const zoom = fit({ width: all.width, height: 1 }, TOP_W, H, 1.25);
-    const cut = await inPage((s, room) => {
-      const el = document.querySelector(s), top = el.getBoundingClientRect().top;
-      const rows = [...el.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height);
-      let at = 0;
-      rows.forEach((r, i) => { const gap = rows[i + 1] ? (r.bottom + rows[i + 1].top) / 2 : el.getBoundingClientRect().bottom; if (gap - top <= room) at = gap; });
-      const cmd = el.querySelector('[role="status"]').getBoundingClientRect().bottom;
-      return { height: Math.floor(at - top), cmdShown: cmd < at, need: Math.ceil(cmd - top), room: Math.floor(room), width: Math.round(el.getBoundingClientRect().width) };
-    }, sec, (H - HEADLINE_ONLY) / zoom);
+    // As big as it can be drawn with the command still above the canvas's bottom edge. The
+    // section is always as wide as the canvas, so a smaller zoom means a wider page, shorter
+    // steps, and more room. The cut goes in the gap under the last block of the section that
+    // fits. The steps say what a line under the headline would, so this canvas has none and the
+    // room goes to them.
+    let all, zoom, cut;
+    for (zoom of [1.25, 1.2, 1.15, 1.1, 1.05, 1]) {
+      vp.width += Math.floor(TOP_W / zoom / 2) * 2 - (await boxAround([sec])).width;
+      await viewport(vp);
+      await settle();
+      all = await boxAround([sec]);
+      cut = await inPage((s, room) => {
+        const el = document.querySelector(s), top = el.getBoundingClientRect().top;
+        const rows = [...el.children].map((c) => c.getBoundingClientRect()).filter((r) => r.height);
+        let at = 0;
+        rows.forEach((r, i) => { const gap = rows[i + 1] ? (r.bottom + rows[i + 1].top) / 2 : el.getBoundingClientRect().bottom; if (gap - top <= room) at = gap; });
+        const cmd = el.querySelector('[role="status"]').getBoundingClientRect().bottom;
+        return { height: Math.floor(at - top), cmdShown: cmd < at, need: Math.ceil(cmd - top), room: Math.floor(room), width: Math.round(el.getBoundingClientRect().width) };
+      }, sec, (H - HEADLINE_ONLY) / zoom);
+      if (cut.cmdShown) break;
+    }
     if (!cut.cmdShown) die(`the quick start's command ends ${cut.need}px down a ${cut.width}px-wide section, and only ${cut.room}px fit above the canvas's bottom edge at ${zoom}x.`);
     await isolate([sec]);
     const c = await crop(even({ ...all, height: cut.height }), zoom, vp);

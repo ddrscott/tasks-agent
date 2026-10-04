@@ -1276,7 +1276,9 @@ never touches the Chrome you're signed in to. How the crops are made:
   server only; against the live site it fails and says so. It finds the quick start by structure
   (the section labelled by its heading, an ordered list of four steps, the buttons in steps 2
   and 3, the command in a `role="status"` block), not by wording. The token in the command is
-  dotted out and the local address is swapped for the hosted one.
+  dotted out and the local address is swapped for the hosted one. It's drawn at 1.25x when the
+  command fits above the canvas's bottom edge at that size; when the steps' wording runs
+  longer, the script widens the page and steps the zoom down (to 1x at the least) until it does.
 
 Each shot waits for the thing it's a picture of and fails with the reason when it isn't there,
 or when the canvas wouldn't fit (a headline too wide, a list too tall), so a change to the demo
