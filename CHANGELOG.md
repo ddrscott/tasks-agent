@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An empty board shows `// START_HERE`, four steps that end with Claude Code working a card: sign in, Add a sample agent card, Copy the command, paste it in a terminal
 - Add a sample agent card puts a real `#agent` card on the board. It has the agent look around a folder and ask you which small fix to make before it changes anything. One undo removes it
 - Copy the command gives one line that connects Claude Code to your board with a new access token and starts it on your `#agent` cards, with no Authenticate and Allow step. The Connect page has the same quick start at the top, and a one-line command for Codex
-- Agents can call `get_started` over MCP to read the rules for working the board, so the starter prompt is now one line
+- Agents can call `get_started` over MCP to read the rules for working the board. The rules have an agent say what it is, its machine, and its folder when it claims a card, keep your `ANSWER:` lines when it updates its status, and come back for your answer after it asks a question
 - The Connect page has a Sessions section with the Claude Code hooks to copy and the hook script to download, and a section on working with an agent: the `#agent` tag, questions, claims, and the event feed
 - On a phone or tablet, an open card has a Move to row: tap a lane and the card moves there
 - A card an agent session is working on shows that session in the card: its state, machine, last action, and a Copy resume command button
@@ -26,12 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tasks-events --require <tag>` — hear only cards that carry that tag too, so a lead and a gauntlet agent can share a repo
 - A link to Tasks shared in Slack, iMessage, X, or anywhere else that previews links shows a title, a description, and a picture of the board
 - Each page names itself in the browser tab, like `Connect an agent · Tasks`, and Tasks has a home-screen icon on iPhone and iPad
-- Signed out, `/tasks/` is a real front page: what Tasks is, the sign-in form, and a sample board showing an agent's question, a claimed card, and the Sessions list. Below that: what's different, the `claude mcp add` command with a Copy button, and a link to the demo board
+- Signed out, `/tasks/` is a real front page: what Tasks is, the sign-in form, and a sample board showing an agent's question, a claimed card, and the Sessions list. Below that: what's different, including how an answer reaches your agent and that an encrypted board is closed to outside agents, the `claude mcp add` command with a Copy button, and a link to the demo board. On a phone the headline, the demo button, and a piece of the sample board come before the sign-in form
 - Pricing is on the front page, readable before you sign up: the daily assistant limits for Free and Pro, and the Pro price as Stripe has it
-- A mistyped address like `/tasks/nope` shows a not-found page with links to the pages that exist, instead of the sign-in form
-- Until your first agent connects, the board says "No agent connected yet" above the lanes, and each `#agent` card says nothing will pick it up, with a link to Connect. It all goes away the moment an agent connects
+- A mistyped address like `/tasks/nope` answers 404 Not Found and shows a not-found page with links to the pages that exist, instead of the sign-in form
+- Until your first agent connects, the board says "No agent connected yet" above the lanes, and each `#agent` card says nothing will pick it up, with a link to Connect. With no `#agent` card yet, it says how to hand one over: add `#agent` to a card's title, or use the Tags field. It all goes away the moment an agent connects
 - A demo board at `/tasks/demo` you can try without signing up: drag cards, answer an agent's question, and watch a scripted agent pick it up. It lives in your browser tab and nothing is saved
-- The Connect page has a starter prompt to copy into a newly connected agent, so it works `#agent` cards the right way from the first message
+- The Connect page has a one-line starter prompt to copy into a newly connected agent, so it works `#agent` cards the right way from the first message
 - One command sets up Sessions on a machine: it saves your token, installs the two scripts, and adds the hooks to `~/.claude/settings.json` without touching what's already there. The Connect page shows it with a new token filled in
 - End a new card's title with `#agent` and it's tagged: "Write a haiku #agent" adds the card "Write a haiku" with the tag. Works in quick add, on each line of a pasted list, and in the new-card dialog, with several tags too. `#123`, `C#`, and a `#tag` in the middle of a title are left as typed
 - The front page has `// CHECK_IT_YOURSELF`: links to the public code, the changelog with how many changes it holds, the encryption format, what Sessions stores, and who makes Tasks and why
@@ -39,7 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The Connect page opens on Claude Code and leads with coding agents: Claude Code, Cursor, and Codex come first, with Claude, ChatGPT, and Glean still there
-- "No agent connected yet" and `// START_HERE` say how to hand a card to an agent: add `#agent` to its title, or use the Tags field
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
 - On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
 - Bigger buttons on touch screens, and Theme moves into the account menu on a phone
@@ -49,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent's recommended answer on a card is marked `REC`, not only outlined
 - Clear all cards and Delete lane take two taps: the first changes the item to say what the second will do
 - After something is removed, the toast says how many and stays 10 seconds, so there's time to hit Undo
-- The sign-in screen says what Tasks is for: a board your AI agents work from. It says plainly that an encrypted board is closed to outside agents
 - "Connect an agent" is the first item in the account menu, and the Sessions list links to the hook setup
 - When the top bar runs short on room, search shrinks to its icon, then the buttons drop to icon plus count, then the summary goes. On a phone the tag filter chip sits on its own row
 - Orange and gray text is darker in the light themes, and the count badges use dark ink, so small text is easier to read
@@ -59,18 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Over MCP, the board listing says when a card's notes are cut short, and changes answer with lane counts and the new cards' ids instead of the whole board
 - The assistant's starter suggestions are about agent work: queue up cards tagged `agent`, ask what's waiting on your answer, ask which `#agent` cards aren't done
 - "Need you" in the top bar is the one count of what's waiting on you. It adds sessions stopped at a permission prompt to the open questions and lists both, each session with its project, what it wants, its machine, and Copy resume command. The Sessions button just counts live sessions
-- On a phone, the front page shows the headline, the demo button, and a piece of the sample board before the sign-in form
-- The front page says how an answer reaches your agent: right away on the event feed, or the next time the agent reads the board
 
 ### Fixed
 - An agent with no Claude Code hooks (Cursor, Codex, anything on MCP) reads true in the Sessions list: it's working only while it holds a card, releasing a card says `released "<card title>"` and goes idle, and a claim that was refused no longer says it claimed the card
 - Passing `agent`, `machine`, or `project` to `claim_card` again updates the session's row
 - A session's last action names the card by its title instead of its id
 - A session with no project is listed under "No project" and a machine it didn't name is left off, instead of the word "unknown" twice. A session with no folder no longer offers a resume command
-- "Need you" counts one decision once: a session stopped on a card that has an open question shows under that question instead of adding to the count. The front page's sample bar and the demo count the same way
-- An agent following the starter prompt now tells the board what it is, its machine, and its folder when it claims a card, instead of showing as "agent · unknown"
-- An agent that asked you a question comes back for the answer: it checks the board again instead of stopping, and says so plainly when it can't wait
-- An agent following the starter prompt no longer wipes your `ANSWER:` line off a card's notes when it updates its status
+- "Need you" counts one decision once: a session stopped on a card that has an open question shows under that question instead of adding to the count
 - Tapping the search icon on a phone opens search
 - iPhones no longer zoom in when you tap a field
 - The "Add card" label in quick add was unreadable against its button
@@ -84,8 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With the assistant open and more lanes than fit, the board no longer sits scrolled a little sideways with the first lane tight against the left edge
 - "Add a card" in an empty lane opens right under the lane's name instead of leaving a blank gap above the box
 - A long conversation with the assistant scrolls inside the panel instead of pushing the message box off the bottom of the screen
-- A mistyped address like `/tasks/nope` answers 404 Not Found. It used to say 200 OK while showing the not-found page
-- Opening the front page or the demo signed out no longer leaves an error in the browser console
+- Opening Tasks signed out no longer leaves an error in the browser console
 
 ## [0.1.0] - 2026-10-03
 
