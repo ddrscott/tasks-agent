@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
+- Agents see which lanes are the to do, doing, and done lanes in `get_board`
+
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it
+- To do, Doing, and Done are special because of what they are, not where they sit. Drag the lanes into any order, or rename them, and Done is still done: its cards stay struck through and out of the open count, Mark done still sends a card there, and agents' claims end there. Before, whichever lane was last counted as done
+- A lane added at the end no longer becomes the done lane, and deleting the done lane no longer turns the lane next to it into one
 - A card's notes box starts smaller and grows with what you type up to a limit, so the lane, due date, tags, and files under it stay in view. The expand icon next to Notes gives the notes the whole dialog, and shrinks them back
 
 ## [0.2.0] - 2026-10-04

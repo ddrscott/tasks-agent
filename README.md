@@ -194,10 +194,29 @@ run ahead of whatever serves the zone.
   There's no account menu, encryption, or billing there. Search is the in-tab keyword search an
   encrypted board uses (`localSearch.ts`). The top bar is written out again in `Demo.tsx`, so a
   button added to the real one in `App.tsx` needs adding there too.
-- **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
-  appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
-  same, and the card editor has Mark done / Reopen, which is the path on touch
-  screens.
+- **Done = the done lane, wherever it sits.** Cards carry no checkbox; the lane is the
+  status. A ✓ appears on hover or keyboard focus (a reopen arrow in the done lane), `x` does
+  the same, and the card editor has Mark done / Reopen, which is the path on touch screens.
+  Reopen sends the card to the top of the to do lane.
+- **Three lanes are special, and none of them by position.** To do takes new cards (`n`, a
+  card added with no lane named, a reopened card). Doing is where an agent puts the card it
+  picked up. Done means finished: its cards are struck through, drop out of the open count and
+  the event feed's `hello`, and stop being claimed. Each is a `role` stored on the lane
+  (`src/lanes.ts`), so the lanes can be dragged into any order or renamed and nothing changes.
+  - The lane menu has `This lane is`: To do, Doing, Done. Tap one to give this lane the role;
+    the lane that had it gives it up. Tap the lit one to make the lane ordinary again.
+  - A role has at most one lane and can have none. Delete the done lane and the board has no
+    done lane (so no Mark done) until another lane gets the role. With no to do lane, new
+    cards go to the first lane.
+  - A board from before roles has none stored. It reads them off the lane names (`To do`,
+    `Doing` or `In progress`, `Done`), and failing that off position, the old rule: first lane
+    takes new cards, last lane is done. The first time its lanes change (add, rename, delete,
+    move, or a role handed over) the roles are written onto the lanes, and only those count
+    from then on. A new board's lanes carry their roles from the start.
+  - `get_board` marks them for agents: `Done (lane id l0axn, the done lane, 12 cards)`.
+  - On an encrypted board the server can't read lane names, so until the roles are written
+    down it goes by position there. The role itself isn't encrypted, like a lane's sort.
+  - `npm run check:lanes` covers all of it.
 - **Adding a card.** The + in a lane's header opens the full `// NEW_CARD` dialog
   (`src/client/NewCard.tsx`): title, notes, lane, due date, tags, and files in one go.
   Nothing is added until Add card, so the X or Esc leaves no empty card behind (they ask
@@ -552,7 +571,7 @@ strip, and the not-found page link to it too.
     Worker rereads the cards every 2 seconds (`cardDetail`, at most 30 reads a call) and keeps
     nothing; a client that hangs up ends the loop. Each call counts as hearing from the
     session, at both ends of the hold, so an agent that's waiting never reads stale and keeps
-    its cards (`// SESSIONS`). A card you delete, or move to the last lane
+    its cards (`// SESSIONS`). A card you delete, or move to the done lane
     with its question still open, ends the wait too: the answer says the card is gone or
     finished and to stop waiting on it, the same rule that ends its claim (`// SESSIONS`).
   - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
@@ -720,7 +739,7 @@ When an agent needs you to decide something, it asks on the card and you answer 
   Taking `#needs-ceo` off by hand clears the question without an answer.
 - **The agent waits for it.** `wait_for_answer` over MCP holds for up to 30 seconds and
   returns as soon as one of the cards it was given is answered, with that card in full. It also
-  returns when a card was deleted, was moved to the last lane with its question still open, or
+  returns when a card was deleted, was moved to the done lane with its question still open, or
   had its question cleared by hand. The working rules have
   an agent call it in a loop for up to 10 minutes (`// CONNECT_AN_AGENT`). No shell, no feed.
   Every call counts as hearing from the session, so it doesn't go stale while it waits.
@@ -739,7 +758,7 @@ When an agent needs you to decide something, it asks on the card and you answer 
   (`STATUS: 2026-10-04 — read the folder…`), which would take the room the news needs, so the
   face leaves a leading date or date and time off (`withoutLeadingDate`, used by `faceLine`).
   The notes keep the line as written, and the face's tooltip shows all of it. A card with an open question shows the question
-  instead, and a card in the last lane shows neither.
+  instead, and a card in the done lane shows neither.
 - **Right after you answer, the card says what you answered.** The STATUS line an agent wrote
   before asking usually says it's waiting on you, and it stays in the notes until the agent
   rewrites it, some seconds after your tap. So an answer remembers the STATUS line the card
@@ -986,7 +1005,7 @@ hooks installed can still hold cards, and one that's waiting on your answer keep
 on the card, so they don't show up in undo, notes, or search.
 
 **A finished card isn't claimed.** A claim says a session is working on the card, and nothing is
-working on a card that's done or gone. So a claim ends the moment its card reaches the last lane
+working on a card that's done or gone. So a claim ends the moment its card reaches the done lane
 or is deleted, whoever did it: the agent over MCP (with or without `release_card`), you in the
 app, or the assistant. The card stops saying "working" right then instead of 15 minutes later.
 A `release_card` that arrives afterward finds nothing to release and says so, which is fine.
@@ -994,11 +1013,12 @@ A `release_card` that arrives afterward finds nothing to release and says so, wh
 - **Where it happens.** `TodoAgent.mutate` (and undo and redo, which change the board without it)
   compares the board before and after with `endedCards` in `src/presence-shared.ts`. If a card
   ended, it calls `Presence.finish`, which drops the claim. That call is one-way and runs after
-  the change is saved: no undo step, no flash, no agent event. A board with one lane has no done
-  lane, so only a delete ends a claim there. An encrypted board keeps no presence and is skipped.
-- **What counts.** Being in the last lane now and not before. That covers a move, a card added
-  straight to the last lane, and a lane change that makes another lane the last one. A card
-  moved back out of the last lane is just a card again.
+  the change is saved: no undo step, no flash, no agent event. A board with no done lane (one
+  lane, or the done lane was deleted) ends a claim only on a delete. An encrypted board keeps no presence and is skipped.
+- **What counts.** Being in the done lane now and not before. That covers a move, a card added
+  straight to the done lane, and making another lane the done lane from its menu. Dragging the
+  lanes into another order ends nothing. A card moved back out of the done lane is just a card
+  again.
 - **Undo doesn't bring a claim back.** Undo the move and the card returns to its lane unclaimed.
   The agent claims it again if it's still on it; a claim the board invented would say a session
   is working when nobody has heard that from the session. Redoing the move, or undoing the
@@ -1065,7 +1085,7 @@ names the card by its title.
 | You answered | working (it kept the card) | got your answer on "Fix the login redirect" |
 | The question was taken back | working | its question on "Fix the login redirect" was taken back |
 | `wait_for_answer` | unchanged; last-seen moves | unchanged |
-| An agent moved the card to the last lane | idle, or working if it holds another card | finished "Fix the login redirect" |
+| An agent moved the card to the done lane | idle, or working if it holds another card | finished "Fix the login redirect" |
 | You or the assistant moved it there | same | "Fix the login redirect" was moved to Done |
 | The card was deleted | same | "Fix the login redirect" was deleted |
 | 15 quiet minutes, so its claims lapse | idle | its claim lapsed |
@@ -1318,6 +1338,7 @@ npm run typecheck
 npm run build && npx vite preview   # the built Worker, for checking status codes: /tasks/nope is a 404
 npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
+npm run check:lanes      # special lanes: to do, doing, done follow the lane, not its position
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the Sessions installer against a temp HOME: fresh, existing settings.json, run twice
