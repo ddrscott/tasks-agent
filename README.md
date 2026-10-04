@@ -1370,7 +1370,8 @@ build it measured about 250 ms.
 The footer on every page ends with the running version, like `$ v0.1.0 · 7270832`: the release
 in `package.json` and the short git commit the build came from. Before the first release it shows
 the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newest entries of
-`CHANGELOG.md`, with a link to the whole file.
+`CHANGELOG.md`, with a link to the whole file. On a phone (560px and under) it covers the whole
+screen; everywhere, the X in its corner or Esc closes it.
 
 - `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
   versioning. **Add a line under `[Unreleased]` with every change someone would notice**, in the

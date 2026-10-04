@@ -1084,7 +1084,9 @@ a.att-name:hover { color: var(--accent-text); }
 .version-mark { color: var(--accent); margin-right: 4px; text-decoration: none; display: inline-block; }
 /* The footer sits at the bottom of the screen, so its list opens upward. */
 .popover:has(> .changes) { top: auto; bottom: calc(100% + 8px); right: auto; left: 0; text-align: left; }
-.changes { width: 380px; max-width: calc(100vw - 32px); max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 12px; font: 13px/1.5 var(--font-ui); color: var(--ink); }
+.changes { width: 380px; max-width: calc(100vw - 32px); max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain; padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; font: 13px/1.5 var(--font-ui); color: var(--ink); }
+/* The heading and the X stay put while the list scrolls under them. */
+.changes-top { position: sticky; top: 0; z-index: 1; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 -8px -6px 0; padding: 8px 0 6px; background: var(--surface); }
 .changes section { display: flex; flex-direction: column; gap: 6px; }
 .changes h3 { margin: 0; display: flex; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); }
 .changes h3 span { font-weight: 400; color: var(--muted); }
@@ -1196,9 +1198,10 @@ a.att-name:hover { color: var(--accent-text); }
 
 @media (max-width: 560px) {
   /* The sessions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
-  /* Clear of the wrapped footer and the floating Ask button. */
-  .popover:has(> .changes) { position: fixed; top: auto; bottom: 76px; left: 16px; right: 16px; }
-  .changes { width: auto; max-width: none; }
+  /* What's new takes the whole screen on a phone, over the top bar and the floating Ask button. The X in its corner closes it. */
+  .popover:has(> .changes) { position: fixed; inset: 0; z-index: 60; border: 0; border-radius: 0; box-shadow: none; }
+  .changes { width: auto; max-width: none; height: 100%; max-height: none; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); font-size: 15px; }
+  .changes-top { padding-top: max(10px, env(safe-area-inset-top)); }
   .popover:has(> .sessions), .popover:has(> .asks) { position: fixed; top: 62px; left: 16px; right: 16px; }
   .sessions, .asks { width: auto; max-width: none; }
   .asks-btn, .sess-btn { padding: 0 8px; }

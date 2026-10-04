@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- What's new fills the screen on a phone, and has an X in the corner to close it
+
 ## [0.2.0] - 2026-10-04
 
 ### Added

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BASE } from "./base";
 import { Popover } from "./Board";
+import { IconClose } from "./icons";
 
 const CHANGELOG_URL = "https://github.com/ddrscott/tasks-agent/blob/main/CHANGELOG.md";
 
@@ -33,7 +34,10 @@ function Version() {
       {open && (
         <Popover label="What's new" onClose={() => setOpen(false)}>
           <div className="changes">
-            <h2 className="h">WHATS_NEW</h2>
+            <div className="changes-top">
+              <h2 className="h">WHATS_NEW</h2>
+              <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={() => setOpen(false)}><IconClose /></button>
+            </div>
             {changes.length === 0 && <p>No changes written up yet.</p>}
             {changes.map((r) => (
               <section key={r.name}>
