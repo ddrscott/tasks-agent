@@ -12,7 +12,9 @@ import type { Vault } from "./vault";
 // On an encrypted board the file is encrypted here first, and opening one downloads the
 // ciphertext and decrypts it in the tab. Only types that can't run scripts open inline.
 
-const fileUrl = (a: Attachment, download = false) => api(`/api/attachments/${a.id}${download ? "?download=1" : ""}`);
+// `board` is the owner's id on a board someone shared with you (// TEAM_BOARDS); the Worker checks membership.
+const withBoard = (q: string[], board?: string) => { const all = board ? [...q, `board=${encodeURIComponent(board)}`] : q; return all.length ? `?${all.join("&")}` : ""; };
+const fileUrl = (a: Attachment, download = false, board?: string) => api(`/api/attachments/${a.id}${withBoard(download ? ["download=1"] : [], board)}`);
 const isImage = (a: Attachment) => /^image\/(png|jpeg|gif|webp|avif)$/.test(a.type);
 // Matches the Worker's INLINE list: a decrypted file of any other type is only ever saved, never opened here.
 const INLINE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf", "text/plain"]);
@@ -31,8 +33,8 @@ export function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
-async function upload(cardId: string, file: File): Promise<void> {
-  const r = await fetch(api(`/api/attachments?card=${encodeURIComponent(cardId)}`), {
+async function upload(cardId: string, file: File, board?: string): Promise<void> {
+  const r = await fetch(api(`/api/attachments${withBoard([`card=${encodeURIComponent(cardId)}`], board)}`), {
     method: "POST",
     headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": encodeURIComponent(file.name) },
     body: file,
@@ -44,9 +46,9 @@ async function upload(cardId: string, file: File): Promise<void> {
 }
 
 /** Upload one file to a card, encrypting it first on an encrypted board. */
-export async function uploadFile(cardId: string, file: File, vault: Vault | null): Promise<void> {
+export async function uploadFile(cardId: string, file: File, vault: Vault | null, board?: string): Promise<void> {
   if (vault) await uploadSealed(vault, { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) }, cardId);
-  else await upload(cardId, file);
+  else await upload(cardId, file, board);
 }
 
 /** Where a card's files would go, on a board with nowhere to store them (the demo). */
@@ -66,9 +68,13 @@ type Props = {
   onRemove(id: string): void;
   /** The element that accepts dropped and pasted files, usually the whole dialog. */
   dropTarget: React.RefObject<HTMLElement | null>;
+  /** The owner's id, on a board someone shared with you. */
+  board?: string;
+  /** A viewer: the files open and download, and nothing can be added or removed. */
+  readOnly?: boolean;
 };
 
-export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }: Props) {
+export function Attachments({ cardId, vault, attachments, onRemove, dropTarget, board, readOnly }: Props) {
   const [pending, setPending] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
@@ -81,18 +87,18 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }
     setPending((p) => [...p, ...files.map((f) => f.name)]);
     for (const f of files) {
       try {
-        await uploadFile(cardId, f, vault);
+        await uploadFile(cardId, f, vault, board);
       } catch (e) {
         setError((e as Error).message);
       } finally {
         setPending((p) => { const i = p.indexOf(f.name); return i < 0 ? p : [...p.slice(0, i), ...p.slice(i + 1)]; });
       }
     }
-  }, [cardId, vault]);
+  }, [cardId, vault, board]);
 
   useEffect(() => {
     const el = dropTarget.current;
-    if (!el) return;
+    if (!el || readOnly) return;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
     const onOver = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setOver(true); } };
     const onLeave = (e: DragEvent) => { if (!el.contains(e.relatedTarget as Node | null)) setOver(false); };
@@ -117,33 +123,35 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget }
       el.removeEventListener("drop", onDrop);
       el.removeEventListener("paste", onPaste);
     };
-  }, [dropTarget, add]);
+  }, [dropTarget, add, readOnly]);
 
   return (
     <div className={`attachments${over ? " over" : ""}`}>
       <div className="attachments-head">
         <span>Attachments</span>
-        <button type="button" className="btn ghost" onClick={() => input.current?.click()}><IconClip />Attach files</button>
+        {!readOnly && <button type="button" className="btn ghost" onClick={() => input.current?.click()}><IconClip />Attach files</button>}
+        {!readOnly && (
         <input
           ref={input} type="file" multiple hidden
           onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = ""; }}
         />
+        )}
       </div>
       {attachments.length === 0 && pending.length === 0 && (
-        <p className="attachments-empty">{over ? "Drop to attach" : "Drop files here, paste a screenshot, or use Attach files."}</p>
+        <p className="attachments-empty">{readOnly ? "No files on this card." : over ? "Drop to attach" : "Drop files here, paste a screenshot, or use Attach files."}</p>
       )}
       {(attachments.length > 0 || pending.length > 0) && (
         <ul>
           {vault && attachments.map((a) => <SealedFile key={a.id} a={a} vault={vault} onRemove={onRemove} onError={setError} />)}
           {!vault && attachments.map((a) => (
             <li key={a.id}>
-              <a className="att-thumb" href={fileUrl(a)} target="_blank" rel="noreferrer" title={`Open ${a.name}`}>
-                {isImage(a) ? <img src={fileUrl(a)} alt="" loading="lazy" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
+              <a className="att-thumb" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer" title={`Open ${a.name}`}>
+                {isImage(a) ? <img src={fileUrl(a, false, board)} alt="" loading="lazy" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
               </a>
-              <a className="att-name" href={fileUrl(a)} target="_blank" rel="noreferrer">{a.name}</a>
+              <a className="att-name" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer">{a.name}</a>
               <span className="att-size">{formatBytes(a.size)}</span>
-              <a className="btn ghost" href={fileUrl(a, true)} download={a.name} title="Download">↓</a>
-              <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>
+              <a className="btn ghost" href={fileUrl(a, true, board)} download={a.name} title="Download" aria-label={`Download ${a.name}`}>↓</a>
+              {!readOnly && <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>}
             </li>
           ))}
           {pending.map((name, i) => (

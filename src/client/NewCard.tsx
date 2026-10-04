@@ -26,12 +26,14 @@ type Props = {
   vault: Vault | null;
   /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
   filesNote?: string;
+  /** The owner's id, on a board someone shared with you: files upload to that board. */
+  board?: string;
   /** Adds the card and resolves to its id. */
   onAdd(input: NewCardInput): Promise<string>;
   onClose(): void;
 };
 
-export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onAdd, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -123,7 +125,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
     const failed: File[] = [];
     let why = "";
     for (const f of files) {
-      try { await uploadFile(id, f, vault); } catch (e) { failed.push(f); why = (e as Error).message; }
+      try { await uploadFile(id, f, vault, board); } catch (e) { failed.push(f); why = (e as Error).message; }
     }
     if (!failed.length) return onClose();
     setFiles(failed);
