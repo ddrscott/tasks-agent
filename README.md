@@ -25,7 +25,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
-| Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks |
+| Claude Code sessions | A `Presence` Durable Object per user (`src/presence.ts`): one row per session, plus card claims, fed by Claude Code hooks and by `claim_card` |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -429,7 +429,7 @@ strip, and the not-found page link to it too.
   "Sign in to create a token" link, which goes to `/tasks/?next=/tasks/connect#…` so sign-in
   lands back on the same section. The top bar's back link goes to the board signed in and to
   the landing page signed out. `App.tsx` routes `connect` ahead of the sign-in check and
-  passes `signedIn`; the page is a static asset, so the Worker never gated it.
+  passes `signedIn`; the Worker hands every page the same HTML and never gated it.
 - **The quick start.** Four steps: sign in, **Add a sample agent card**, **Copy the command**,
   paste it in a terminal. The same `QuickStart` component is the empty board's `// START_HERE`
   (`// HOW_IT_WORKS`, First run). On the Connect page, which has no board connection, the
@@ -716,7 +716,7 @@ curl -fsSL https://askscottpierce.com/tasks/setup.mjs \
   token is untested and carries on. `--dry-run` on the end prints the plan, writes nothing,
   and sends nothing.
 - **How it's served.** `scripts/tasks-setup.mjs` is the installer. The Worker answers
-  `/tasks/setup.mjs` (`src/server.ts`, listed in `run_worker_first`) with that file plus the two
+  `/tasks/setup.mjs` (`src/server.ts`; the Worker answers every `/tasks` address) with that file plus the two
   scripts and its own origin written into it (`buildSetup` in `src/setup.ts`), so one download
   is everything that lands on the machine and it can be read before it's run. The token goes
   in the environment, never in a URL. From a checkout, `TASKS_TOKEN=… node scripts/tasks-setup.mjs`
@@ -1032,10 +1032,10 @@ npm run shots            # the Product Hunt gallery, shot from the running app (
 npm run check:launch     # the launch copy against its character and word limits
 ```
 
-The `/tasks` base lives in seven places: `src/client/base.ts`, `src/server.ts`,
+The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
 `src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
-`src/auth.ts` (redirect and cookie paths), `vite.config.ts` (`build.assetsDir`), and
-`wrangler.jsonc` (`routes`, `run_worker_first`).
+`src/auth.ts` (redirect and cookie paths), `src/agent-rules.ts` (the default `base`),
+`vite.config.ts` (`build.assetsDir`), and `wrangler.jsonc` (`routes`, `run_worker_first`).
 
 `.dev.vars` sets `DEV_LOGIN_CODES=1`, which skips sending email: the code shows
 on the sign-in screen and in the terminal. Copy `.dev.vars.example` to create it.
