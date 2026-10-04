@@ -1347,13 +1347,16 @@ a.chip.no-agent:hover { border-style: solid; }
 }
 @media (max-width: 560px) {
   .demo-strip { padding: 8px 12px; }
-  .demo-strip p { flex-basis: 60%; font-size: 12px; }
-  .demo-links { flex: 1 1 100%; }
-  .demo-links .btn { flex: 1; justify-content: center; }
-  .demo-reset { display: none; }
-  /* Once the script has run out, Start over is the next thing to do, so it comes back. */
-  .demo-strip.over .demo-reset { display: inline-flex; }
+  .demo-strip p { flex: 1 1 0; font-size: 12px; }
+  /* The three buttons join the strip's own rows: Start over sits at the end of the first, beside
+     the line that says it's a demo, so it's there the whole time. The other two share the next. */
+  .demo-links { display: contents; }
+  .demo-links .btn { flex: 1 1 40%; justify-content: center; }
+  .demo-links .demo-reset { flex: none; }
+  /* Once the script has run out, the strip's line is longer and Start over is the next thing to
+     do, so the line takes a row and the three buttons share one. */
   .demo-strip.over p { flex-basis: 100%; }
+  .demo-strip.over .demo-links .btn { flex: 1 1 0; padding-inline: 6px; }
   /* The real board moves Theme into the account menu on a phone. The demo has no account menu,
      and no account button in the bar, so the Theme button keeps that place. */
   .demo .theme-anchor > .btn { display: inline-flex; }

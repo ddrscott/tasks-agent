@@ -285,10 +285,11 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     boardEl.scrollLeft += lane.getBoundingClientRect().left - boardEl.getBoundingClientRect().left - pad;
   }, []);
 
-  // Sessions: time moves along so "4s ago" stays true, and the lead session follows the script.
+  // Sessions: the clock runs every second, so a working session's "4s ago" counts up and starts
+  // over when it does the next thing (demoData.ts), and the lead session follows the script.
   const [, tick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 10_000);
+    const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
   // The lead session says needs input exactly while its card has a question open: the answer

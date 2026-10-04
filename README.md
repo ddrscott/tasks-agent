@@ -176,8 +176,14 @@ run ahead of whatever serves the zone.
     recommendation. Delete the card and it takes the next one; undo that and it's back on it.
     A card dialog that's open when the agent changes the card is redrawn from the new card,
     which drops anything typed in it and not saved.
+  - **The other two sessions run on the clock** (`demoPresence`, redrawn every second). The
+    working one in shop-web steps through a short loop of tool calls: its "seen" time counts up
+    a few seconds, then starts over with a new last-action line, the way a session with hooks
+    reports after each tool. The idle one in infra was last heard from a minute before the demo
+    opened and only gets older, so four minutes in it's marked stale like any quiet session.
   - **On a phone** it opens on the lane that holds the open question, not the first lane, and
-    the Theme button stays in the top bar, since there's no account menu to put it in.
+    the Theme button stays in the top bar, since there's no account menu to put it in. Start
+    over is in the strip the whole time there too, at the end of its first row.
 
   A strip under the top bar says it's a demo and nothing is saved, with links to sign up and to
   Connect; a reload or Start over resets it. The seed has `agentSeenAt` set, so "No agent
