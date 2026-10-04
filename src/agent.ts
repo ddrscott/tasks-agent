@@ -287,7 +287,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private restore(board: Board) {
     const before = this.state;
     // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
-    this.setState({ ...board, theme: before.theme, themeChosen: before.themeChosen, sealed: before.sealed });
+    this.setState(ops.keepSettings(board, before));
     this.reindex(before, this.state);
     const kept = new Set(ops.attachmentIds(this.state));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
@@ -351,6 +351,17 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     } catch (e) {
       return { ok: false, summary: (e as Error).message };
     }
+  }
+
+  /**
+   * An outside agent just made a call over MCP (mcp.ts). The first one is remembered on the
+   * board, which is what takes "No agent connected yet" off every open tab. It's a setting, not
+   * a change: no undo step, no event on the feed, and no card moves or flashes. Every call after
+   * the first returns without touching anything.
+   */
+  noteAgentSeen() {
+    const next = ops.markAgentSeen(this.state, new Date().toISOString());
+    if (next !== this.state) this.setState(next);
   }
 
   /** Whether the board is end-to-end encrypted, for MCP. */
@@ -518,7 +529,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   async resetEncryptedBoard() {
     if (!this.state.sealed) throw new Error("This board isn't encrypted.");
-    await this.swapBoard({ ...ops.newBoard(), theme: this.state.theme, themeChosen: this.state.themeChosen });
+    // The agents that were connected still are, so the fresh board doesn't ask for one again.
+    const { sealed: _gone, ...settings } = this.state;
+    await this.swapBoard(ops.keepSettings(ops.newBoard(), settings));
     this.sql`DELETE FROM seal_meta`;
     this.index.clear();
   }
@@ -584,7 +597,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       }
       if (lanes.some((l) => !l.name) || cards.some((c) => !c.title)) throw new Error("A lane or card came back empty.");
     }
-    return { lanes, cards, theme: cur.theme, themeChosen: cur.themeChosen, ...(seal ? { sealed: seal } : {}) };
+    return ops.keepSettings({ lanes, cards, theme: cur.theme }, { ...cur, sealed: seal });
   }
 
   /**

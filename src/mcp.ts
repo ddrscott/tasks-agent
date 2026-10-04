@@ -221,5 +221,12 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     return server;
   }, { route: MCP_PATH });
 
-  return handler(req, env, ctx);
+  const res = await handler(req, env, ctx);
+  // An MCP request that went through means an agent is connected: the token was good and the
+  // client spoke the protocol. The handshake counts, so the app says so as soon as the agent is
+  // added, before it has touched a card. The board keeps the first time only (TodoAgent.noteAgentSeen).
+  if (req.method === "POST" && res.ok) {
+    ctx.waitUntil(Promise.resolve(agent.noteAgentSeen()).catch((e: Error) => console.warn("noting the agent failed", e.message)));
+  }
+  return res;
 }

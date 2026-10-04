@@ -11,13 +11,10 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
-import { hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
 
-export const AGENT_TAG = "agent";
-/** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */
-export const GAUNTLET_TAG = "gauntlet";
-const forAgent = (c: Card) => hasTag(c, AGENT_TAG) || hasTag(c, GAUNTLET_TAG);
-export { NEEDS_CEO_TAG };
+// The tags live in shared.ts, where the app can reach them too.
+export { AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
 
