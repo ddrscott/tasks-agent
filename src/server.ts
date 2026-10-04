@@ -4,7 +4,7 @@ import { handleAttachments } from "./attachments";
 import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
-import { pageAt } from "./routes";
+import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
 import { reportFrom } from "./presence";
@@ -30,15 +30,54 @@ const BASE = "/tasks";
  * The app's HTML. Every page is the same document, and the client draws the one the address
  * names. `status` is 404 for an address that names nothing, so crawlers and link checkers hear
  * the truth while a person still gets the not-found page with its links.
+ *
+ * The head is written per page on the way out (PAGE_META in src/routes.ts): link-preview
+ * fetchers don't run JavaScript, so the title a shared link shows has to be in this HTML.
  */
-async function shell(req: Request, env: Env, status: 200 | 404): Promise<Response> {
+async function shell(req: Request, env: Env, page: Page | null): Promise<Response> {
   // A bare request: a 404 must never come back as "304 Not Modified" from a conditional header.
-  const page = await env.ASSETS.fetch(new Request(new URL("/", req.url), { method: req.method === "HEAD" ? "HEAD" : "GET" }));
-  if (status === 200 || !page.ok) return page;
-  const headers = new Headers(page.headers);
+  const html = await env.ASSETS.fetch(new Request(new URL("/", req.url), { method: req.method === "HEAD" ? "HEAD" : "GET" }));
+  if (!html.ok) return html;
+  const headers = new Headers(html.headers);
+  // The same file is a different document at each address now, so its ETag and length no longer describe it.
   headers.delete("ETag");
-  headers.set("Cache-Control", "no-store");
-  return new Response(page.body, { status, headers });
+  headers.delete("Content-Length");
+  if (page === null) headers.set("Cache-Control", "no-store");
+  const status = page === null ? 404 : 200;
+  if (!html.body) return new Response(null, { status, headers });
+  return new Response(withHead(html, pageHead(page)).body, { status, headers });
+}
+
+/**
+ * Write one page's head into index.html: <title>, the description, canonical, and the og: and
+ * twitter: copies of each. index.html holds the front page's own tags, so `/tasks/` only gets
+ * its title set (from the same constant the client uses). Every other page also loses the
+ * JSON-LD block, which describes the product on the front page and nowhere else. An address
+ * that names nothing gets `noindex` and no canonical or og:url: there's no page to point at.
+ */
+function withHead(html: Response, head: PageHead): Response {
+  const content = (value: string | null) => ({
+    element(el: Element) {
+      if (value === null) el.remove(); else el.setAttribute("content", value);
+    },
+  });
+  let rw = new HTMLRewriter()
+    .on("title", { element(el) { el.setInnerContent(head.title); } })
+    .on('meta[property="og:title"]', content(head.title))
+    .on('meta[name="twitter:title"]', content(head.title));
+  if (head.landing) return rw.transform(html);
+  rw = rw
+    .on('link[rel="canonical"]', { element(el) { if (head.url) el.setAttribute("href", head.url); else el.remove(); } })
+    .on('meta[property="og:url"]', content(head.url))
+    .on('script[type="application/ld+json"]', { element(el) { el.remove(); } });
+  if (head.description !== null) {
+    rw = rw
+      .on('meta[name="description"]', content(head.description))
+      .on('meta[property="og:description"]', content(head.description))
+      .on('meta[name="twitter:description"]', content(head.description));
+  }
+  if (!head.index) rw = rw.on('meta[name="robots"]', content("noindex"));
+  return rw.transform(html);
 }
 
 /**
@@ -118,9 +157,10 @@ const app: ExportedHandler<Env> = {
 
     // A page (src/routes.ts lists them) gets the app. Anything else is a file in public/tasks,
     // like og.png, or it's nothing, and nothing is a 404 that still draws the not-found page.
-    if (pageAt(path, BASE)) return shell(req, env, 200);
+    const page = pageAt(path, BASE);
+    if (page) return shell(req, env, page);
     const file = await env.ASSETS.fetch(req);
-    return file.status === 404 ? shell(req, env, 404) : file;
+    return file.status === 404 ? shell(req, env, null) : file;
   },
 };
 

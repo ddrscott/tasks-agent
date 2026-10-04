@@ -87,11 +87,12 @@ run ahead of whatever serves the zone.
   signed in or not, and the response is a real **404**. The pages are listed once, in
   `src/routes.ts` (`PAGES`): `connect`, `privacy`, `terms`, `demo`, `pricing`, plus `/tasks/`
   itself. The client uses the list to pick the page and the Worker uses it to pick the status,
-  so add a new page there and nowhere else. To make that possible the Worker answers every
+  so add a new page there, with a row in `PAGE_META` beside it for its title and description
+  (`// LINK_PREVIEWS_AND_TITLES`; a page without a row doesn't compile). To make that possible the Worker answers every
   `/tasks` address (`run_worker_first` in `wrangler.jsonc`) except `/tasks/assets/*` and
   `/tasks/needle/*`, which the asset layer serves by itself, and `not_found_handling` is
   `none`: a page gets the app's HTML, a file in `public/tasks/` gets the file, and everything
-  else gets the app's HTML with a 404. A missing file under `/tasks/assets/` is a bare 404.
+  else gets the app's HTML with a 404, marked `noindex`. A missing file under `/tasks/assets/` is a bare 404.
 - **Who's signed in.** `GET /tasks/api/me` answers 200 either way: the user, or `null` when
   nobody is signed in. It isn't a 401, so a signed-out visit leaves the browser console clean.
   Everything that needs a session still answers 401 without one.
@@ -988,10 +989,41 @@ step with what the app stores: update it when you add a table, a processor, or a
 
 ## // LINK_PREVIEWS_AND_TITLES
 
-`index.html` carries what a shared link shows: the title, description, canonical URL, `og:*`
-and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. It's static, so every path
-serves the same tags and they all point at `https://askscottpierce.com/tasks/`. Only put
+`index.html` carries what a shared link shows for the front page: the title, description,
+canonical URL, `og:*` and `twitter:*` tags, and a JSON-LD `SoftwareApplication` block. Only put
 true facts in there: no ratings, no user counts, and no price until billing is on.
+
+**Every page gets its own head.** Link-preview fetchers (Slack, X, iMessage, Hacker News) read
+the raw HTML and don't run JavaScript, and every page is the same `index.html`. So the Worker,
+which answers every `/tasks` page itself, rewrites the head on the way out with `HTMLRewriter`
+(`shell` and `withHead` in `src/server.ts`), from one table: `PAGE_META` in `src/routes.ts`.
+
+| Address | `<title>`, `og:title`, `twitter:title` | Description | Canonical and `og:url` |
+|---|---|---|---|
+| `/tasks/` | the default title | as written in `index.html` | `https://askscottpierce.com/tasks/` |
+| `/tasks/demo` | Demo board · Tasks | a live demo board, no sign-up | `…/tasks/demo` |
+| `/tasks/connect` | Connect an agent · Tasks | from the table | `…/tasks/connect` |
+| `/tasks/pricing` | Pricing · Tasks | from the table | `…/tasks/pricing` |
+| `/tasks/privacy`, `/tasks/terms` | Privacy · Tasks, Terms · Tasks | from the table | their own address |
+| anything else (404) | Not found · Tasks | "There's no page at this address." | removed, and `robots` is `noindex` |
+
+- **To add a page or change a title**, edit `PAGE_META`. A row has a `name` and a
+  `description`; the description is written to `meta description`, `og:description`, and
+  `twitter:description` alike. The client's tab titles come from the same rows: `useTitle`
+  only accepts a name that's in the table, so a title can't say one thing in the HTML and
+  another in the tab.
+- **The front page is the exception.** Its descriptions and JSON-LD stay written out in
+  `index.html`, and the Worker only sets its title, from `DEFAULT_TITLE`. Every other page has
+  the JSON-LD block removed: it describes the product, on the front page.
+- **Canonical URLs always name production** (`SITE` in `src/routes.ts`), whatever host served
+  the page, and have no trailing slash except `/tasks/`. `/tasks/demo/` says `/tasks/demo`.
+- **`og:image` is the same picture everywhere.** A per-page image would need its own render.
+- **`/tasks/pricing` is the front page opened at its pricing section**, with its own title and
+  canonical so a shared pricing link previews as pricing.
+- **Rewritten pages carry no `ETag`**: the file's ETag describes `index.html`, not the page
+  made from it. The Worker never answered a page with a 304 anyway.
+- It works the same under `vite dev` and from the built Worker. Check a page with
+  `curl -s localhost:5173/tasks/demo | grep -iE '<title>|description|canonical|og:|twitter:'`.
 
 - **The share image** is `public/tasks/og.png` (1200x630), and the home-screen icon is
   `public/tasks/apple-touch-icon.png` (180x180). Both are screenshots of HTML kept in
@@ -1006,9 +1038,11 @@ true facts in there: no ratings, no user counts, and no price until billing is o
 - X, Slack, and iMessage cache previews. After changing the image, rename it (and the URLs in
   `index.html`) if the old one has to stop showing.
 - **Tab titles** come from `useTitle` in `src/client/title.ts`: `useTitle("Connect an agent")`
-  gives "Connect an agent · Tasks". Each page calls it once at the top of its component. The
+  gives "Connect an agent · Tasks". Each page calls it once at the top of its component, with a
+  name from `PAGE_META` (or "Board", your own board's tab, which is never in served HTML). The
   sign-in screen calls it with no name and gets the full default title, because that's the
-  page a shared link lands on. `DEFAULT_TITLE` there has to match `<title>` in `index.html`.
+  page a shared link lands on. `DEFAULT_TITLE` in `src/routes.ts` is that title; `<title>` in
+  `index.html` should say the same, and the Worker overwrites it with the constant either way.
 
 ## // SIGN_IN_WITH_GOOGLE_AND_MICROSOFT
 

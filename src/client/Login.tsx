@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { pageAt } from "../routes";
+import { PAGE_META, pageAt } from "../routes";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
 import { useTitle } from "./title";
@@ -42,7 +42,9 @@ function loadTurnstile(): Promise<void> {
 const safeNext = (raw: string | null) => (raw && raw.startsWith("/tasks/") && !raw.startsWith("//") && !/[\\\s]/.test(raw) ? raw : null);
 
 export function Login({ onSignedIn }: { onSignedIn: () => void }) {
-  useTitle();
+  // The front page keeps the full default title. At /tasks/pricing it's the pricing page, signed
+  // out too, which is what the served HTML says (PAGE_META in src/routes.ts).
+  useTitle(pageAt(location.pathname, BASE) === "pricing" ? PAGE_META.pricing.name : undefined);
   // Where to go after signing in, e.g. back to an agent's OAuth consent screen.
   const [next] = useState(() => safeNext(new URLSearchParams(location.search).get("next")));
   const [providers, setProviders] = useState<Provider[]>([]);
