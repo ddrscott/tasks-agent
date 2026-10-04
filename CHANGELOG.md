@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone. The screens for it are still to come
 - A card remembers who last changed it: you, a member, the assistant on someone's behalf, or an agent
 - An audit log of invites, role changes, removals, and people leaving, with who and when, that the owner can download as CSV or JSON
+- An invite link opens a page that shows who invited you, the role, and what that role can do, with Accept and Decline. It only works signed in as the address it was sent to, and it brings you back to the invite after you sign in
+- A board switcher next to the logo, once someone has shared a board with you: your board, and each shared one with your role. The open board is in the address, so a reload or a bookmark comes back to it
+- A shared board says whose it is and what you can do on it. A viewer can read everything and change nothing; a writer can change cards, and lanes, undo, questions, and board settings stay with the owner
+- Leave a shared board from the account menu
+- A shared board shows who last changed each card, and whether an agent or the assistant did it for them
+- When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

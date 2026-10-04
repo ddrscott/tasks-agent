@@ -264,6 +264,8 @@ run ahead of whatever serves the zone.
   attribute, and `styles.css` does the rest. There's one count of what's waiting on you: "need
   you" adds up the open questions (`// QUESTIONS`) and the sessions stopped at a prompt
   (`// SESSIONS`), and the Sessions button next to it only says how many sessions are live.
+  Someone with a board shared with them also gets the board switcher next to the wordmark
+  (`// TEAM_BOARDS`); its name and role chip drop to an icon at the "labels" step and on a phone.
 - **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
   `aria-label` (the account button is "Account", not the email address). The account and
   lane menus are `role="menu"` with `menuitem` children, the other popovers are
@@ -1135,8 +1137,9 @@ Sessions button is hidden, and turning encryption on erases the rows that were t
 
 A Pro owner invites people into their board by email. Each member is a **viewer** (read only) or
 a **writer**. It's the whole board; there are no per-tag scopes yet. The server side is built and
-checked (`npm run check:members`). The app's UI for it (members panel, board switcher, banners,
-who-changed-it on a card) is not built yet: this section is what that UI builds against.
+checked (`npm run check:members`). The member's side of the app is built on it (**The member's
+side**, below): the invite page, the board switcher, a shared board that shows only what your
+role can do, and who changed each card. The owner's Members panel is its own piece.
 
 **The model.**
 
@@ -1198,8 +1201,9 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
 - The client opens the same socket as always, plus the board's id:
   `useAgent({ agent: "TodoAgent", basePath: "tasks/agent", query: { board: "<owner id>" } })`,
   which is `wss://…/tasks/agent?board=<owner id>`. Without `board` (or with your own id) you
-  get your own board, as before. `Workspace` in `App.tsx` already passes `?board=` from the
-  page's address through; that's all the client does so far.
+  get your own board, as before. The page's address carries it (`/tasks/?board=<owner id>`),
+  and `BoardHost` in `App.tsx` asks `GET /api/board/access` before it connects, so the app
+  never knocks on a board that won't open.
 - The Worker (`memberConnect` in `src/server.ts`) checks the session, calls `access`, and for
   a member hands the owner's Durable Object a request it built from scratch: no browser
   headers, no path, only `x-tasks-member` with the member it just checked. On the owner's own
@@ -1328,9 +1332,12 @@ D1 holds only `SHA-256("invite:" + token)`, and the invite is found by that hash
 `invite_invalid` ("This invite isn't for this account, or it's no longer valid."), covers a
 wrong account, a used, expired, revoked, declined, or made-up token. Accepting clears the hash
 in the same statement, so a link works once. Lookups are limited to 30 an hour per account and
-120 per IP. `/tasks/invite` is a page (`src/client/Invite.tsx`, plain for now, `noindex`):
-signed out it links to `/tasks/?next=/tasks/invite%23t%3D<token>`, and sign-in comes back to it.
-`next` only ever takes paths inside the app (`safeNext`).
+120 per IP. `/tasks/invite` is a page (`src/client/Invite.tsx`, `noindex`); what it does is
+under **The member's side**. The token never goes through sign-in in a URL: the page keeps it
+in the tab and signs you in with `next=/tasks/invite`. `next` only ever takes paths inside the
+app, and `safeNext` (`src/auth.ts`, and its twin in `Login.tsx`) cuts off any fragment, so a
+token couldn't reach the sign-in email or the SSO redirect by way of `next` even if a page
+sent one.
 
 **The email** goes out the same way sign-in codes do (`sendInvite` in `src/members.ts`): who
 invited you, the role, the link, when it expires, and that you can ignore it. With
@@ -1344,12 +1351,83 @@ list would refuse it (`maySignIn` in `src/auth.ts`). Nothing else about the list
 
 - The upgrade prompt belongs on the Invite button when `board.sharing` is `pro_required`.
   `suspended` and `encrypted` each need their own line; so does a member's `plan_lapsed`.
-- `Workspace` isn't member-aware yet. On a shared board: don't mount the cloud chat (its
-  history fetch is a 404), don't call `usage`, `undoRedo`, `setTheme`, or the lane and
-  encryption actions, pass `board` to the attachment calls, and skip the "this board was
-  encrypted on this device" check, which is keyed to your own account.
 - A writer dragging a card inside a sorted lane is refused (`setLaneManual`); moving between
   lanes works.
+
+**The member's side.** What someone who was invited sees. All of it follows what the server
+says the role is (`GET /api/board/access`, then `tasks_access` on the socket), never the
+address or a guess, and nothing on screen offers a change the server would refuse.
+
+- **The invite page** (`/tasks/invite#t=<token>`, `src/client/Invite.tsx`). It moves the token
+  from the address into this tab's `sessionStorage` and takes it out of the address bar and
+  the history. Signed out, it says an invite is waiting and sends you to sign in with
+  `next=/tasks/invite`; an email code, Google, or Microsoft all land back in the same tab,
+  where the token still is. (A sign-in link opened in another tab doesn't have it, and that
+  tab says to open the invite email again.) The token is only ever sent in the body of the
+  three invite calls. Signed in as the invited address, the page shows who invited you, the
+  address it was sent to, the role, one line on what that role can do, and when the link
+  expires, with Accept and Decline. Accept lands on the shared board. Every invite that can't
+  be used gets one message, the same way the server gives one refusal: it was sent to a
+  different address, or it's been used, withdrawn, or has expired. It doesn't say which, so a
+  stolen link says nothing about itself. From there, "Sign out and use another address" signs
+  you out and brings you back to the same invite after you sign in again.
+- **The board switcher** (`src/client/BoardSwitcher.tsx`) sits next to the wordmark: My board,
+  then each board shared with you as its owner's email and your role, with "view only: the
+  owner's plan lapsed" when that's so. It isn't drawn for someone with no shared boards, so a
+  solo board's top bar is unchanged. On a phone, and when the top bar is tight, it's an icon.
+  Picking a board puts it in the address (`/tasks/?board=<owner id>`), so reload, Back, and
+  bookmarks work, and the board id survives signing in. `BoardHost` in `App.tsx` remounts
+  the whole workspace per board, so nothing from one leaks into the next. A board you can't
+  open (removed, never shared, a made-up id) falls back to your own with a toast that says
+  so. The list has accepted boards only; `GET /api/boards` doesn't list pending invites.
+- **The line under the top bar** (`.member-line`) stays for as long as a shared board is open:
+  a role chip, whose board it is, what you can do, and what would change that. A viewer:
+  "View only. To change cards, ask the owner to make you a writer." A writer during a lapse:
+  the owner's Pro plan lapsed, nothing was deleted, and writing comes back with the plan.
+- **A viewer's board** has no way to change anything: cards don't lift (no drag handlers are
+  attached, by mouse, touch, or keyboard), there's no check button, no add card or quick add,
+  lane names are plain text with no menu, and `n`, `x`, `/`, and `⌘Z` do nothing. A card opens
+  as a read-only view (`CardView` in `CardEditor.tsx`): the notes rendered with their
+  checkboxes fixed, lane, due date, and tags as text, files to open or download, and one
+  button, Close. No assistant.
+- **A writer's board** has cards and nothing of the owner's. Gone, not disabled: lane menus,
+  rename, and add lane; Undo, Redo, and their keys (a toast after a change never offers Undo);
+  "need you", Sessions, Connect, Encryption, billing, and the cloud assistant. Three card
+  changes the server refuses are said where they'd happen: dragging inside a sorted lane puts
+  the card back and says only the owner can change that lane's order; a card with an open
+  question has no check, no Delete, no Mark done, and its done lane is disabled in Move to
+  and the Lane menu, with a line saying it waits on the owner; and taking `needs-ceo` off such
+  a card shows the server's reason. Anything else the server turns down shows its message in
+  a toast, and a drag that was refused snaps back.
+- **The assistant** for a writer is `src/client/MemberChat.tsx`: only the model in the tab
+  (Needle), one plain step at a time, sent as `applyLocal` under the writer's own role. It
+  says the cloud assistant is the owner's. The conversation lives in the tab and is saved
+  nowhere.
+- **Questions** show with their options as plain text and a line saying the owner answers.
+  There are no buttons to tap, and no "need you" count on someone else's board.
+- **Theme.** A member keeps the theme their browser already had; the owner's choice for their
+  board isn't applied. The picker on a shared board changes this browser only and calls
+  nothing on the board. Your own board applies its saved theme again when you go back to it.
+- **The account menu** on a shared board holds what's yours: Go to my board, New card and Ask
+  the assistant for a writer, Change theme, Sign out, and **Leave this board**, which takes a
+  second tap on the same item ("Tap again to leave …").
+- **Live changes.** `tasks_access` frames update the open board on the spot, each with a toast
+  in plain words: made a viewer (an open card editor turns into the read-only view, and an
+  open New card dialog or quick add closes), made a writer, the owner's plan lapsed or came
+  back. A frame with `closed` (removed, left in another tab, or the board was encrypted)
+  closes the socket from the client, drops back to your own board, and says why. If the
+  socket drops for any other reason, the app asks `GET /api/board/access` before it lets the
+  reconnect go on, and gives the board up on a 404, so a member removed while offline doesn't
+  retry forever.
+- **Who changed it.** The open card says "Edited by dana@example.com · 3m ago" under its
+  created date ("Added by" for a card nobody has touched since), with "via MCP" for an
+  outside agent on the owner's token and "via the assistant" for the in-app one. The card
+  face carries the same line only when the last change wasn't yours by hand. Names show on a
+  board once it's shared in practice: you're a member of it, or someone other than you has
+  changed a card on it. A board only its owner has ever touched shows none, so a solo board
+  looks the way it always did (`WhoContext` in `src/client/member.tsx`).
+- **Attachments** on a shared board go through `?board=`. A viewer gets Open and Download and
+  no Attach or Remove.
 
 ## // SEARCH
 
