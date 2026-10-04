@@ -313,6 +313,21 @@ export function answerAsk(b: Board, id: string, input: { choice?: number; text?:
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
 }
 
+/**
+ * The agent's STATUS line, without the label, when the notes open with one. The board's ANSWER:
+ * lines sit above it (answerAsk), so those and blank lines are skipped. Null when the first real
+ * line is anything else: notes a person wrote aren't a status.
+ */
+export function statusLine(notes: string): string | null {
+  for (const raw of notes.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("ANSWER:")) continue;
+    const m = /^STATUS:\s*(\S.*)$/.exec(line);
+    return m ? m[1].slice(0, 200) : null;
+  }
+  return null;
+}
+
 /** A card's open question or last answer in one line, for agents. */
 export function describeAsk(c: Card): string {
   if (c.ask) return ` — ASKING: ${c.ask.question} [${c.ask.options.map((o, i) => `${i + 1}) ${o}${c.ask!.recommended === i ? " (recommended)" : ""}`).join(" | ")}]`;

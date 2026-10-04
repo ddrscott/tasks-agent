@@ -541,6 +541,8 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
 .card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
+/* The agent's STATUS line from the notes: plain mono text, two lines at most. The whole line is in its title. */
+.card-status { margin-top: 6px; font: 11px/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .card-meta:empty { display: none; }
 .chip {
