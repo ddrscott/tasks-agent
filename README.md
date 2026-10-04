@@ -1499,15 +1499,18 @@ tags that direct them are the owner's alone, and so are the cards that carry the
 
 - Every change to membership calls `TodoAgent.membersChanged` before the request answers
   (`signal` in `src/members.ts`); the Stripe webhook does the same when the owner's plan changes. Every member
-  socket is rechecked then: closed, or sent a new `tasks_access`.
+  socket is rechecked then: closed, or sent a new `tasks_access`. A try that fails is tried
+  again, four in all over about 3.5 seconds (`SIGNAL_WAITS_MS`: at once, then after 0.2, 0.8,
+  and 2.4 seconds), with the request waiting and the work under `waitUntil` so it finishes if
+  the caller hangs up. If all four fail it's logged as an error (`MEMBERSHIP SIGNAL LOST`)
+  and the board's own checks, below, are what's left.
 - Each socket remembers its last access check for 2 seconds (`ACCESS_CACHE_MS`), so a member
   sending many frames costs two D1 reads every 2 seconds instead of two per frame. The memory
   only counts if the check began after the last `membersChanged`: that call moves the board's
   membership epoch before it awaits anything, and a check stamped with an older epoch is
   never trusted, including one that was already on its way to D1 when the change landed. So a
   signalled change waits on nothing. A change with no signal (a row edited by hand, a plan
-  that ran out with no webhook) holds within 2 seconds on a socket that's sending, and at the
-  next sweep on one that isn't.
+  that ran out with no webhook) holds within 2 seconds on a socket that's sending.
 - **A connect can't straddle a change.** `acceptMember` reads the member's access and then
   accepts the socket, and a `membersChanged` that lands while that read is out can't see a
   socket that doesn't exist yet. So after the read comes back the board looks at the epoch
@@ -1521,11 +1524,27 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   socket only on an access check that began under the current epoch (`pushFresh` in
   `src/member-rules.ts`). A socket whose check is from an older epoch, for any reason, is
   checked against D1 first and gets the push only if it still has a way in.
-- The backstop: while any member is connected the board rechecks them all every
-  `MEMBER_RECHECK_SECONDS` (30), and a state push to a socket not checked within that window
-  waits for a recheck. 30 seconds because it only matters when the signal was lost (a failed
-  RPC, a plan that ran out with no webhook), and it costs one small D1 read per connected
-  member per run. With nobody connected it stops.
+- **A lost signal costs seconds of reads, not thirty.** A push to a member's socket also needs
+  that check to be recent: `MEMBER_PUSH_FRESH_MS`, 5 seconds. An older one is checked against
+  D1 first, and a member who's gone is closed right there instead of being sent the board.
+  So on a board that's changing, a member whose access check was older than 5 seconds costs
+  one D1 read (shared by their tabs, and by everything that wants the answer at that moment)
+  before the next push, and then nothing for 5 seconds.
+- The sweep: while any member is connected the board rechecks them all every
+  `MEMBER_RECHECK_SECONDS` (30). It closes a removed member's tab on a board nobody is
+  changing, and it's what notices a plan that lapsed with no webhook. It costs one small D1
+  read per connected member per run, and with nobody connected it stops.
+- **The worst case, when the signal is lost for good** (all four tries failed, or the row was
+  changed some other way). Writes: refused from the removed member's next frame, since the
+  board asks D1 again once its 2-second memory is spent. Reads: their open tab is sent board
+  changes for at most 5 seconds after its last check, then the next push finds them gone and
+  closes it; `check:members` deletes the row straight from the database on a board changing
+  four times a second and measures it (about 3.5 seconds on the last run), and it used to be
+  28.7 seconds. On a board that isn't
+  changing there's nothing new to read, and the tab keeps what it already had on screen
+  until the sweep closes it, 30 seconds at most. A demoted writer in the same spot can read
+  either way; their writes stop within 2 seconds. A lapsed plan with no webhook is view only
+  for members within 30 seconds (the sweep), and at once when the webhook does arrive.
 
 **Attribution.** Every card carries who last changed it: `by?: { email: string; via?: "assistant" | "agent" }`
 on `Card` (`src/shared.ts`), next to `updatedAt`. `email` is the owner or the member; `via` is

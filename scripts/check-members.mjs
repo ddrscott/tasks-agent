@@ -52,7 +52,7 @@ const stubs = {
   name: "stubs",
   setup(b) {
     b.onResolve({ filter: /^(cloudflare:workers|agents)$/ }, (a) => ({ path: a.path, namespace: "stub" }));
-    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const getAgentByName = () => { throw new Error('no agents here'); };" }));
+    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const waitUntil = () => {}; export const getAgentByName = () => { throw new Error('no agents here'); };" }));
   },
 };
 const load = async (entry) => {
@@ -222,6 +222,20 @@ section("access rules (pure)");
   ok("one checked before the last membership change doesn't, however recently", pushFresh(sockMeta, 8, 10_001, 30_000) === false && pushFresh({ ...sockMeta, ep: 8 }, 7, 10_001, 30_000) === false);
   ok("one whose check is too old doesn't", pushFresh(sockMeta, 7, 10_000 + 30_000, 30_000) === false && pushFresh(sockMeta, 7, 10_000 + 29_999, 30_000) === true);
   ok("and one with no way in never does", pushFresh({ ...sockMeta, effective: "none" }, 7, 10_001, 30_000) === false);
+
+  ok("pushes need a check from the last few seconds, far inside the 30-second sweep", rules.MEMBER_PUSH_FRESH_MS <= 5000 && pushFresh(sockMeta, 7, 10_000 + rules.MEMBER_PUSH_FRESH_MS, rules.MEMBER_PUSH_FRESH_MS) === false);
+
+  // Telling the board its membership changed is tried more than once.
+  const { withRetries, SIGNAL_WAITS_MS } = rules;
+  const flaky = (failures) => { let n = 0; return async () => { if (n++ < failures) throw new Error(`down ${n}`); return "told"; }; };
+  const waited = [];
+  const noWait = async (ms) => { waited.push(ms); };
+  const third = await withRetries(flaky(2), SIGNAL_WAITS_MS, undefined, noWait);
+  ok("a signal that fails twice gets through on the third try, after backing off", third.value === "told" && third.tries === 3 && waited.join() === SIGNAL_WAITS_MS.slice(1, 3).join() && SIGNAL_WAITS_MS[0] === 0 && SIGNAL_WAITS_MS.every((w, i) => i === 0 || w > SIGNAL_WAITS_MS[i - 1]));
+  const heard = [];
+  const lost = await withRetries(flaky(99), SIGNAL_WAITS_MS, (e, n) => heard.push(`${n}:${e.message}`), noWait).then(() => null, (e) => e);
+  ok(`one that never works is tried ${SIGNAL_WAITS_MS.length} times, each failure is reported, and the last error comes out`, lost?.message === `down ${SIGNAL_WAITS_MS.length}` && heard.length === SIGNAL_WAITS_MS.length && heard[0] === "1:down 1");
+  ok("one that works the first time doesn't wait at all", (await withRetries(flaky(0), SIGNAL_WAITS_MS, undefined, async () => { throw new Error("waited"); })).tries === 1);
 
   const by = { email: "w@example.com" };
   const b2 = shared.addCard(b, { title: "Two" }).board;
@@ -1443,6 +1457,38 @@ section("a member who floods");
     ok("a connect that straddles a removal is refused: no socket, no frame, no board", gone.status === 200 && typeof afterGone === "string" && refused(s2, 404) && s2.frames.length === 0, [how(s2), s2.frames.length]);
     s2.close();
     await fo.rpc("deleteCard", [afterGone]);
+  }
+
+  // A "membership changed" signal that never arrives. The member's row is deleted straight in
+  // the database, which is what the board sees when every try at the signal fails. On a board
+  // that's changing, the tab used to be sent every change until the 30-second sweep.
+  {
+    const ghost = await account("ghost");
+    const inv = await invite(floodOwner, ghost.email, "viewer");
+    await call(ghost, "POST", "/api/invites/accept", { token: tokenOf(inv) });
+    const g = await open(ghost, { board: floodOwner.id });
+    await g.wait((f) => f.type === "cf_agent_state");
+    let stop = false;
+    let ticks = 0;
+    const ticker = (async () => { while (!stop) { await fo.rpc("addCard", [lane, `tick ${ticks++}`]); await sleep(250); } })();
+    await sleep(1200);
+    const isState = (f) => f.type === "cf_agent_state";
+    const before = g.frames.filter(isState).length;
+    d1(`DELETE FROM board_members WHERE owner_id = ${q(floodOwner.id)} AND member_email = ${q(ghost.email)}`);
+    const tGone = Date.now();
+    const fresh = rules.MEMBER_PUSH_FRESH_MS;
+    const closed = await g.waitClosed(fresh + 6000);
+    await sleep(1500);
+    stop = true;
+    await ticker;
+    const states = g.frames.filter(isState);
+    const readFor = states.length ? states[states.length - 1]._at - tGone : 0;
+    console.log(`     … a removal with no signal, on a board changing 4 times a second: the tab was sent the board for ${Math.max(0, readFor)} ms after the row was gone, and closed after ${g.closedAt === null ? "never" : g.closedAt - tGone} ms (the sweep is every ${RECHECK_S} s)`);
+    ok("the member was getting the board before", before >= 2 && ticks > 5, [before, ticks]);
+    ok(`with the signal lost, their tab is sent the board for no longer than the ${fresh / 1000}-second read window`, readFor <= fresh + 400, readFor);
+    ok("and the push that finds them gone closes the tab (4403), long before the sweep", closed?.code === 4403 && g.closedAt - tGone <= fresh + 1500 && g.frames[g.frames.length - 1]?.closed === "removed", [closed, g.closedAt === null ? null : g.closedAt - tGone]);
+    ok("nothing reaches it after that", g.frames.filter(isState).length === states.length && !g.frames.some((f) => isState(f) && f._at > g.closedAt));
+    await fo.rpc("clearLane", [lane]);
   }
 
   // Tabs. A fifth socket for one member closes their oldest.

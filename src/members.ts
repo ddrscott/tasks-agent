@@ -7,10 +7,11 @@
 // nothing by itself. Every surface that reaches someone else's board calls `access` first, and
 // answers "no such board" and "not your board" the same way.
 
+import { waitUntil } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
 import { planFor } from "./billing";
-import { BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, type Access, type MemberRole } from "./member-rules";
+import { BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, SIGNAL_WAITS_MS, withRetries, type Access, type MemberRole } from "./member-rules";
 
 export type { Access, MemberRole } from "./member-rules";
 
@@ -170,15 +171,27 @@ function csvCell(v: string | number | null): string {
  * sockets that are already open are closed or downgraded now, and the owner's open tabs read
  * the members list again (TodoAgent.membersChanged). Every change to `board_members` calls
  * it, the ones that change nobody's access too (an invite sent, declined, or revoked): the
- * owner's Members dialog is waiting on those. The object also rechecks on its own every
- * MEMBER_RECHECK_SECONDS, so a failure here is late, never lost.
+ * owner's Members dialog is waiting on those.
+ *
+ * A try that fails is tried again, four times in all over about three and a half seconds
+ * (SIGNAL_WAITS_MS), and the request waits for them: the row is already changed, and the
+ * answer shouldn't say "removed" while their tab is still open. The work is handed to
+ * `waitUntil` as well, so it finishes even if the caller hangs up. If every try fails it's
+ * logged as an error, loudly, and the board's own checks are what's left: writes are refused
+ * from the member's next frame regardless (the board asks D1 again within 2 seconds), nothing
+ * is pushed to their tab on a check older than MEMBER_PUSH_FRESH_MS (5 seconds), and the sweep
+ * closes it within MEMBER_RECHECK_SECONDS (30).
  */
 async function signal(env: Env, ownerId: string): Promise<void> {
-  try {
-    await (await getAgentByName(env.TodoAgent, ownerId)).membersChanged();
-  } catch (e) {
-    console.warn("telling the board about a membership change failed", (e as Error).message);
-  }
+  const work = withRetries(
+    async () => { await (await getAgentByName(env.TodoAgent, ownerId)).membersChanged(); },
+    SIGNAL_WAITS_MS,
+    (e, attempt) => console.warn(`telling the board about a membership change failed (try ${attempt} of ${SIGNAL_WAITS_MS.length})`, (e as Error)?.message),
+  ).then(() => undefined, (e: unknown) => {
+    console.error(`MEMBERSHIP SIGNAL LOST for board ${ownerId} after ${SIGNAL_WAITS_MS.length} tries: open member tabs keep their old access until the board's own recheck (seconds for reads, up to MEMBER_RECHECK_SECONDS to close).`, (e as Error)?.message);
+  });
+  try { waitUntil(work); } catch { /* no request to hang it on (a test, a scheduled run): the await below is enough */ }
+  await work;
 }
 
 /**

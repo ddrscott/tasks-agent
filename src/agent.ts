@@ -14,7 +14,7 @@ import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  frameCost, MEMBER_LIMITS, MEMBER_RATE, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  frameCost, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -389,8 +389,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
-   * Send the board to members' sockets. A socket whose access was checked within the recheck
-   * window gets it now; an older one is checked first and gets it only if it still has a way in.
+   * Send the board to members' sockets. A socket whose access was checked in the last few
+   * seconds (MEMBER_PUSH_FRESH_MS), under the current epoch, gets it now; any other is
+   * checked first and gets it only if it still has a way in.
    */
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pushedAt = 0;
@@ -434,7 +435,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /** How old a socket's access check may be for the board to be pushed to it without asking again. */
   private pushFreshMs(): number {
-    return this.recheckMs();
+    return Math.min(MEMBER_PUSH_FRESH_MS, this.recheckMs());
   }
 
   /**
@@ -485,11 +486,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
-   * The backstop for a signal that never came (a failed RPC, a plan that ran out with no
-   * webhook): while any member is connected, check them all every MEMBER_RECHECK_SECONDS.
-   * 30 seconds by default: short enough that a missed signal is a brief lag, not a hole, and
-   * the cost is one small D1 read per connected member per run, only on boards being shared
-   * right now. With nobody connected it stops.
+   * The backstop for a signal that never came (an RPC that failed every retry, a plan that ran
+   * out with no webhook): while any member is connected, check them all every
+   * MEMBER_RECHECK_SECONDS. 30 seconds by default. It's what closes a removed member's tab on
+   * a board nobody is changing, and what turns a lapsed plan into view only. It isn't what
+   * limits reads: nothing is pushed to a socket on a check older than MEMBER_PUSH_FRESH_MS
+   * (flushMembers), so a tab the sweep hasn't reached yet has been sent nothing new. The cost
+   * is one small D1 read per connected member per run, only on boards being shared right now.
+   * With nobody connected it stops.
    */
   async sweepMembers() {
     const sockets = this.ctx.getWebSockets(MEMBER_TAG);

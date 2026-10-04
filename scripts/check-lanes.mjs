@@ -23,7 +23,7 @@ const stubs = {
   name: "stubs",
   setup(b) {
     b.onResolve({ filter: /^(cloudflare:workers|agents)$/ }, (a) => ({ path: a.path, namespace: "stub" }));
-    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const getAgentByName = () => {};" }));
+    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const waitUntil = () => {}; export const getAgentByName = () => {};" }));
   },
 };
 const { newBoard, laneRoles, roleOf, doneLaneId, todoLaneId, moveLane, renameLane, addLane, deleteLane, setLaneRole, addCard, describeBoard } = await load("src/shared.ts");

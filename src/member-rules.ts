@@ -368,6 +368,30 @@ export type ActivityFrame = {
 };
 
 /**
+ * How old a member socket's access check may be for the board to be pushed to it without
+ * asking D1 again. This is the read window when a "membership changed" signal is lost for
+ * good: a removed member's open tab can be sent the board for this long after its last check,
+ * and no longer. The next push checks first, and closes it.
+ */
+export const MEMBER_PUSH_FRESH_MS = 5000;
+
+/** The waits before each try at telling the board its membership changed: at once, then backing off. */
+export const SIGNAL_WAITS_MS: readonly number[] = [0, 200, 800, 2400];
+
+/**
+ * Run `fn` until it works, waiting `waits[i]` before try i. Returns how many tries it took, or
+ * throws the last error once they're used up. `pause` is there so a test doesn't have to wait.
+ */
+export async function withRetries<T>(fn: () => Promise<T>, waits: readonly number[], onFail?: (e: unknown, attempt: number) => void, pause: (ms: number) => Promise<unknown> = (ms) => new Promise((r) => setTimeout(r, ms))): Promise<{ value: T; tries: number }> {
+  let last: unknown;
+  for (let i = 0; i < waits.length; i++) {
+    if (waits[i] > 0) await pause(waits[i]);
+    try { return { value: await fn(), tries: i + 1 }; } catch (e) { last = e; onFail?.(e, i + 1); }
+  }
+  throw last;
+}
+
+/**
  * Whether the board may be pushed to a member's socket on the strength of the access check it
  * remembers. The check has to have begun under the current membership epoch (so nothing read
  * before the last "membership changed" counts, including a read that was in flight when it

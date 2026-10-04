@@ -17,7 +17,7 @@ const stubs = {
   name: "stubs",
   setup(b) {
     b.onResolve({ filter: /^(cloudflare:workers|agents)$/ }, (a) => ({ path: a.path, namespace: "stub" }));
-    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const getAgentByName = () => {};" }));
+    b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: "export class DurableObject {}; export const waitUntil = () => {}; export const getAgentByName = () => {};" }));
   },
 };
 await build({ entryPoints: [join(root, "src/events.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error", plugins: [stubs] });
