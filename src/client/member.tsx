@@ -4,6 +4,7 @@
 // decides a role; it only turns the server's answer into what to show and what to say.
 
 import { createContext, useContext } from "react";
+import type { ActivityFrame } from "../member-rules";
 import type { By, Card } from "../shared";
 
 /** A member's way into someone else's board, as the server reports it. */
@@ -108,6 +109,28 @@ export function whoText(by: By, me: string): string {
   if (by.via === "agent") return `${who} via MCP`;
   if (by.via === "assistant") return `${who} via the assistant`;
   return who;
+}
+
+/** A `tasks_activity` frame off the socket, or null when it isn't one. */
+export function asActivity(f: unknown): ActivityFrame | null {
+  const v = f as Partial<ActivityFrame> | null;
+  if (!v || v.type !== "tasks_activity" || (v.action !== "card_deleted" && v.action !== "card_restored")) return null;
+  if (!v.by || typeof v.by.email !== "string" || !Array.isArray(v.cards) || typeof v.count !== "number") return null;
+  return v as ActivityFrame;
+}
+
+/**
+ * What to say when somebody else deletes a card on a shared board, or brings one back:
+ * `dana@example.com deleted "Ship the invoice"`. Null for your own doing, which the tab that
+ * did it already said.
+ */
+export function activityText(f: ActivityFrame, me: string): string | null {
+  const first = f.cards[0];
+  if (f.by.email === me || !first || typeof first.title !== "string") return null;
+  const how = f.by.via === "agent" ? " via MCP" : f.by.via === "assistant" ? " via the assistant" : f.by.via === "undo" ? ", with Undo," : f.by.via === "redo" ? ", with Redo," : "";
+  const title = first.title.length > 60 ? `${first.title.slice(0, 60)}…` : first.title;
+  const what = f.count > 1 ? `${f.count} cards: "${title}" and ${f.count - 1} more` : `"${title}"`;
+  return `${f.by.email}${how} ${f.action === "card_deleted" ? "deleted" : "brought back"} ${what}`;
 }
 
 const verb = (c: Card) => (c.createdAt === c.updatedAt ? "Added" : "Edited");

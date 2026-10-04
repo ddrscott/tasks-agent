@@ -588,7 +588,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
           </section>
         </>
       )}
-      <p className="mem-foot">Every invite, role change, and removal is written to the <button type="button" className="linkish" onClick={onAudit}>audit log</button>, with who did it and when.</p>
+      <p className="mem-foot">Every invite, role change, removal, and deleted card is written to the <button type="button" className="linkish" onClick={onAudit}>audit log</button>, with who did it and when.</p>
     </>
   );
 }
@@ -607,6 +607,12 @@ const ACTIONS: Record<AuditAction, string> = {
   member_left: "Member left the board",
   sharing_suspended: "Sharing paused: Pro lapsed, members are view only",
   sharing_restored: "Sharing restored: Pro is back, roles apply again",
+  card_deleted: "Card deleted",
+  card_restored: "Card brought back",
+};
+/** How a card entry was made when it wasn't by hand. */
+const VIA: Record<NonNullable<NonNullable<AuditEntry["detail"]>["via"]>, string> = {
+  assistant: "through the assistant", agent: "by their agent, over MCP", undo: "with Undo", redo: "with Redo",
 };
 const AUDIT_PAGE = 25;
 
@@ -639,8 +645,10 @@ function AuditLog({ me }: { me: Props["me"] }) {
   return (
     <>
       <p className="mem-summary">
-        Who was invited, who accepted or declined, every role change, removal, and exit, and when your plan paused or
-        restored sharing. Newest first. The log can't be edited or cleared, and it's kept as long as the account is.
+        Who was invited, who accepted or declined, every role change, removal, and exit, when your plan paused or
+        restored sharing, and every card deleted from this board since it was first shared: who deleted it, its
+        title, and the lane it was in. Newest first. The log can't be edited or cleared, and it's kept as long as
+        the account is.
       </p>
       <div className="mem-actions audit-actions">
         <a className="btn" href={api("/api/board/audit.csv")} download>Download CSV</a>
@@ -657,7 +665,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <table className="audit">
           <caption className="sr-only">Audit log, newest first</caption>
           <thead>
-            <tr><th scope="col">When</th><th scope="col">Who did it</th><th scope="col">What</th><th scope="col">To whom</th><th scope="col">Role change</th></tr>
+            <tr><th scope="col">When</th><th scope="col">Who did it</th><th scope="col">What</th><th scope="col">To whom or what</th><th scope="col">Role change</th></tr>
           </thead>
           <tbody>
             {entries.map((e) => (
@@ -667,9 +675,13 @@ function AuditLog({ me }: { me: Props["me"] }) {
                   <span className="audit-utc">{iso(e.at)}</span>
                 </td>
                 <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (plan change)" : e.actor}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
-                <td data-th="What"><span>{ACTIONS[e.action] ?? e.action}</span><span className="audit-code">{e.action}</span></td>
-                <td data-th="To whom" className="audit-who">{e.target ? <span>{e.target}</span> : <span className="audit-none">the whole board</span>}</td>
-                <td data-th="Role" className="audit-role">{role(e) ? <span>{role(e)}</span> : <span className="audit-none">no change</span>}</td>
+                <td data-th="What"><span>{ACTIONS[e.action] ?? e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
+                {e.detail ? (
+                  <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
+                ) : (
+                  <td data-th="To whom" className="audit-who">{e.target ? <span>{e.target}</span> : <span className="audit-none">the whole board</span>}</td>
+                )}
+                <td data-th="Role" className="audit-role">{role(e) ? <span>{role(e)}</span> : <span className="audit-none">{e.detail ? "none" : "no change"}</span>}</td>
               </tr>
             ))}
           </tbody>

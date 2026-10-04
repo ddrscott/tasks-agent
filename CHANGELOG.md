@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agents see which lanes are the to do, doing, and done lanes in `get_board`
 - The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone
 - A card remembers who last changed it: you, a member, the assistant on someone's behalf, or an agent
-- An audit log of invites, role changes, removals, and people leaving, with who and when, that the owner can download as CSV or JSON
+- An audit log of invites, role changes, removals, people leaving, and deleted cards, with who and when, that the owner can download as CSV or JSON
 - Members, in the account menu: invite someone by email as a viewer or a writer, see who's on your board and since when, change a role in place, and remove someone with two taps. Pending invites show when they were sent and when they expire, with Resend and Revoke
 - Members shows how many of the board's 10 places are taken and how many invite emails you have left today, and says why when it can't invite: a free plan (with Upgrade to Pro right at the Invite button), a full board, a spent day of invites, or an address that's already there
 - When Pro lapses, Members says so: everyone's still listed, they can only look until Pro is back, and nothing was deleted
@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Leave a shared board from the account menu
 - A shared board shows who last changed each card, and whether an agent or the assistant did it for them
 - When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened. A removed member's tabs are closed within a moment, every one of them
+- When someone deletes a card on a shared board, everyone else with it open sees who did and what it was called, and the owner's message has Undo. The deletion goes in the audit log with the card's title and the lane it was in
 - A shared board holds up under a member's script: changes sent faster than a person could are told to slow down, a member can't grow someone's board past 1,000 cards or 1 MB, and a burst of changes reaches everyone else's tab a few times a second instead of once per change
 
 ### Changed

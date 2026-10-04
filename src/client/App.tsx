@@ -29,7 +29,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { MemberChat } from "./MemberChat";
-import { accessChangeText, asMemberAccess, bannerText, boardFromUrl, modeOf, roleWord, WhoContext, type Boards, type MemberAccess } from "./member";
+import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, modeOf, roleWord, WhoContext, type Boards, type MemberAccess } from "./member";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
@@ -211,7 +211,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     // On a shared board the panel starts closed; the saved choice is about your own board.
     return !member && chatSaved.current === "open" && innerWidth > 900;
   });
-  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
+  /** `step` is the one undo step the toast's Undo means (a card someone else deleted): it's undone only if it's still the last. */
+  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number; step?: number } | null>(null);
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
@@ -371,16 +372,32 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     if (text) say(text, false, DESTRUCTIVE_TOAST_MS);
   }, [lose, say]);
 
+  // Someone else deleted a card, or brought one back with undo. The card is already gone from
+  // the board by the time this arrives, so the toast is the only place its name shows. The
+  // owner's has Undo, for that one step and only while it's still the last.
+  const onActivity = useCallback((raw: unknown) => {
+    const f = asActivity(raw);
+    const text = f && activityText(f, me.email);
+    if (!f || !text) return;
+    const step = !member && f.action === "card_deleted" && typeof f.undo === "number" ? f.undo : undefined;
+    setToast({ text, action: step !== undefined ? "undo" : null, key: Date.now(), ms: DESTRUCTIVE_TOAST_MS, step });
+  }, [me.email, member]);
+
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
     basePath: "tasks/agent",
     ...(sharedBoard ? { query: { board: sharedBoard } } : {}),
     onStateUpdate: (s) => ingest(s),
+    // The board's own frames (// TEAM_BOARDS), beside the SDK's: a member's access, and who deleted a card.
+    onMessage: (m: MessageEvent) => {
+      if (typeof m.data !== "string" || !m.data.slice(0, 40).includes('"type":"tasks_')) return;
+      try {
+        const f = JSON.parse(m.data) as { type?: string };
+        if (f.type === "tasks_access" && sharedBoard) onAccess(f);
+        else if (f.type === "tasks_activity") onActivity(f);
+      } catch { /* not ours */ }
+    },
     ...(sharedBoard ? {
-      onMessage: (m: MessageEvent) => {
-        if (typeof m.data !== "string") return;
-        try { const f = JSON.parse(m.data) as { type?: string }; if (f.type === "tasks_access") onAccess(f); } catch { /* not ours */ }
-      },
       // A dropped socket retries by itself. Before it keeps knocking, ask whether the board is
       // still ours: a member removed while offline gets "Not found" forever otherwise.
       onClose: () => {
@@ -509,8 +526,15 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
     setToast({ text: label ? `Redid: ${label.toLowerCase()}` : "Nothing to redo", action: label ? "undo" : null, key: Date.now() });
   }, [agent, member]);
 
-  const undo = useCallback(async () => {
+  const undo = useCallback(async (step?: number) => {
     if (member) return;
+    if (step !== undefined) {
+      const done = await agent.stub.undoIf(step);
+      setToast(done
+        ? { text: `Undid: ${done.toLowerCase()}`, action: "redo", key: Date.now() }
+        : { text: "The board has changed since then, so that can't be undone from here. Undo in the top bar steps back through what came after.", action: null, key: Date.now(), ms: DESTRUCTIVE_TOAST_MS });
+      return;
+    }
     const label = await agent.stub.undo();
     // Offer Redo right where the eye already is, in case the undo was an accident.
     setToast({ text: label ? `Undid: ${label.toLowerCase()}` : "Nothing to undo", action: label ? "redo" : null, key: Date.now() });
@@ -824,7 +848,7 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
       {toast && (
         <div className="toast" role="status" key={toast.key}>
           <span>{toast.text}</span>
-          {toast.action === "undo" && <button onClick={() => { setToast(null); void undo(); }}>Undo</button>}
+          {toast.action === "undo" && <button onClick={() => { const step = toast.step; setToast(null); void undo(step); }}>Undo</button>}
           {toast.action === "redo" && <button onClick={() => { setToast(null); void redo(); }}>Redo</button>}
         </div>
       )}

@@ -99,9 +99,17 @@ export async function boardShared(env: Env, ownerId: string): Promise<boolean> {
 
 export type AuditAction =
   | "invite_sent" | "invite_resent" | "invite_accepted" | "invite_declined" | "invite_revoked" | "invite_expired"
-  | "role_changed" | "member_removed" | "member_left" | "sharing_suspended" | "sharing_restored";
+  | "role_changed" | "member_removed" | "member_left" | "sharing_suspended" | "sharing_restored"
+  | "card_deleted" | "card_restored";
 
-export type AuditEntry = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null };
+/** What a card entry says about the card: its id, its title and lane at that moment, and how it was done when not by hand. */
+export type AuditCard = { card: string; title: string; lane: string; via?: "assistant" | "agent" | "undo" | "redo" };
+
+export type AuditEntry = {
+  id: number; at: number; actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null;
+  /** Set on `card_deleted` and `card_restored`, null on membership entries. */
+  detail: AuditCard | null;
+};
 
 function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction, target: string | null, from: MemberRole | null = null, to: MemberRole | null = null) {
   return env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -110,8 +118,46 @@ function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction,
 
 const audit = (...args: Parameters<typeof auditRow>) => auditRow(...args).run();
 
-type AuditDbRow = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null };
-const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, at: r.at, actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role });
+type AuditDbRow = { id: number; at: number; actor: string; action: AuditAction; target: string | null; from_role: MemberRole | null; to_role: MemberRole | null; detail: string | null };
+function cardDetail(raw: string | null): AuditCard | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as Partial<AuditCard>;
+    if (typeof d.card !== "string" || typeof d.title !== "string") return null;
+    const via = d.via === "assistant" || d.via === "agent" || d.via === "undo" || d.via === "redo" ? d.via : undefined;
+    return { card: d.card, title: d.title, lane: typeof d.lane === "string" ? d.lane : "", ...(via ? { via } : {}) };
+  } catch {
+    return null;
+  }
+}
+const toEntry = (r: AuditDbRow): AuditEntry => ({ id: r.id, at: r.at, actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail) });
+
+/**
+ * Write down cards that were deleted from a board, or brought back by undo: who, when, the
+ * card's title, and the lane it was in. Only the board's Durable Object calls this, with the
+ * name it took from the connection that made the change (TodoAgent.noteCards); there's no
+ * route to it, so a member can't write an entry or choose the name on one.
+ *
+ * A board that was never shared writes nothing: the insert only happens when `board_sharing`
+ * has a row, which the first invite creates and nothing deletes. One row per card.
+ */
+export async function logCards(env: Env, ownerId: string, actor: string, action: "card_deleted" | "card_restored", cards: AuditCard[]): Promise<void> {
+  const at = Date.now();
+  const rows = cards.map((c) => env.DB.prepare(
+    `INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail)
+     SELECT ?1, ?2, ?3, ?4, NULL, NULL, NULL, ?5 WHERE EXISTS (SELECT 1 FROM board_sharing WHERE owner_id = ?1)`,
+  ).bind(ownerId, at, actor, action, JSON.stringify({ card: c.card, title: c.title.slice(0, 200), lane: c.lane.slice(0, 40), ...(c.via ? { via: c.via } : {}) })));
+  for (let i = 0; i < rows.length; i += 50) await env.DB.batch(rows.slice(i, i + 50));
+}
+
+/** Tell the board it has been shared, so it starts keeping the entries above (TodoAgent.markShared). */
+async function markShared(env: Env, ownerId: string): Promise<void> {
+  try {
+    await (await getAgentByName(env.TodoAgent, ownerId)).markShared();
+  } catch (e) {
+    console.warn("telling the board it's shared failed", (e as Error).message);
+  }
+}
 
 /** A spreadsheet runs a cell that starts with = + - or @ as a formula. Emails can start with those. */
 function csvCell(v: string | number | null): string {
@@ -325,6 +371,8 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
     auditRow(env, owner.id, owner.email, "invite_sent", email, null, role),
     env.DB.prepare("INSERT OR IGNORE INTO board_sharing (owner_id, suspended, updated_at) VALUES (?, 0, ?)").bind(owner.id, now),
   ]);
+  // From the first invite on, the board writes down who deletes a card.
+  await markShared(env, owner.id);
   const sent = await sendInvite(req, env, owner, email, role, token, expiresAt);
   const member: Member = { email, role, status: "pending", invitedAt: now, acceptedAt: null, expiresAt, expired: false };
   if ("error" in sent) return json({ error: sent.error, code: "email_failed", member }, 502);
@@ -368,7 +416,7 @@ async function auditPage(req: Request, env: Env, owner: User): Promise<Response>
   const before = Number(q.get("before"));
   const limit = Math.min(200, num(q.get("limit") ?? undefined, AUDIT_PAGE));
   const { results } = await env.DB.prepare(
-    "SELECT id, at, actor, action, target, from_role, to_role FROM board_audit WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3",
+    "SELECT id, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2) ORDER BY id DESC LIMIT ?3",
   ).bind(owner.id, Number.isInteger(before) && before > 0 ? before : 0, limit + 1).all<AuditDbRow>();
   const page = results.slice(0, limit);
   return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null });
@@ -376,7 +424,7 @@ async function auditPage(req: Request, env: Env, owner: User): Promise<Response>
 
 async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promise<Response> {
   const { results } = await env.DB.prepare(
-    "SELECT id, at, actor, action, target, from_role, to_role FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
+    "SELECT id, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
   ).bind(owner.id, AUDIT_EXPORT_MAX).all<AuditDbRow>();
   const name = `tasks-audit-${new Date().toISOString().slice(0, 10)}.${format}`;
   const headers = { "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -384,8 +432,11 @@ async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promi
     return new Response(JSON.stringify({ board: owner.id, owner: owner.email, exportedAt: new Date().toISOString(), entries: results.map(toEntry) }, null, 2),
       { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
   }
-  const lines = ["id,time,actor,action,target,from_role,to_role"];
-  for (const r of results) lines.push([r.id, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role].map(csvCell).join(","));
+  const lines = ["id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
+  for (const r of results) {
+    const d = cardDetail(r.detail);
+    lines.push([r.id, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? null].map(csvCell).join(","));
+  }
   return new Response(`${lines.join("\r\n")}\r\n`, { headers: { ...headers, "Content-Type": "text/csv; charset=utf-8" } });
 }
 

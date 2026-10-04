@@ -113,6 +113,8 @@ export const MEMBER_LIMITS = {
   cards: 1000,
   /** The whole board as JSON. Its Durable Object stores it in one 2 MB row, and every change sends all of it to every open tab. */
   boardBytes: 1024 * 1024,
+  /** Cards one member may delete in a UTC day. Each is a row in the owner's audit log, which nothing prunes. */
+  deletesPerDay: 200,
 } as const;
 
 function cardTooBig(c: Card): string | null {
@@ -209,6 +211,22 @@ export const INTERNAL_HEADERS = [
   // The Agents SDK's own: startup props, and the marker that routes a socket to a sub-agent.
   "x-agents-lifecycle-props", "x-cf-agents-subagent-url",
 ] as const;
+
+/**
+ * Sent to every open tab of a shared board, the owner's and members', when cards are deleted
+ * or brought back by undo, so nobody's card vanishes without a word. `by` is stamped by the
+ * board from the connection that did it. `undo` goes to the owner's tabs only: the undo step
+ * that would put it back (TodoAgent.undoIf).
+ */
+export type ActivityFrame = {
+  type: "tasks_activity";
+  action: "card_deleted" | "card_restored";
+  by: { email: string; via?: "assistant" | "agent" | "undo" | "redo" };
+  /** The first few, for the toast. `count` is how many there were. */
+  cards: { id: string; title: string; lane: string }[];
+  count: number;
+  undo?: number;
+};
 
 /** The frame a member's socket gets on connect and whenever its access changes. */
 export type AccessFrame = { type: "tasks_access" } & Access & {

@@ -1181,7 +1181,8 @@ each card.
   dialog shows it in a box labeled `dev only` with a Copy button. In production the API
   never returns one, so the box never renders.
 - **Audit log** is the second tab: newest first, 25 at a time with Show older entries, in
-  columns When, Who did it, What, To whom, and Role change. Each time is shown in local time
+  columns When, Who did it, What, To whom or what, and Role change. A deleted card shows its
+  title, the lane it was in, and its id where a member's address would be. Each time is shown in local time
   with its zone and, under it, the UTC ISO time, so it can be pasted into a ticket. Each
   action shows in words and as its code (`role_changed`). Download CSV and Download JSON are
   plain links to `/api/board/audit.csv` and `.json`.
@@ -1204,10 +1205,10 @@ each card.
   its owner's user id (32 hex characters). It isn't a secret and opens nothing: every request
   that names a board goes through one function, `access` in `src/members.ts`, and every way
   that can fail gets the same answer, so nothing says whether a board exists.
-- **Membership is in D1** (migration `0005_team_boards.sql`): `board_members` (one row per
-  person, pending or accepted; owner id, owner email, member email, member id, role, status,
+- **Membership is in D1** (migrations `0005_team_boards.sql` and up): `board_members` (one row
+  per person, pending or accepted; owner id, owner email, member email, member id, role, status,
   token hash, expiry, invited/accepted times), `board_audit` (append-only; triggers refuse
-  UPDATE and DELETE), `invite_sends` (the daily email count), `board_sharing` (whether the
+  UPDATE and DELETE; `0006_board_activity.sql` adds `detail` for card entries), `invite_sends` (the daily email count), `board_sharing` (whether the
   board is currently view-only because Pro lapsed). Declining, revoking, removing, and
   leaving delete the member row; the audit log keeps what happened.
 - **Emails** are lower-cased and trimmed exactly as sign-in does it, because the account id is
@@ -1283,7 +1284,8 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
   sockets they accepted, so none of their broadcasts (chat messages, stream chunks, MCP server
   lists) reach a member, and no frame a member sends reaches their handlers.
 
-**What a member's socket receives.** Exactly three frame types, plus replies to its own calls:
+**What a member's socket receives.** Four frame types, plus replies to its own calls. Three
+come on connect; `tasks_activity` comes when a card is deleted (**Who deleted it**, below).
 
 ```jsonc
 { "type": "cf_agent_identity", "name": "<owner id>", "agent": "todo-agent" }
@@ -1347,6 +1349,7 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 | A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date, 16 KB as JSON | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
 | Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
 | The board as JSON | 1 MB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine |
+| Card deletions by one member | 200 a UTC day | `[delete_limit] …`. Each one is a row in the audit log, which nothing prunes |
 | Board pushes to one member socket | at most one every 200 ms | a burst of writes is coalesced: each socket gets the board as it stands, five times a second at most. One change on a quiet board goes out at once |
 
 The bucket is per member id and lives in the board object's memory; uploads draw on it too
@@ -1393,6 +1396,38 @@ nothing in a payload is read into it. A card that wasn't changed keeps its mark.
 mark the cards they change as the owner's. Cards from before this have no `by`, and an
 encrypted board never has one. Show it on the card's last change; it's not a history.
 
+**Who deleted it.** A deleted card has no face left to show a name on. So on a board that has
+ever been shared (from its first invite on, and for good), every card that leaves the board is
+written to the owner's audit log as `card_deleted`: who, when, the card's id and title, and the
+lane it was in. That covers a writer's Delete, the assistant's `delete_cards`, the owner's own
+deletions, Clear all cards, a deleted lane's cards, the owner's agent over MCP, and an undo or
+redo that takes a card away. A card that undo or redo brings back is `card_restored`. One row
+per card.
+
+- **Who writes it.** Only the board's Durable Object (`noteCards` in `src/agent.ts`, which
+  calls `logCards` in `src/members.ts`). The name is `by()`, read from the connection that made
+  the change, the same as the mark on a card. No route and no callable reaches it, and nothing
+  in a call's arguments is read into it, so a member can't write an entry or pick its name.
+  The board knows it was shared from `markShared`, which the first invite calls.
+- **What's in it.** `actor` is the email. `detail` is `{ card, title, lane, via? }`: the title
+  as it was (200 characters at most), the lane's name, and `via` when it wasn't by hand:
+  `"assistant"`, `"agent"` (the owner's, over MCP), `"undo"`, or `"redo"`. Notes, tags, and
+  files aren't copied. `target`, `from`, and `to` are null. The title stays in an append-only
+  log after the card is gone, and the privacy page says so. An encrypted board is never
+  shared, so no ciphertext title reaches it; a board that was never shared logs nothing.
+- **In the moment.** Every open tab of the board gets
+  `{ "type": "tasks_activity", "action": "card_deleted" | "card_restored", "by": { "email", "via"? }, "cards": [{ "id", "title", "lane" }], "count": n }`
+  (`cards` holds the first three). The app shows `dana@example.com deleted "Ship the invoice"`
+  as a toast to everyone but the person who did it. The owner's copy of the frame also has
+  `undo`, the id of the undo step that reverses it, and their toast has an Undo button that
+  calls `undoIf(step)`: it undoes that step only while it's still the last one, and otherwise
+  says the board has moved on. Members get no `undo` and can't call `undoIf`.
+- **What isn't logged.** Edits, moves, and removed files. The card is still there for those,
+  and it carries the name of whoever changed it last. Only a deletion leaves nothing behind.
+- **The cap.** A member can delete `MEMBER_LIMITS.deletesPerDay` (200) cards per board per UTC
+  day, counted in the board's own SQLite (`member_deletes`), so a writer can't fill the log.
+  The owner isn't counted.
+
 **Attachments.** Add `?board=<owner id>` to both calls: `POST /tasks/api/attachments?card=<id>&board=<owner id>`
 and `GET /tasks/api/attachments/<attachment id>?board=<owner id>`. A viewer's upload is
 `403 {"error":"…","code":"read_only"}`. Anyone without access, a bad id, and a staged upload
@@ -1416,7 +1451,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
 | `POST /api/board/members/remove` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `GET /api/board/audit?limit=50&before=<id>` | | `{ entries: AuditEntry[], next: number\|null }`, newest first; pass `next` as `before`. `limit` up to 200 |
-| `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. CSV columns: `id,time,actor,action,target,from_role,to_role` |
+| `GET /api/board/audit.csv`, `/api/board/audit.json` | | A download of the whole log, oldest first. CSV columns: `id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via` |
 | `GET /api/boards` | | `{ own: { board, email, plan }, shared: [{ board, ownerEmail, role, effective, reason: null\|"plan_lapsed", plan, since }] }` for the switcher |
 | `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found` |
 | `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
@@ -1424,12 +1459,13 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
-`AuditEntry` is `{ id, at, actor, action, target: string|null, from: role|null, to: role|null }`.
+`AuditEntry` is `{ id, at, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null }`.
 `actor` is the signed-in email that did it, or `system`. `from` and `to` are the role before and
 after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
 late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
-`sharing_restored`. The plan entries are written when the webhook arrives, when the board
+`sharing_restored`, and the two card entries, `card_deleted` and `card_restored` (**Who
+deleted it**, above), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when the board
 rechecks with members connected, or when the owner opens the members list, whichever is first.
 The log is kept for as long as the account exists; nothing prunes it.
 

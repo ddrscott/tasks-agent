@@ -1477,6 +1477,7 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .audit th:last-child, .audit td:last-child { padding-right: 0; }
 .audit-utc, .audit-code { display: block; font: 11px/1.5 var(--font-mono); color: var(--muted); }
 .audit-who, .audit-role { font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.audit-card { overflow-wrap: anywhere; }
 .audit-you, .audit-none { color: var(--muted); }
 
 .enc-shared { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); }

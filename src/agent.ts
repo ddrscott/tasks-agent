@@ -11,10 +11,10 @@ import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type TaskEvent } from "./events";
 import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
-import { access, boardShared, syncSharing } from "./members";
+import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   assertMayChange, CLOSE_FLOOD, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  plainError, SLOW_DOWN, spendToken, type Access, type AccessFrame, type AccessReason, type Bucket, type Effective,
+  MEMBER_LIMITS, plainError, SLOW_DOWN, spendToken, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -41,6 +41,8 @@ type Actor = "you" | "agent";
  */
 type Caller = {
   kind: "owner" | "member";
+  /** A member's account id. Not set for the owner. */
+  id?: string;
   email: string | null;
   /** What this caller may do right now. Always "owner" for the owner. */
   effective: Effective;
@@ -267,6 +269,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (this.ctx.getWebSockets(MEMBER_TAG).length - giveWay.length >= MAX_MEMBER_SOCKETS) {
       return new Response("This board has too many open tabs right now. Try again in a minute.", { status: 503, headers: { "Cache-Control": "no-store" } });
     }
+    this.markShared();
     const pair = new WebSocketPair();
     const meta: MemberMeta = { tm: 1, id: who.id, email: who.email, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at, ep };
     this.ctx.acceptWebSocket(pair[1], [MEMBER_TAG, `m:${who.id}`]);
@@ -327,7 +330,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (needs === "writer" && m.effective !== "writer") return reply({ success: false, error: m.reason === "plan_lapsed" ? READ_ONLY_LAPSED : READ_ONLY });
     try {
       const fn = (this as unknown as Record<string, (...a: unknown[]) => unknown>)[f.method as string];
-      const result = await callers.run({ kind: "member", email: m.email, effective: m.effective, reason: m.reason }, () => fn.apply(this, f.args as unknown[]));
+      const result = await callers.run({ kind: "member", id: m.id, email: m.email, effective: m.effective, reason: m.reason }, () => fn.apply(this, f.args as unknown[]));
       reply({ success: true, result: result === undefined ? null : result });
     } catch (e) {
       reply({ success: false, error: e instanceof Error ? e.message : "That didn't work." });
@@ -427,6 +430,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async membersChanged() {
     // First, and before any await: nothing a socket remembers about its access counts from here on.
     this.epoch += 1;
+    this.markShared();
     await this.recheck(this.ctx.getWebSockets(MEMBER_TAG), false);
   }
 
@@ -469,7 +473,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
     const a = await access(this.env, who, this.name, { sealed: !!this.state.sealed });
     if (a.effective === "none" || a.role === "owner") throw new Error("No such board.");
-    return callers.run({ kind: "member", email: who.email, effective: a.effective, reason: a.reason, ...(via ? { via } : {}) }, fn);
+    return callers.run({ kind: "member", id: who.id, email: who.email, effective: a.effective, reason: a.reason, ...(via ? { via } : {}) }, fn);
   }
 
   /** Message arrays built on the server (applyLocal), the only ones an encrypted board accepts whole. */
@@ -502,6 +506,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       id INTEGER PRIMARY KEY AUTOINCREMENT, grp TEXT, label TEXT, board TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, chats INTEGER NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
+    this.sql`CREATE TABLE IF NOT EXISTS member_deletes (member TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (member, day))`;
     if (!this.state.sealed) this.index.backfill(this.state);
   }
 
@@ -544,6 +549,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.guard(before, changed);
     const after = ops.stampBy(before, changed, this.by(actor));
     ops.assertSealedBoard(after);
+    // On a shared board a deleted card is written down. A member's deletions are counted first.
+    const gone = this.goneCards(before, after);
+    if (gone.length) this.spendDeletes(gone.length);
     const top = this.sql<{ grp: string | null }>`SELECT grp FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!group || top?.grp !== group) {
       this.sql`INSERT INTO history (grp, label, board) VALUES (${group ?? null}, ${label}, ${JSON.stringify(before)})`;
@@ -551,6 +559,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
     this.sql`DELETE FROM redo`;
     this.setState(after);
+    if (gone.length) {
+      const step = this.sql<{ id: number }>`SELECT id FROM history ORDER BY id DESC LIMIT 1`[0]?.id;
+      this.noteCards("card_deleted", gone, this.by(actor), step);
+    }
     this.reindex(before, after);
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
@@ -589,6 +601,74 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** The open #agent cards, sent to an event client when it connects. Null on an encrypted board. */
   agentQueue(): TaskEvent | null {
     return this.state.sealed ? null : agentQueue(this.state);
+  }
+
+  // ---------- who deleted it (// TEAM_BOARDS) ----------
+  //
+  // Every card says who changed it last. A deleted card has nothing left to say it on, so on a
+  // board that has ever been shared the deletion itself is recorded: in the owner's audit log
+  // (logCards in members.ts), and as a line in every open tab. The name is `by()`, taken from
+  // the connection that made the change, the same as the mark on a card. Nothing a client
+  // sends is read into it, and none of this is callable.
+
+  private _shared?: boolean;
+  /** Whether anyone was ever invited to this board. Set once, by the first invite, and kept. */
+  private sharedEver(): boolean {
+    return (this._shared ??= this.sql<{ v: string }>`SELECT v FROM board_meta WHERE k = 'shared'`.length > 0);
+  }
+
+  /** The Worker's word that this board has been shared (members.ts). Deletions are recorded from here on. */
+  markShared() {
+    if (this.sharedEver()) return;
+    this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('shared', ${new Date().toISOString()})`;
+    this._shared = true;
+  }
+
+  /** The cards in `before` that `after` no longer has, as the log keeps them. Nothing on a board that was never shared, or an encrypted one. */
+  private goneCards(before: Board, after: Board): AuditCard[] {
+    if (before.sealed || after.sealed || before.cards === after.cards || !this.sharedEver()) return [];
+    const kept = new Set(after.cards.map((c) => c.id));
+    const lanes = new Map(before.lanes.map((l) => [l.id, l.name]));
+    return before.cards.filter((c) => !kept.has(c.id)).map((c) => ({ card: c.id, title: c.title.slice(0, 200), lane: lanes.get(c.laneId) ?? "" }));
+  }
+
+  /**
+   * Count a member's deletions against their day. Each one becomes a row in a log nothing
+   * prunes, so a member gets MEMBER_LIMITS.deletesPerDay of them and is refused past that,
+   * before anything is written. The owner isn't counted.
+   */
+  private spendDeletes(n: number) {
+    const c = callers.getStore();
+    if (c?.kind !== "member") return;
+    const who = c.id ?? c.email ?? "member";
+    const day = this.today();
+    const used = this.sql<{ n: number }>`SELECT n FROM member_deletes WHERE member = ${who} AND day = ${day}`[0]?.n ?? 0;
+    if (used + n > MEMBER_LIMITS.deletesPerDay) {
+      throw new Error(`[delete_limit] You've deleted ${used} cards on this board today, and a member can delete ${MEMBER_LIMITS.deletesPerDay} a day. Ask the board's owner, or try again tomorrow (UTC).`);
+    }
+    this.sql`DELETE FROM member_deletes WHERE day != ${day}`;
+    this.sql`INSERT INTO member_deletes (member, day, n) VALUES (${who}, ${day}, ${n})
+      ON CONFLICT(member, day) DO UPDATE SET n = n + ${n}`;
+  }
+
+  /** Record cards that were deleted or brought back, and tell every open tab. `step` is the undo step that reverses it, for the owner's tabs. */
+  private noteCards(action: "card_deleted" | "card_restored", cards: AuditCard[], by: { email: string; via?: AuditCard["via"] } | null, step?: number) {
+    const who = by ?? { email: this.ownerEmail() ?? "the owner" };
+    const rows = cards.map((c) => ({ ...c, ...(who.via ? { via: who.via } : {}) }));
+    this.ctx.waitUntil(logCards(this.env, this.name, who.email, action, rows).catch((e: Error) => console.error("recording a card change failed", action, e.message)));
+    const frame: ActivityFrame = {
+      type: "tasks_activity", action, by: { email: who.email, ...(who.via ? { via: who.via } : {}) },
+      cards: cards.slice(0, 3).map((c) => ({ id: c.card, title: c.title, lane: c.lane })), count: cards.length,
+    };
+    const forMembers = JSON.stringify(frame);
+    const forOwner = JSON.stringify(step === undefined ? frame : { ...frame, undo: step });
+    const cutoff = Date.now() - this.recheckMs();
+    for (const ws of this.ctx.getWebSockets()) {
+      const m = memberMeta(ws);
+      // A member's socket that hasn't been checked lately waits for the board itself, which is checked first (flushMembers).
+      if (m) { if (m.at >= cutoff && m.effective !== "none") sendTo(ws, forMembers); }
+      else if (!this.ctx.getTags(ws).includes(MEMBER_TAG)) sendTo(ws, forOwner);
+    }
   }
 
   // ---------- attachments ----------
@@ -737,11 +817,18 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** Swap in a board from the undo or redo stack, keeping preferences, which aren't undoable. */
-  private restore(board: Board) {
+  private restore(board: Board, how: "undo" | "redo") {
     const before = this.state;
     // The passphrase envelope isn't undoable either: an undo must never bring back an old passphrase.
     // Whoever undid or redid it made the last change to the cards that came back different.
     this.setState(ops.stampBy(before, ops.keepSettings(board, before), this.by("you")));
+    // Undoing "Add card" deletes a card, and undoing a delete brings one back. Both are written down.
+    const who = this.by("you");
+    const stamp = who ? { email: who.email, via: how } : null;
+    const gone = this.goneCards(before, this.state);
+    if (gone.length) this.noteCards("card_deleted", gone, stamp);
+    const back = this.goneCards(this.state, before);
+    if (back.length) this.noteCards("card_restored", back, stamp);
     this.reindex(before, this.state);
     // Undo and redo can finish or remove a card too (redoing a move to Done, undoing "Add card").
     // The other direction brings nothing back: a claim that ended stays ended.
@@ -759,8 +846,19 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`DELETE FROM history WHERE id = ${top.id}`;
     this.sql`INSERT INTO redo (grp, label, board) VALUES (NULL, ${top.label}, ${JSON.stringify(this.state)})`;
     this.sql`DELETE FROM redo WHERE id NOT IN (SELECT id FROM redo ORDER BY id DESC LIMIT ${HISTORY_LIMIT})`;
-    this.restore(JSON.parse(top.board) as Board);
+    this.restore(JSON.parse(top.board) as Board, "undo");
     return top.label;
+  }
+
+  /**
+   * Undo one particular step, and only if it's still the last one. The "Undo" on the toast
+   * that says a member deleted a card names the step it means, so it can't undo something
+   * else that landed in between. Null when the board has moved on.
+   */
+  @callable()
+  undoIf(step: number): string | null {
+    const top = this.sql<{ id: number }>`SELECT id FROM history ORDER BY id DESC LIMIT 1`[0];
+    return top && top.id === step ? this.undo() : null;
   }
 
   /** Redo the last undone change. Returns what was redone, or null when there's nothing to redo. */
@@ -771,7 +869,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!top) return null;
     this.sql`DELETE FROM redo WHERE id = ${top.id}`;
     this.sql`INSERT INTO history (grp, label, board) VALUES (NULL, ${top.label}, ${JSON.stringify(this.state)})`;
-    this.restore(JSON.parse(top.board) as Board);
+    this.restore(JSON.parse(top.board) as Board, "redo");
     return top.label;
   }
 

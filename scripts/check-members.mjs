@@ -553,6 +553,8 @@ const OWNER_ONLY_CALLS = [
   // Not callable by anyone over the socket, and a member mustn't be the exception.
   ["attach", [seed, { id: "a0000000000000000", name: "x", size: 1, type: "text/plain", addedAt: "now" }]], ["runTool", ["add_lane", { name: "Hacked" }]],
   ["askCeo", [{ id: seed, question: "Q?", options: ["a", "b"] }]], ["mutate", ["x"]], ["setState", [{ lanes: [], cards: [], theme: "paper" }]],
+  ["undoIf", [1]], ["markShared", []], ["noteCards", ["card_deleted", [{ card: "c0000", title: "Forged", lane: "To do" }], { email: "owner@example.com" }]],
+  ["goneCards", [{}, {}]], ["spendDeletes", [-200]], ["logCards", []],
   ["membersChanged", []], ["sweepMembers", []], ["noteAgentSeen", []], ["collectAttachments", []], ["persistMessages", [[]]], ["destroy", []],
   ["describe", []], ["cardDetail", [seed]], ["agentQueue", []], ["hasAttachment", ["x"]], ["uploadPolicy", []], ["onChatMessage", []], ["saveMessages", [[]]],
   ["constructor", []], ["__proto__", []], ["toString", []], ["fetch", []], ["sql", []], ["schedule", [1, "destroy"]],
@@ -640,6 +642,79 @@ let writerCard;
   const undone = await ownerSock.rpc("undo");
   ok("the owner can undo", undone.success === true && typeof undone.result === "string", undone);
   await ownerSock.rpc("redo");
+}
+
+// ---------- who deleted it ----------
+
+section("who deleted it");
+{
+  // A deleted card has no face left to show a name on, so the deletion itself is recorded.
+  const entryFor = async (who, pred) => {
+    for (let i = 0; i < 20; i++) { const e = (await audit(who)).find(pred); if (e) return e; await sleep(150); }
+    return null;
+  };
+  const title = "Card the writer will delete";
+  const cardId = (await writerSock.rpc("addCard", [lanes[0].id, title])).result;
+  await ownerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === cardId));
+  let oMark = ownerSock.frames.length; let vMark = viewerSock.frames.length; const wMark = writerSock.frames.length;
+  // Everything a client could add to the call to name someone else.
+  const del = await writerSock.rpc("deleteCard", [cardId, { by: { email: owner.email }, actor: owner.email }, owner.email]);
+  ok("a writer deletes a card", del.success === true, del);
+  const isAbout = (f) => f.type === "tasks_activity" && f.cards?.[0]?.id === cardId;
+  const oFrame = await ownerSock.wait(isAbout, 3000, oMark);
+  const vFrame = await viewerSock.wait(isAbout, 3000, vMark);
+  ok("the owner's open board is told who deleted it and what it was called", oFrame?.action === "card_deleted" && oFrame.by.email === writer.email && oFrame.cards[0].title === title && oFrame.cards[0].lane === lanes[0].name && oFrame.count === 1, oFrame);
+  ok("and gets the undo step that brings it back", Number.isInteger(oFrame?.undo));
+  ok("everyone else with the board open is told too, without an undo step", vFrame?.by.email === writer.email && vFrame.cards[0].title === title && !("undo" in vFrame), vFrame);
+  const gone = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === cardId);
+  ok("the audit log has it: who, when, the title, and the lane", gone?.actor === writer.email && gone.detail.title === title && gone.detail.lane === lanes[0].name && gone.detail.via === undefined && Math.abs(gone.at - Date.now()) < 60_000, gone);
+  ok("the name is the connection's, whatever the call claimed", gone?.actor === writer.email && !JSON.stringify(gone).includes(owner.email));
+
+  ok("a stale undo step undoes nothing", (await ownerSock.rpc("undoIf", [oFrame.undo - 1])).result === null && !ownerSock.state().cards.some((c) => c.id === cardId));
+  const wMark2 = writerSock.frames.length;
+  const undone = await ownerSock.rpc("undoIf", [oFrame.undo]);
+  const backState = await ownerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === cardId), 3000, oMark);
+  ok("the owner's Undo for that step brings the card back", undone.success === true && typeof undone.result === "string" && !!backState, undone);
+  const back = await entryFor(owner, (e) => e.action === "card_restored" && e.detail?.card === cardId);
+  ok("and that's in the log too, as the owner's undo", back?.actor === owner.email && back.detail.via === "undo" && back.detail.title === title, back);
+  const wBack = await writerSock.wait((f) => f.type === "tasks_activity" && f.action === "card_restored" && f.cards?.[0]?.id === cardId, 3000, wMark2);
+  ok("the writer is told the owner brought it back", wBack?.by.email === owner.email && wBack.by.via === "undo" && !("undo" in wBack), wBack);
+
+  const viaAssistant = await writerSock.rpc("applyLocal", [{ text: "delete it", calls: [{ name: "delete_cards", input: { ids: [cardId] } }], engine: "needle-rs", confidence: 1 }]);
+  const viaA = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === cardId && e.detail.via === "assistant");
+  ok("a card the writer's assistant deletes is logged as theirs, via the assistant", viaAssistant.result?.outcomes?.[0]?.ok === true && viaA?.actor === writer.email, viaA);
+
+  const agentCard = (await ownerSock.rpc("addCard", [lanes[0].id, "Card the owner's agent deletes"])).result;
+  const token = (await call(owner, "POST", "/api/tokens", { name: "check deletes" })).data.token;
+  vMark = viewerSock.frames.length;
+  const byAgent = await mcp(token, "delete_cards", { ids: [agentCard] });
+  const viaM = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === agentCard);
+  const vAgent = await viewerSock.wait((f) => f.type === "tasks_activity" && f.cards?.[0]?.id === agentCard, 3000, vMark);
+  ok("a card the owner's agent deletes over MCP is logged as the owner's, via their agent", !byAgent.isError && viaM?.actor === owner.email && viaM.detail.via === "agent" && vAgent?.by.via === "agent", [byAgent.text.slice(0, 120), viaM]);
+
+  const ownCard = (await ownerSock.rpc("addCard", [lanes[0].id, "Card the owner deletes"])).result;
+  await ownerSock.rpc("deleteCard", [ownCard]);
+  const byOwner = await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === ownCard);
+  ok("the owner's own deletions are logged the same way", byOwner?.actor === owner.email && byOwner.detail.via === undefined, byOwner);
+
+  const csv = await call(owner, "GET", "/api/board/audit.csv");
+  ok("the CSV carries the card's title and lane", csv.text.includes(`,card_deleted,,,,${cardId},${title},${lanes[0].name},`), csv.text.split("\r\n").filter((l) => l.includes("card_deleted")).slice(0, 2));
+  const tricky = '=HYPERLINK("http://evil.example","x"), "quoted"';
+  const trickyId = (await writerSock.rpc("addCard", [lanes[0].id, tricky])).result;
+  await writerSock.rpc("deleteCard", [trickyId]);
+  await entryFor(owner, (e) => e.action === "card_deleted" && e.detail?.card === trickyId);
+  const csv2 = (await call(owner, "GET", "/api/board/audit.csv")).text;
+  ok("a title that looks like a formula is exported as text", csv2.includes(`,"'=HYPERLINK(""http://evil.example"",""x""), ""quoted""",`), csv2.split("\r\n").filter((l) => l.includes(trickyId)));
+  ok("a member can't read any of it", !(await call(writer, "GET", "/api/board/audit")).text.includes(title) && !(await call(viewer, "GET", "/api/board/audit.csv")).text.includes(title));
+
+  // A board nobody was ever invited to keeps no such log and sends no such frame.
+  const solo = await open(stranger);
+  await solo.wait((f) => f.type === "cf_agent_state");
+  const soloCard = (await solo.rpc("addCard", [solo.state().lanes[0].id, "Solo card"])).result;
+  await solo.rpc("deleteCard", [soloCard]);
+  await sleep(600);
+  ok("a board that was never shared keeps no deletion log", (await audit(stranger)).length === 0 && !solo.frames.some((f) => f.type === "tasks_activity"), solo.frames.map((f) => f.type));
+  solo.close();
 }
 
 // ---------- questions, MCP, the feed, presence ----------
@@ -938,6 +1013,19 @@ section("a member who floods");
   ok("the owner can go past it", (await fo.rpc("addCard", [lane, "Owner's own"])).success === true);
   await fo.rpc("clearLane", [lane]);
 
+  // A member's deletions are counted: each is a row in a log nothing prunes.
+  const perDay = rules.MEMBER_LIMITS.deletesPerDay;
+  const many = await calm.rpc("applyLocal", [{ text: "add", calls: [batch(5000, perDay + 1)], engine: "needle-rs", confidence: 1 }], 20_000);
+  const ids = many.result?.outcomes?.[0]?.ids ?? [];
+  const wipe = (list) => calm.rpc("applyLocal", [{ text: "delete", calls: [{ name: "delete_cards", input: { ids: list } }], engine: "needle-rs", confidence: 1 }], 20_000);
+  const all = await wipe(ids);
+  ok(`a member can't delete ${perDay + 1} cards in one go`, ids.length === perDay + 1 && all.result?.outcomes?.[0]?.ok === false && /a day/.test(all.result.outcomes[0].summary) && !all.result.outcomes[0].summary.startsWith("["), all.result?.outcomes);
+  // One was deleted in the card-ceiling rows above.
+  const most = await wipe(ids.slice(0, perDay - 1));
+  const rest = await calm.rpc("deleteCard", [ids[perDay]]);
+  ok(`${perDay} deletions in a day go through, and the next is refused with delete_limit`, most.result?.outcomes?.[0]?.ok === true && rest.success === false && codeOf(rest) === "delete_limit", [most.result?.outcomes, rest]);
+  ok("the owner isn't counted", (await fo.rpc("clearLane", [lane])).success === true && fo.state().cards.filter((c) => c.laneId === lane).length === 0);
+
   // Tabs. A fifth socket for one member closes their oldest.
   const tabs = [];
   for (let i = 0; i < 4; i++) { const t = await open(watcher, { board: floodOwner.id }); await t.wait((f) => f.type === "cf_agent_state"); tabs.push(t); }
@@ -1029,7 +1117,7 @@ section("the audit log");
   ok("the log pages, newest first", p1.data.entries.length === 3 && p1.data.next === p1.data.entries[2].id && p2.data.entries.length === 3 && p2.data.entries[0].id < p1.data.entries[2].id, [p1.data.next, p2.data.entries.map((e) => e.id)]);
   const csv = await call(owner, "GET", "/api/board/audit.csv");
   const lines = csv.text.trim().split("\r\n");
-  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "id,time,actor,action,target,from_role,to_role" && lines.length === entries.length + 1, [lines.length, entries.length]);
+  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "id,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && lines.length === entries.length + 1, [lines.length, entries.length]);
   ok("the CSV names the people and the times", csv.text.includes(`${owner.email},member_removed,${removed.email},writer,`) && /\d{4}-\d\d-\d\dT/.test(lines[1]));
   const js = await call(owner, "GET", "/api/board/audit.json");
   ok("and as JSON", js.status === 200 && js.data.owner === owner.email && js.data.entries.length === entries.length);
