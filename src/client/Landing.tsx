@@ -17,6 +17,7 @@ const DEMO = `${BASE}/demo`;
 
 export function Landing({ signIn }: { signIn: ReactNode }) {
   const command = claudeMcpAdd(`${location.origin}${BASE}/mcp`);
+const REPO = "https://github.com/ddrscott/tasks-agent";
   return (
     <div className="landing">
       <header className="topbar">
@@ -135,6 +136,8 @@ const DOING: Card[] = [
   card("s4", "Rate limit the login endpoint", {
     tags: ["agent", "needs-ceo"],
     ask: {
+        <Proof />
+
       question: "Limit by IP or by account?",
       options: ["By IP", "By account", "Both, IP first"],
       recommended: 2,
@@ -150,6 +153,94 @@ const session = (id: string, more: Partial<Session>): Session => ({
 });
 
 const SESSIONS: Session[] = [
+/** What sits where the sign-in form would, for someone who's already signed in (/tasks/pricing). */
+export function SignedInCard({ email }: { email: string }) {
+  return (
+    <div className="login-card" id="sign-in">
+      <h2 className="h">SIGNED_IN</h2>
+      <p>You're signed in as <b>{email}</b>.</p>
+      <a className="btn primary" href={`${BASE}/`}>Open your board</a>
+    </div>
+  );
+}
+
+// ---------- proof ----------
+
+/** "12 changes" from the changelog counts baked into the build. Never typed in by hand. */
+const changes = (n: number) => `${n.toLocaleString()} ${n === 1 ? "change" : "changes"}`;
+
+/** How much has shipped, in the changelog's own numbers (`counts` in vite.config.ts). */
+function shipped(): string {
+  const { total, unreleased, latest } = __BUILD__.counts;
+  if (!latest) return `${changes(total)} written up so far.`;
+  const release = `v${latest.name}`;
+  return unreleased > 0
+    ? `${changes(unreleased)} written up since ${release}, ${total.toLocaleString()} in all.`
+    : `${changes(latest.count)} in ${release}, ${total.toLocaleString()} in all.`;
+}
+
+/**
+ * What a visitor can check without trusting us: the demo, the code, the changelog, the formats,
+ * and who makes it. Every line here has to be true and checkable from the link beside it. No
+ * user counts, star counts, logos, or quotes from anyone but the maker, because there are none
+ * to show. The numbers come from CHANGELOG.md at build time.
+ */
+function Proof() {
+  const out = { target: "_blank", rel: "noopener noreferrer" };
+  return (
+    <section className="landing-section" id="proof" aria-labelledby="proof-h">
+      <h2 className="h" id="proof-h">CHECK_IT_YOURSELF</h2>
+      <p className="landing-lede">Don't take our word for it.</p>
+      <div className="proof">
+        <dl className="proof-list">
+          <div>
+            <dt>Demo</dt>
+            <dd>The demo is the real board, running in your browser tab with a scripted agent. No account, and nothing is saved.</dd>
+            <dd className="proof-go"><span className="prompt" aria-hidden="true">$</span> <a href={DEMO}>Try the demo board</a></dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>The code is public: the Worker, the client, and the MCP tools your agent calls.</dd>
+            <dd className="proof-go"><a href={REPO} {...out}>Read the code</a></dd>
+          </div>
+          <div>
+            <dt>Changelog</dt>
+            <dd>Built in the open by coding agents working cards on a Tasks board. <b>{shipped()}</b></dd>
+            <dd className="proof-go"><a href={`${REPO}/blob/main/CHANGELOG.md`} {...out}>Read the changelog</a></dd>
+          </div>
+          <div>
+            <dt>Encryption</dt>
+            <dd>An encrypted board is standard JWE (RFC 7516). Download a backup and any JOSE library opens it with your passphrase. Without the passphrase, nobody does.</dd>
+            <dd className="proof-go"><a href={`${REPO}#-end_to_end_encryption`} {...out}>See the format</a></dd>
+          </div>
+          <div>
+            <dt>Protocol</dt>
+            <dd>The agent side is MCP over Streamable HTTP with OAuth sign-in, nothing custom. It all runs on Cloudflare Workers.</dd>
+            <dd className="proof-go"><a href={`${BASE}/connect`}>See the setup</a></dd>
+          </div>
+          <div>
+            <dt>Sessions</dt>
+            <dd>It's presence, not a log. Each session overwrites one row: its state and one line about its last action. No transcript, prompt, tool output, or Bash command is stored.</dd>
+            <dd className="proof-go"><a href={`${REPO}#-sessions`} {...out}>See what's stored</a></dd>
+          </div>
+        </dl>
+        <figure className="maker">
+          <figcaption className="maker-who">
+            <span>Maker</span>
+            Tasks is made by one developer, <a href="https://askscottpierce.com" {...out}>Scott Pierce</a>. Here's why:
+          </figcaption>
+          <blockquote>
+            “… I still get lost in progressing my projects forward. This Tasks app is my initial approach at
+            getting back to basics so I can manage the projects without needing to swim through oceans of
+            text to recall what's going on.”
+          </blockquote>
+          <p className="maker-by">Scott Pierce</p>
+        </figure>
+      </div>
+    </section>
+  );
+}
+
   session("7c1e04b2-sample", { state: "needs-input", machine: "mini", last: "Waiting on: Limit by IP or by account?", seenAt: NOW - 120_000 }),
   session("3fa9d6e1-sample", { last: "Edit migrations/0007_sessions.sql", seenAt: NOW - 4_000 }),
   session("b20c88a7-sample", { project: "docs-site", agent: "", state: "idle", last: "Finished: rebuilt the search index", cwd: "~/code/docs-site", seenAt: NOW - 180_000 }),
