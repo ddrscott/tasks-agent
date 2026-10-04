@@ -4,10 +4,11 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
-import { AskBlock } from "./Ask";
+import { AskBlock, AskOwnerContext } from "./Ask";
+import { ByFace, type Mode } from "./member";
 import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 
@@ -43,6 +44,12 @@ type Props = {
   onDragging(active: boolean): void;
   /** `ms` is how long it stays; destructive actions ask for longer than the default. */
   toast(text: string, undo?: boolean, ms?: number): void;
+  /**
+   * What the person looking may do here (// TEAM_BOARDS). Left out, it's the owner's board:
+   * everything. A writer gets cards and no lane controls. A viewer gets a board with nothing
+   * on it that changes anything: cards don't lift, and there's no add, no check, no menu.
+   */
+  mode?: Mode;
 };
 
 const LANE_PREFIX = "lane:";
@@ -81,6 +88,8 @@ function stepBoard(side: number) {
 
 export function BoardView(p: Props) {
   const { board } = p;
+  const mode = p.mode ?? "owner";
+  const owner = useContext(AskOwnerContext);
   const [drag, setDrag] = useState<{ id: string; cards: Card[] } | null>(null);
   const cards = drag?.cards ?? board.cards;
   // Done is a role a lane holds (lanes.ts), not the last place on the board.
@@ -205,6 +214,17 @@ export function BoardView(p: Props) {
     const beforeIndex = shownCards(board, before.laneId).findIndex((c) => c.id === id);
     if (before.laneId === lane && beforeIndex === index) return;
     const target = board.lanes.find((l) => l.id === lane);
+    // Two things a writer's drag can't do, said here because the server would refuse them:
+    // reorder a sorted lane (that changes the lane's sort, which is the owner's), and finish a
+    // card whose question the owner hasn't answered. The card goes back where it was.
+    if (mode !== "owner" && target?.sort && before.laneId === lane) {
+      p.toast(`${target.name} is sorted by ${SORTS.find((o) => o.by === target.sort)?.say ?? "a rule"}. Only the board's owner can change its order.`);
+      return;
+    }
+    if (mode !== "owner" && before.ask && lane === doneLane && before.laneId !== doneLane) {
+      p.toast(`That card has a question waiting on ${owner ?? "the board's owner"}, so it can't be finished yet.`);
+      return;
+    }
     if (target?.sort && before.laneId === lane) {
       // Dragging a card to a new spot in a sorted lane is choosing your own order, so the lane goes
       // back to manual and keeps exactly what's on screen.
@@ -220,7 +240,11 @@ export function BoardView(p: Props) {
   /** Done means "in the done lane": send the card there, or back to the top of the to do lane. */
   function toggleDone(card: Card, fromKeyboard = false) {
     const target = card.laneId === doneLane ? todoLaneId(board.lanes) : doneLane;
-    if (!target || target === card.laneId) return;
+    if (!target || target === card.laneId || mode === "viewer") return;
+    if (mode === "writer" && card.ask && target === doneLane) {
+      p.toast(`That card has a question waiting on ${owner ?? "the board's owner"}, so it can't be finished yet.`);
+      return;
+    }
     void p.actions.moveCard(card.id, target, card.laneId === doneLane ? 0 : Number.MAX_SAFE_INTEGER);
     // The card remounts in its new lane, which drops keyboard focus; follow it there.
     if (fromKeyboard) {
@@ -245,18 +269,18 @@ export function BoardView(p: Props) {
       onDragCancel={() => { setDrag(null); p.onDragging(false); }}
     >
       {/* "No agent connected yet", until one is (AgentNudge.tsx). */}
-      <AgentNudge board={board} say={p.toast} />
-      <div className="board">
+      {mode === "owner" && <AgentNudge board={board} say={p.toast} />}
+      <div className="board" data-mode={mode === "owner" ? undefined : mode}>
         {board.lanes.map((lane, i) => (
           <LaneView
             key={lane.id} lane={lane} index={i} lanes={board.lanes}
             cards={drag ? cards.filter((c) => c.laneId === lane.id) : shownCards(board, lane.id)}
             isDone={lane.id === doneLane} role={roleOf(board.lanes, lane.id)} hasDone={!!doneLane}
             highlight={!!active && active.laneId === lane.id}
-            {...p} onToggle={toggleDone}
+            {...p} mode={mode} onToggle={toggleDone}
           />
         ))}
-        <AddLane onAdd={(name) => p.actions.addLane(name)} full={board.lanes.length >= 8} />
+        {mode === "owner" && <AddLane onAdd={(name) => p.actions.addLane(name)} full={board.lanes.length >= 8} />}
       </div>
       <DragOverlay dropAnimation={{ duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" }}>
         {active && <CardFace card={active} isDone={active.laneId === doneLane} overlay />}
@@ -269,6 +293,9 @@ function LaneView(props: Props & {
   lane: Lane; index: number; lanes: Lane[]; cards: Card[]; isDone: boolean; role: LaneRole | undefined; hasDone: boolean; highlight: boolean; onToggle(c: Card): void;
 }) {
   const { lane, cards, actions } = props;
+  // Lanes are the owner's: a member sees the name, the count, and the sort, with nothing to press.
+  const owns = (props.mode ?? "owner") === "owner";
+  const canCards = props.mode !== "viewer";
   const { setNodeRef } = useDroppable({ id: LANE_PREFIX + lane.id });
   const [renaming, setRenaming] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -311,7 +338,9 @@ function LaneView(props: Props & {
     >
       <header className="lane-head">
         <span className="lane-dot" />
-        {renaming ? (
+        {!owns ? (
+          <span className="lane-name static">{lane.name}</span>
+        ) : renaming ? (
           <input
             className="lane-name" autoFocus defaultValue={lane.name} maxLength={40} aria-label="Lane name"
             onBlur={(e) => commitRename(e.target.value)}
@@ -327,9 +356,10 @@ function LaneView(props: Props & {
           <span className="lane-count">{cards.length}</span>
         )}
         {/* Says why the cards are in this order, and that dragging one will change that. */}
-        {sortedBy && <span className="lane-sort" title={`Sorted by ${sortedBy.say}. Change it from the lane menu.`}>by {sortedBy.say}</span>}
+        {sortedBy && <span className="lane-sort" title={owns ? `Sorted by ${sortedBy.say}. Change it from the lane menu.` : `Sorted by ${sortedBy.say}. The board's owner sets the order.`}>by {sortedBy.say}</span>}
         <span className="spacer" />
-        <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
+        {canCards && <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>}
+        {owns && (
         <div className="anchor">
           <button className="btn ghost icon" title="Lane options" aria-label={`${lane.name} lane options`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><IconDots /></button>
           {menu && (
@@ -389,39 +419,45 @@ function LaneView(props: Props & {
             </Popover>
           )}
         </div>
+        )}
       </header>
 
       <SortableContext id={lane.id} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="cards" ref={setNodeRef}>
           {cards.map((c) => (
             <SortableCard
-              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.hasDone}
+              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle}
+              // No check for a viewer, and none for a writer on a card whose question is still open: the server refuses both.
+              canToggle={props.hasDone && canCards && (owns || props.isDone || !c.ask)} locked={!canCards}
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
           {cards.length === 0 && !adding && (
-            <div className="lane-empty">{props.index === 0 ? "Nothing here yet. Add a card, or ask the assistant." : "Drag cards here"}</div>
+            <div className="lane-empty">{!canCards ? "No cards" : props.index === 0 ? (owns ? "Nothing here yet. Add a card, or ask the assistant." : "Nothing here yet. Add a card.") : "Drag cards here"}</div>
           )}
         </div>
       </SortableContext>
 
-      <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(t) => actions.addCard(lane.id, t)} />
+      {canCards && <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(t) => actions.addCard(lane.id, t)} />}
     </section>
   );
 }
 
 function SortableCard(p: {
   card: Card; isDone: boolean; flash: boolean; canToggle: boolean; faded: boolean; tagFilter: string | null;
+  /** A viewer's card: it opens, and that's all. */
+  locked?: boolean;
   onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void; onTag(tag: string): void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id, disabled: !!p.locked });
   return (
     <div
-      ref={setNodeRef} {...attributes} {...listeners}
+      // A viewer's card is a plain button that opens: none of the drag handlers or the "press space to pick up" instructions.
+      ref={setNodeRef} {...(p.locked ? { role: "button", tabIndex: 0 } : attributes)} {...(p.locked ? {} : listeners)}
       style={{ transform: CSS.Translate.toString(transform), transition, viewTransitionName: isDragging ? undefined : `card-${p.card.id}` }}
       className={isDragging ? "dragging" : undefined}
       data-card-id={p.card.id}
-      aria-roledescription={`card. Space to pick up, Enter to edit, X to mark ${p.isDone ? "not done" : "done"}`}
+      aria-roledescription={p.locked ? "card. Enter to open" : `card. Space to pick up, Enter to edit${p.canToggle ? `, X to mark ${p.isDone ? "not done" : "done"}` : ""}`}
       onClick={() => p.onOpen(p.card)}
       onKeyDown={(e) => {
         listeners?.onKeyDown?.(e);
@@ -442,6 +478,7 @@ export function CardFace(p: {
 }) {
   const { card } = p;
   const status = !p.isDone && !card.ask ? faceLine(card) : null;
+  const boardOwner = useContext(AskOwnerContext);
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -461,7 +498,7 @@ export function CardFace(p: {
         {!p.overlay && <AskBlock card={card} compact />}
         {/* What the agent last said it's doing, so nobody opens the card to find out. An open question says it better, and a done card is done. */}
         {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
-        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : "Your answer. The agent hasn't written a new STATUS line yet."}>{status.text}</div>}
+        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : `${boardOwner ? `${boardOwner}'s` : "Your"} answer. The agent hasn't written a new STATUS line yet.`}>{status.text}</div>}
         <div className="card-meta">
           {card.tags?.map((t) => (
             <button
@@ -479,6 +516,8 @@ export function CardFace(p: {
             <span className="chip" title={card.attachments.map((a) => a.name).join("\n")}><IconClip />{card.attachments.length}</span>
           )}
         </div>
+        {/* Who made the last change, on a shared board, when it wasn't you (member.tsx). */}
+        {!p.overlay && <ByFace card={card} />}
       </div>
     </div>
   );

@@ -84,8 +84,13 @@ function sessionCookie(req: Request, token: string, maxAge: number): string {
  * crafted link can't bounce a fresh session to another site.
  */
 export function safeNext(raw: unknown): string | null {
-  if (typeof raw !== "string" || !raw.startsWith("/tasks/") || raw.startsWith("//") || /[\\\s]/.test(raw)) return null;
-  return raw.length <= 2000 ? raw : null;
+  if (typeof raw !== "string") return null;
+  // A fragment never comes along. `next` is written into the sign-in email and the SSO
+  // redirect, and a fragment is where an invite link keeps its token (// TEAM_BOARDS), so
+  // cutting it here means a token can't reach an email, a URL, or a log by way of `next`.
+  const path = raw.split("#")[0];
+  if (!path.startsWith("/tasks/") || path.startsWith("//") || /[\\\s]/.test(path)) return null;
+  return path.length <= 2000 ? path : null;
 }
 
 /** Start a 30-day session for a verified email. Returns the Set-Cookie header. */

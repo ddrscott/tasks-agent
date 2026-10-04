@@ -26,7 +26,10 @@ import { Login } from "./Login";
 import { MembersDialog, SharedBadge, SharedButton, SharedNote } from "./Members";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
-import { AskContext, AsksButton, type AnswerFn } from "./Ask";
+import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
+import { BoardSwitcher } from "./BoardSwitcher";
+import { MemberChat } from "./MemberChat";
+import { accessChangeText, asMemberAccess, bannerText, boardFromUrl, modeOf, roleWord, WhoContext, type Boards, type MemberAccess } from "./member";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
@@ -75,15 +78,110 @@ export function App() {
   // Connect is public too: signed out it shows the setup steps and asks for a sign-in only where a token is made.
   if (page === "connect") return <Connect signedIn={me !== null} onBack={() => go("board")} />;
   // An invite link (// TEAM_BOARDS). Signed out, it sends you to sign in and back.
-  if (page === "invite") return <Invite me={me} onBoard={(board) => { location.assign(`${BASE}/?board=${board}`); }} />;
+  if (page === "invite") return <Invite me={me} onSignedOut={() => setMe(null)} />;
   if (me === null) return <Login onSignedIn={load} />;
   // /tasks/pricing is the front page at its pricing section, for someone signed in too.
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
-  return <Workspace me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
+  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} />;
 }
 
-function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+/** One line to show on the next board that opens, left by the invite page ("You're on dana's board as a writer"). */
+const FLASH = "tasks-board-flash";
+function takeFlash(): string | null {
+  try { const t = sessionStorage.getItem(FLASH); sessionStorage.removeItem(FLASH); return t; } catch { return null; }
+}
+
+/**
+ * Which board is on screen: your own, or one someone shared with you (// TEAM_BOARDS). The
+ * address says which (`/tasks/?board=<owner id>`), so a reload or a bookmark comes back to it.
+ * The id opens nothing by itself. Before a shared board is connected to, the server is asked
+ * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
+ * saying so, and nothing keeps knocking on a board that won't open.
+ */
+function BoardHost({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+  const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
+  const [access, setAccess] = useState<MemberAccess | null>(null);
+  const [boards, setBoards] = useState<Boards | null>(null);
+  const [notice, setNotice] = useState<string | null>(takeFlash);
+
+  const loadBoards = useCallback(() => {
+    fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
+  }, []);
+  useEffect(() => { loadBoards(); }, [loadBoards, boardId]);
+
+  // Back to your own board, with the reason. The address drops the board it can't open.
+  const fallBack = useCallback((why: string) => {
+    history.replaceState(null, "", `${BASE}/`);
+    setNotice(why);
+    setAccess(null);
+    setBoardId(null);
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => setBoardId(boardFromUrl(me.id));
+    addEventListener("popstate", onPop);
+    return () => removeEventListener("popstate", onPop);
+  }, [me.id]);
+
+  useEffect(() => {
+    if (!boardId) { setAccess(null); return; }
+    let off = false;
+    setAccess(null);
+    fetch(api(`/api/board/access?board=${encodeURIComponent(boardId)}`)).then(async (r) => {
+      if (off) return;
+      if (r.status === 401) { onSignOut(); return; }
+      const a = r.ok ? asMemberAccess(((await r.json()) as { access?: unknown }).access) : null;
+      if (off) return;
+      if (a) setAccess(a);
+      // One answer for a board that was unshared, one you were never on, and one that doesn't exist: the server doesn't say which.
+      else fallBack("That board isn't shared with you. You may have been removed, or the link is wrong. This is your own board.");
+    }).catch(() => { if (!off) fallBack("That board couldn't be reached just now. This is your own board."); });
+    return () => { off = true; };
+  }, [boardId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const switchTo = useCallback((board: string | null) => {
+    history.pushState(null, "", board ? `${BASE}/?board=${board}` : `${BASE}/`);
+    setAccess(null);
+    setBoardId(board);
+  }, []);
+
+  if (boardId && (!access || access.board !== boardId)) return <div className="splash">opening the board</div>;
+  return (
+    <Workspace
+      // A different board is a different connection and a clean slate: nothing from one leaks into the next.
+      key={boardId ?? "own"}
+      me={me} onSignOut={onSignOut} onConnect={onConnect}
+      shared={boardId ? access : null} boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
+      notice={notice} onNoticeShown={() => setNotice(null)}
+    />
+  );
+}
+
+type WorkspaceProps = {
+  me: Me; onSignOut(): void; onConnect(hash?: string): void;
+  /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
+  shared: MemberAccess | null;
+  boards: Boards | null;
+  onSwitch(board: string | null): void;
+  /** The shared board is gone for this account (removed, left, encrypted): go back to your own, and say why. */
+  onLost(why: string): void;
+  /** Read the list of boards again. */
+  onBoards(): void;
+  /** Something to say once the board is up, like why you're back on your own. */
+  notice: string | null;
+  onNoticeShown(): void;
+};
+
+function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown }: WorkspaceProps) {
   useTitle("Board");
+  // Everything below asks `mode`, never the URL or a guess: "owner" on your own board, and on a
+  // shared one whatever the server last said (the preflight, then `tasks_access` on the socket).
+  const member = !!shared;
+  const [access, setAccess] = useState<MemberAccess | null>(shared);
+  const accessRef = useRef(access);
+  accessRef.current = access;
+  const mode = modeOf(access);
+  const canWrite = mode !== "viewer";
   async function signOut() {
     await fetch(api("/api/auth/logout"), { method: "POST" });
     onSignOut();
@@ -109,7 +207,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const chatSaved = useRef<string | null>(null);
   const [chatOpen, setChatOpen] = useState(() => {
     try { chatSaved.current = localStorage.getItem("todo-chat"); } catch { /* private window */ }
-    return chatSaved.current === "open" && innerWidth > 900;
+    // On a shared board the panel starts closed; the saved choice is about your own board.
+    return !member && chatSaved.current === "open" && innerWidth > 900;
   });
   const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
 
@@ -121,7 +220,10 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const chatInput = useRef<HTMLTextAreaElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   // receive() runs before `agent` exists in this render, so it reaches the agent through a ref.
-  const agentRef = useRef<{ stub: { setTheme(theme: string): Promise<unknown> } } | null>(null);
+  const agentRef = useRef<{ stub: { setTheme(theme: string): Promise<unknown> }; close(): void } | null>(null);
+  // A member's theme is their own: the one this browser already uses. The owner's choice for
+  // their board isn't applied here, and picking one here changes this browser, not their board.
+  const [localTheme, setLocalTheme] = useState(readCachedTheme);
   boardRef.current = board;
 
   // End-to-end encryption. `raw` is the board as the server holds it; on an encrypted board
@@ -151,7 +253,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     const prev = boardRef.current;
     // The first board decides the assistant panel when nobody has. An empty board keeps it closed,
     // and that's saved, so it doesn't spring open later: it opens when the person opens it.
-    if (!prev && chatSaved.current === null && innerWidth > 900) {
+    if (!member && !prev && chatSaved.current === null && innerWidth > 900) {
       chatSaved.current = next.cards.length ? "open" : "closed";
       if (next.cards.length) setChatOpen(true);
       else try { localStorage.setItem("todo-chat", "closed"); } catch { /* private window */ }
@@ -159,7 +261,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     // A new account (another sign-in email) starts on Auto. Until the user picks a theme
     // on it, keep the one this browser already uses instead of switching under them.
     const cached = readCachedTheme();
-    if (!prev && !next.themeChosen && cached !== next.theme) {
+    if (member) {
+      if (!prev) applyTheme(cached);
+    } else if (!prev && !next.themeChosen && cached !== next.theme) {
       applyTheme(cached);
       void agentRef.current?.stub.setTheme(cached);
     } else {
@@ -185,7 +289,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       newest.current = next;
       setBoard(next);
     }
-  }, []);
+  }, [member]);
 
   // Every state update goes through here: plain boards straight to the UI, encrypted ones
   // through the vault first. A newer update always wins over a slower decrypt.
@@ -193,6 +297,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     rawRef.current = s;
     setRaw(s);
     const n = ++seq.current;
+    // Someone else's board is never encrypted (an encrypted board has no members), and the
+    // "was encrypted on this device" marker is about your own account's board, not this one.
+    if (member) { receive(s); return; }
     if (!s.sealed) {
       const m = marker.get();
       if (m && !m.startsWith("off:")) setDowngraded(true);
@@ -227,13 +334,59 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   // `?board=<id>` opens a board someone shared with you; without it, the Worker picks your own
   // from the session cookie. The id opens nothing by itself: the Worker checks membership
-  // (// TEAM_BOARDS). This is only the connection; the switcher and the rest of the UI aren't built yet.
-  const [sharedBoard] = useState(() => { const b = new URLSearchParams(location.search).get("board"); return b && b !== me.id ? b : null; });
+  // (// TEAM_BOARDS). BoardHost has already asked the server about it; `shared` is the answer.
+  const sharedBoard = shared?.board ?? null;
+  const say = useCallback((text: string, undo = false, ms?: number) => setToast({ text, action: undo && !member ? "undo" : null, key: Date.now(), ms }), [member]);
+
+  // Losing the board: stop the socket so nothing reconnects, and hand back to BoardHost, once.
+  const lost = useRef(false);
+  const lose = useCallback((why: string) => {
+    if (lost.current) return;
+    lost.current = true;
+    try { agentRef.current?.close(); } catch { /* already closed */ }
+    onLost(why);
+  }, [onLost]);
+
+  // The server says what this account may do on someone else's board, on connect and again the
+  // moment it changes: a role change, the owner's plan lapsing or coming back, removal, or the
+  // board being encrypted. The open board follows it on the spot and says what happened.
+  const onAccess = useCallback((f: { closed?: string } & Record<string, unknown>) => {
+    const was = accessRef.current;
+    if (!was) return;
+    const next = f.closed ? null : asMemberAccess(f);
+    if (!next) {
+      lose(f.closed === "encrypted"
+        ? `${was.ownerEmail} encrypted their board, which closes it to everyone else. This is your own board.`
+        : `You're no longer a member of ${was.ownerEmail}'s board, so it closed. This is your own board.`);
+      return;
+    }
+    const text = accessChangeText(was, next);
+    accessRef.current = next;
+    setAccess(next);
+    if (text) say(text, false, DESTRUCTIVE_TOAST_MS);
+  }, [lose, say]);
+
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
     basePath: "tasks/agent",
     ...(sharedBoard ? { query: { board: sharedBoard } } : {}),
     onStateUpdate: (s) => ingest(s),
+    ...(sharedBoard ? {
+      onMessage: (m: MessageEvent) => {
+        if (typeof m.data !== "string") return;
+        try { const f = JSON.parse(m.data) as { type?: string }; if (f.type === "tasks_access") onAccess(f); } catch { /* not ours */ }
+      },
+      // A dropped socket retries by itself. Before it keeps knocking, ask whether the board is
+      // still ours: a member removed while offline gets "Not found" forever otherwise.
+      onClose: () => {
+        if (lost.current) return;
+        const was = accessRef.current;
+        fetch(api(`/api/board/access?board=${encodeURIComponent(sharedBoard)}`)).then((r) => {
+          if (r.status === 404) lose(`You're no longer a member of ${was?.ownerEmail ?? "that"}'s board, so it closed. This is your own board.`);
+          else if (r.status === 401) { lost.current = true; try { agentRef.current?.close(); } catch { /* closed */ } onSignOut(); }
+        }).catch(() => {});
+      },
+    } : {}),
   });
 
   // Boards encrypted before key checks existed get one from the first tab that unlocks them.
@@ -266,11 +419,12 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   agentRef.current = agent;
 
   // Claude Code sessions reporting in, and the cards they hold. An encrypted board keeps none.
-  const presence = usePresence(!!raw && !raw.sealed);
+  // A member never sees them: claims and Sessions are the owner's.
+  const presence = usePresence(!member && !!raw && !raw.sealed);
 
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
   const [usage, setUsage] = useState<Usage | null>(null);
-  const refreshUsage = useCallback(() => { agent.stub.usage().then(setUsage).catch(() => {}); }, [agent]);
+  const refreshUsage = useCallback(() => { if (!member) agent.stub.usage().then(setUsage).catch(() => {}); }, [agent, member]);
   useEffect(() => { if (board) refreshUsage(); }, [!!board, refreshUsage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Back from Stripe Checkout. The webhook can land a moment after the redirect, so look twice.
@@ -293,13 +447,48 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     else say(data.error ?? "Billing is having trouble. Try again in a minute.");
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Leaving a shared board is the member's own call, and takes two taps on the same item.
+  const [leaveArmed, setLeaveArmed] = useState(false);
+  useEffect(() => { if (!menuOpen) setLeaveArmed(false); }, [menuOpen]);
+  const leave = useCallback(async () => {
+    const a = accessRef.current;
+    if (!a) return;
+    const r = await fetch(api("/api/boards/leave"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board: a.board }) }).catch(() => null);
+    if (r?.ok) { lose(`You left ${a.ownerEmail}'s board. This is your own board.`); return; }
+    const data = r ? ((await r.json().catch(() => ({}))) as { error?: string }) : {};
+    say(data.error ?? "Leaving didn't go through. Try again in a minute.");
+  }, [lose, say]);
+
   // Keep the Undo and Redo buttons' labels current.
   useEffect(() => {
-    if (!board) return;
+    if (!board || member) return; // undo is the owner's
     agent.stub.undoRedo().then(setStack).catch(() => {});
-  }, [board, agent]);
+  }, [board, agent, member]);
 
-  const say = useCallback((text: string, undo = false, ms?: number) => setToast({ text, action: undo ? "undo" : null, key: Date.now(), ms }), []);
+  // Why you're here, when BoardHost has something to say: back on your own board after losing
+  // a shared one, or just in from an invite. It waits for the board so the toast has a page to sit on.
+  useEffect(() => {
+    if (!notice || !board) return;
+    say(notice, false, 12_000);
+    onNoticeShown();
+  }, [notice, !!board]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A change the server turned down: say why in its words, and put the board back the way the
+  // server has it, since a drag had already moved the card on screen.
+  const refused = useCallback((e: unknown) => {
+    say(e instanceof Error && e.message ? e.message : "That didn't work.", false, DESTRUCTIVE_TOAST_MS);
+    if (newest.current && !dragging.current) setBoard(newest.current);
+  }, [say]);
+
+  // A writer made a viewer, or the owner's plan lapsing, while something was half done: close
+  // what can no longer be finished, so nothing on screen offers a change the server will refuse.
+  useEffect(() => {
+    if (canWrite) return;
+    setNewCardLane(null);
+    setQuickAddLane(null);
+    setChatOpen(false);
+  }, [canWrite]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), toast.ms ?? 5000);
@@ -307,15 +496,17 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   }, [toast]);
 
   const redo = useCallback(async () => {
+    if (member) return;
     const label = await agent.stub.redo();
     setToast({ text: label ? `Redid: ${label.toLowerCase()}` : "Nothing to redo", action: label ? "undo" : null, key: Date.now() });
-  }, [agent]);
+  }, [agent, member]);
 
   const undo = useCallback(async () => {
+    if (member) return;
     const label = await agent.stub.undo();
     // Offer Redo right where the eye already is, in case the undo was an accident.
     setToast({ text: label ? `Undid: ${label.toLowerCase()}` : "Nothing to undo", action: label ? "redo" : null, key: Date.now() });
-  }, [agent, say]);
+  }, [agent, say, member]);
 
   // For the Tags field in the card dialogs. On an encrypted board this is the decrypted view, so it works there too.
   const knownTags = useMemo(() => (board ? tagsByUse(board) : []), [board]);
@@ -324,9 +515,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     // Quick add: "Write a haiku #agent" is the title plus a tag. It's split here, in the tab, before anything is sealed.
     addCard: async (laneId, typed, top) => {
       const { title, tags } = splitTitleTags(typed);
-      return agent.stub.addCard(laneId, await out(clean(title, 200)), top, tags.length ? { tags: await Promise.all(tags.map(out)) } : undefined);
+      return agent.stub.addCard(laneId, await out(clean(title, 200)), top, tags.length ? { tags: await Promise.all(tags.map(out)) } : undefined).catch(refused);
     },
-    moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index),
+    moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index).catch(refused),
     addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },
     renameLane: async (id, name) => { laneClash(name, id); return agent.stub.renameLane(id, await out(clean(name, 40))); },
     deleteLane: (id) => agent.stub.deleteLane(id),
@@ -335,7 +526,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     setLaneManual: (id, ids) => agent.stub.setLaneManual(id, ids),
     setLaneSort: (id, by) => agent.stub.setLaneSort(id, by),
     setLaneRole: (id, role) => agent.stub.setLaneRole(id, role),
-  }), [agent, out, laneClash]);
+  }), [agent, out, laneClash, refused]);
 
   const updateCard = useCallback(async (id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) => {
     const p: typeof patch = {};
@@ -343,8 +534,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     if (patch.notes !== undefined) p.notes = patch.notes ? await out(patch.notes.slice(0, 4000)) : "";
     if (patch.due !== undefined) p.due = patch.due ? await out(patch.due) : null;
     if (patch.tags !== undefined) p.tags = await Promise.all(tidyTags(patch.tags).map(out));
-    return agent.stub.updateCard(id, p);
-  }, [agent, out]);
+    return agent.stub.updateCard(id, p).catch(refused);
+  }, [agent, out, refused]);
 
   // The New card dialog: one change, so one Undo takes the whole card back out.
   const addFullCard = useCallback(async (input: NewCardInput) => {
@@ -366,22 +557,25 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
 
   const setChat = useCallback((open: boolean) => {
     setChatOpen(open);
-    try { localStorage.setItem("todo-chat", open ? "open" : "closed"); } catch {}
+    if (!member) try { localStorage.setItem("todo-chat", open ? "open" : "closed"); } catch {}
     if (open) setTimeout(() => chatInput.current?.focus(), 50);
-  }, []);
+  }, [member]);
 
   // Keyboard: n new card, / chat, t theme, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       const typing = el.closest("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]");
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && !typing) { e.preventDefault(); void undo(); return; }
+      // Undo and redo are the owner's; on someone else's board the keys are left to the browser.
+      if (!member && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && !typing) { e.preventDefault(); void undo(); return; }
       const isRedo = (e.metaKey || e.ctrlKey) && ((e.key.toLowerCase() === "z" && e.shiftKey) || (e.ctrlKey && e.key.toLowerCase() === "y"));
-      if (isRedo && !typing) { e.preventDefault(); void redo(); return; }
+      if (!member && isRedo && !typing) { e.preventDefault(); void redo(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInput.current?.focus(); searchInput.current?.select(); return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "n" && boardRef.current?.lanes[0]) { e.preventDefault(); setQuickAddLane(todoLaneId(boardRef.current.lanes)); }
-      if (e.key === "/") { e.preventDefault(); setChat(true); }
+      // A viewer's keys change nothing: no new card, and no assistant to ask.
+      const writes = modeOf(accessRef.current) !== "viewer";
+      if (e.key === "n" && writes && boardRef.current?.lanes[0]) { e.preventDefault(); setQuickAddLane(todoLaneId(boardRef.current.lanes)); }
+      if (e.key === "/" && writes) { e.preventDefault(); setChat(true); }
       if (e.key === "t") { e.preventDefault(); setThemeOpen((o) => !o); }
     };
     addEventListener("keydown", onKey);
@@ -391,7 +585,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   // Auto theme follows the OS as it changes.
   useEffect(() => {
     const mq = matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => { if (boardRef.current?.theme === "auto") applyTheme("auto"); };
+    const onChange = () => { if ((member ? readCachedTheme() : boardRef.current?.theme) === "auto") applyTheme("auto"); };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
@@ -428,7 +622,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       />
     );
   }
-  if (!board || !raw) return <div className="splash">opening your board</div>;
+  if (!board || !raw) return <div className="splash">{access ? `opening ${access.ownerEmail}'s board` : "opening your board"}</div>;
 
   const doneLane = doneLaneId(board.lanes);
   const open = board.cards.filter((c) => c.laneId !== doneLane);
@@ -436,15 +630,21 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const dueToday = open.filter((c) => c.due === today).length;
   const overdue = open.filter((c) => c.due && c.due < today).length;
   const editingCard = board.cards.find((c) => c.id === editing);
-
+  // Names on cards show once a board is shared: you're a member of it, or someone else has
+  // changed a card on it. A board only its owner has touched shows none (member.tsx).
+  const showWho = member || board.cards.some((c) => c.by && c.by.email !== me.email);
+  const banner = access ? bannerText(access) : null;
 
   return (
     <AskContext.Provider value={answerAsk}>
-    <NoAgentProvider board={board} onConnect={onConnect}>
+    <AskOwnerContext.Provider value={access?.ownerEmail ?? null}>
+    <Who me={me.email} on={showWho}>
+    <NoAgentProvider board={board} onConnect={onConnect} off={member}>
     <div className="app">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
+          <BoardSwitcher boards={boards} access={access} onSwitch={onSwitch} onOpen={onBoards} />
           {board.sealed && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
               <IconLock /><span className="hide-sm label">encrypted</span>
@@ -463,6 +663,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           <span className="spacer" />
           <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
+            {/* Undo, questions, Sessions, and the cloud assistant are the owner's. On someone else's board they aren't drawn. */}
+            {!member && (
             <div className="btn-pair">
               <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"} aria-label="Undo">
                 <IconUndo /><span className="hide-sm label">Undo</span>
@@ -471,17 +673,18 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <IconRedo />
               </button>
             </div>
-            <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
-            {!board.sealed && (
+            )}
+            {!member && <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />}
+            {!member && !board.sealed && (
               <SessionsButton
                 presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
                 cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
               />
             )}
-            <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => void agent.stub.setTheme(t)} />
-            <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
+            <ThemePicker current={member ? localTheme : board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => { if (member) setLocalTheme(t as typeof localTheme); else void agent.stub.setTheme(t); }} />
+            {canWrite && <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
               <IconChat /><span className="label">Assistant</span>
-            </button>
+            </button>}
             {/* Your own board only. It shows once someone's invited (// TEAM_BOARDS). */}
             {!sharedBoard && <SharedButton userId={me.id} onOpen={() => setMembersOpen(true)} />}
             <div className="anchor">
@@ -490,6 +693,21 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                 <Popover menu label={`Account, ${me.email}`} onClose={() => setMenuOpen(false)}>
                   <div className="menu">
                     <div className="who">{me.email}</div>
+                    {access ? (
+                      <>
+                        {/* On someone else's board the menu holds what's yours, and the way out. */}
+                        <button role="menuitem" onClick={() => { setMenuOpen(false); onSwitch(null); }}>Go to my board</button>
+                        {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>}
+                        {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>}
+                        <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
+                        <div className="menu-label">This board · {roleWord(access)}</div>
+                        <button
+                          className={`danger${leaveArmed ? " armed" : ""}`} role="menuitem"
+                          onClick={() => { if (!leaveArmed) { setLeaveArmed(true); return; } setMenuOpen(false); void leave(); }}
+                        >{leaveArmed ? `Tap again to leave ${access.ownerEmail}'s board` : "Leave this board"}</button>
+                      </>
+                    ) : (
+                      <>
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
                     {!sharedBoard && <button role="menuitem" onClick={() => { setMenuOpen(false); setMembersOpen(true); }}>Members<SharedNote userId={me.id} /></button>}
@@ -503,6 +721,8 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
                     {usage?.billing && usage.plan === "pro" && (
                       <button role="menuitem" onClick={() => { setMenuOpen(false); void billing("portal"); }}>Manage subscription</button>
                     )}
+                      </>
+                    )}
                     <button className="danger" role="menuitem" onClick={() => void signOut()}>Sign out</button>
                   </div>
                 </Popover>
@@ -512,10 +732,18 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         </header>
 
         {/* // START_HERE decides for itself when to show (quickStartOpen in FirstRun.tsx). */}
-        {!board.sealed && <FirstRun board={board} onConnect={onConnect} add={addFullCard} say={say} />}
+        {!member && !board.sealed && <FirstRun board={board} onConnect={onConnect} add={addFullCard} say={say} />}
+        {/* Whose board this is and what you can do on it, for as long as it's on screen. */}
+        {access && banner && (
+          <aside className="member-line" role="status" aria-label="Shared board">
+            <span className="member-line-mark" aria-hidden="true">$</span>
+            <span className="role-chip" data-role={access.effective}>{roleWord(access)}</span>
+            <span className="member-line-text"><b>{banner.lead}</b> {banner.rest}</span>
+          </aside>
+        )}
         <PresenceContext.Provider value={presence}>
         <BoardView
-          board={board} actions={actions} flash={flash}
+          board={board} actions={actions} flash={flash} mode={mode}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={setNewCardLane}
@@ -531,37 +759,42 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
         <Footer />
       </div>
 
+      {/* The cloud assistant and its transcript are the owner's. A writer gets the model in the tab; a viewer gets none. */}
+      {!member && (
       <Chat
         agent={agent} board={board} vault={board.sealed ? vault : null} open={chatOpen} model={me.model} onClose={() => setChat(false)} onBusy={onBusy} inputRef={chatInput}
         usage={usage} onUpgrade={() => void billing("checkout")}
       />
-      {!chatOpen && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
+      )}
+      {access && canWrite && <MemberChat agent={agent} board={board} owner={access.ownerEmail} open={chatOpen} onClose={() => setChat(false)} inputRef={chatInput} />}
+      {!chatOpen && canWrite && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {newCardLane && (
-        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
       )}
       {editingCard && (
         // The editor shows the session that claimed the card, so it reads the same list the board does.
         <PresenceContext.Provider value={presence}>
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
+          mode={mode} board={sharedBoard ?? undefined}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
-          onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER)}
+          onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).catch(refused)}
           onMoveNow={(laneId) => {
             const to = board.lanes.find((l) => l.id === laneId)?.name ?? "lane";
-            void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true));
+            void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true), refused);
           }}
-          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS)); }}
+          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS), refused); }}
           isDone={editingCard.laneId === doneLane}
           onToggleDone={doneLane ? () => {
             const reopen = editingCard.laneId === doneLane;
             const target = reopen ? todoLaneId(board.lanes)! : doneLane;
             void agent.stub.moveCard(editingCard.id, target, reopen ? 0 : Number.MAX_SAFE_INTEGER)
-              .then(() => say(reopen ? `Reopened "${editingCard.title}"` : `Done: "${editingCard.title}"`, true));
+              .then(() => say(reopen ? `Reopened "${editingCard.title}"` : `Done: "${editingCard.title}"`, true), refused);
           } : undefined}
           onRemoveAttachment={(id) => {
             const name = editingCard.attachments?.find((a) => a.id === id)?.name ?? "file";
-            void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true, DESTRUCTIVE_TOAST_MS));
+            void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true, DESTRUCTIVE_TOAST_MS), refused);
           }}
           onClose={() => setEditing(null)}
         />
@@ -588,6 +821,21 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
       )}
     </div>
     </NoAgentProvider>
+    </Who>
+    </AskOwnerContext.Provider>
     </AskContext.Provider>
   );
+}
+
+/** Turns names on cards on or off for everything inside, and keeps "3m ago" moving (member.tsx). */
+function Who({ me, on, children }: { me: string; on: boolean; children: React.ReactNode }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [on]);
+  const value = useMemo(() => (on ? { me, now } : null), [on, me, now]);
+  return <WhoContext.Provider value={value}>{children}</WhoContext.Provider>;
 }

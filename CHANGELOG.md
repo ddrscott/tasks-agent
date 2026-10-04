@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The audit log is a tab in Members, newest first, with each time in your time zone and in UTC, and Download CSV and Download JSON buttons
 - A shared board says "Shared with 2" in the top bar. Click it to open Members
 - The Encryption dialog says up front when a board can't be encrypted because it's shared, with a button to Members, and Members says when a board can't be shared because it's encrypted
+- An invite link opens a page that shows who invited you, the role, and what that role can do, with Accept and Decline. It only works signed in as the address it was sent to, and it brings you back to the invite after you sign in
+- A board switcher next to the logo, once someone has shared a board with you: your board, and each shared one with your role. The open board is in the address, so a reload or a bookmark comes back to it
+- A shared board says whose it is and what you can do on it. A viewer can read everything and change nothing; a writer can change cards, and lanes, undo, questions, and board settings stay with the owner
+- Leave a shared board from the account menu
+- A shared board shows who last changed each card, and whether an agent or the assistant did it for them
+- When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

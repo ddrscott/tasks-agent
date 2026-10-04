@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cleanTag, type Card, type Lane } from "../shared";
-import { AskBlock } from "./Ask";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
+import { AskBlock, AskOwnerContext } from "./Ask";
+import { ASK_HOLDS, ByLine, type Mode } from "./member";
 import { NoAgentLine } from "./AgentNudge";
 import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
@@ -32,7 +33,70 @@ type Props = {
   onToggleDone?(): void;
   isDone: boolean;
   onClose(): void;
+  /** Who's looking (// TEAM_BOARDS). Left out, the owner. A viewer gets the card to read and nothing to press. */
+  mode?: Mode;
+  /** The owner's id, on a board someone shared with you: files go to and come from that board. */
+  board?: string;
 };
+
+/**
+ * The card, for whoever opened it. A viewer gets a read-only view; everyone else gets the
+ * editor. The role comes from the server and can change while the card is open (a writer made
+ * a viewer, or the owner's plan lapsing), and the dialog follows it on the spot.
+ */
+export function CardEditor(props: Props) {
+  return props.mode === "viewer" ? <CardView {...props} /> : <CardEdit {...props} />;
+}
+
+/** A card to read: the notes rendered with their checkboxes fixed, the files to open or download, and one button, Close. */
+function CardView({ card, lanes, vault, board, onClose }: Props) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const owner = useContext(AskOwnerContext);
+  useModal(ref, {
+    focus: (dialog) => dialog.focus(),
+    fallback: () => document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(card.id)}"]`),
+  });
+  const lane = lanes.find((l) => l.id === card.laneId)?.name ?? "";
+  return (
+    <dialog
+      ref={ref} className="card-dialog card-view" {...MODAL} aria-label={`Card: ${card.title}`} tabIndex={-1}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
+      onCancel={(e) => { e.preventDefault(); onClose(); }}
+      onClick={(e) => { if (e.target === ref.current) onClose(); }}
+    >
+      <div className="dialog-body">
+        <div className="dialog-top">
+          <h2 className="h">CARD</h2>
+          <span className="role-chip" data-role="viewer">view only</span>
+          <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={onClose}><IconClose /></button>
+        </div>
+        <h3 className="card-view-title">{card.title}</h3>
+        <AskBlock card={card} />
+        <div className="notes-read">
+          <div className="notes-head"><span id="notes-label">Notes</span></div>
+          {card.notes.trim()
+            ? <div className="field md-view static" role="group" aria-labelledby="notes-label"><Markdown text={card.notes} /></div>
+            : <p className="attachments-empty">No notes.</p>}
+        </div>
+        <dl className="card-facts">
+          <div><dt>Lane</dt><dd>{lane}</dd></div>
+          <div><dt>Due</dt><dd>{card.due ? new Date(`${card.due}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }) : "none"}</dd></div>
+          <div><dt>Tags</dt><dd>{card.tags?.length ? card.tags.map((t) => <span key={t} className="chip tag">#{t}</span>) : "none"}</dd></div>
+        </dl>
+        <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={() => {}} dropTarget={ref} board={board} readOnly />
+        <div className="dialog-meta">
+          created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+          <ByLine card={card} />
+        </div>
+      </div>
+      <div className="dialog-foot">
+        <span className="view-note">{owner ? `View only on ${owner}'s board.` : "View only."}</span>
+        <span className="spacer" />
+        <button className="btn primary" onClick={onClose}>Close</button>
+      </div>
+    </dialog>
+  );
+}
 
 /**
  * Edit a card. Save (or Enter in the title or tags) keeps the changes. The X and Esc throw them
@@ -40,8 +104,14 @@ type Props = {
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose }: Props) {
+function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  // A writer can't finish or delete a card while its question is open: that would end the
+  // agent's wait, which is the owner's call. Those controls aren't offered, and a line says why.
+  const owner = useContext(AskOwnerContext);
+  const held = mode === "writer" && !!card.ask;
+  const doneLane = doneLaneId(lanes);
+  const heldLane = (id: string) => held && id === doneLane && card.laneId !== doneLane;
   const [title, setTitle] = useState(card.title);
   const [notes, setNotes] = useState(card.notes);
   const [due, setDue] = useState(card.due ?? "");
@@ -152,9 +222,9 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
             <span className="move-label">Move to</span>
             {lanes.map((l) => (
               <button
-                key={l.id} type="button" className="btn move-to" disabled={l.id === card.laneId}
+                key={l.id} type="button" className="btn move-to" disabled={l.id === card.laneId || heldLane(l.id)}
                 aria-current={l.id === card.laneId ? "true" : undefined}
-                title={l.id === card.laneId ? `In ${l.name} now` : `Move to ${l.name}`}
+                title={l.id === card.laneId ? `In ${l.name} now` : heldLane(l.id) ? "Not until the owner answers the question" : `Move to ${l.name}`}
                 onClick={() => moveNow(l.id)}
               >{l.id === card.laneId && <span className="move-mark" aria-hidden="true">$</span>}{l.name}</button>
             ))}
@@ -162,6 +232,7 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
         )}
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={save} />
+        {held && <p className="held-note">{ASK_HOLDS(owner ?? "the board's owner")}</p>}
         <div className="notes-read">
           <div className="notes-head">
             <span id="notes-label">Notes</span>
@@ -204,7 +275,7 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
           <label>
             Lane
             <select className="field" value={lane} onChange={(e) => setLane(e.target.value)}>
-              {lanes.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {lanes.map((l) => <option key={l.id} value={l.id} disabled={heldLane(l.id)}>{l.name}</option>)}
             </select>
           </label>
           <label>
@@ -214,17 +285,18 @@ export function CardEditor({ card, lanes, knownTags, vault, filesNote, onSave, o
         </div>
         <TagField value={tags} onChange={setTags} known={knownTags} onEnter={save} />
         {filesNote ? <NoFiles note={filesNote} /> : (
-          <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} />
+          <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} board={board} />
         )}
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+          <ByLine card={card} />
         </div>
       </div>
       {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">
-        <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>
+        {!held && <button className="btn danger" onClick={() => { onDelete(); onClose(); }}><IconTrash />Delete</button>}
         <span className="spacer" />
-        {onToggleDone && (
+        {onToggleDone && (!held || isDone) && (
           <button className="btn" onClick={() => { save(); onToggleDone(); }}>
             {isDone ? <><IconUndo />Reopen</> : <><IconCheck />Mark done</>}
           </button>

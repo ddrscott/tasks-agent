@@ -15,6 +15,13 @@ export type AnswerFn = (cardId: string, input: { choice?: number; text?: string 
 /** How a card answers its question. Provided by App, so the buttons work wherever a card is drawn. */
 export const AskContext = createContext<AnswerFn>(() => {});
 
+/**
+ * Set to the owner's email when the board on screen is someone else's (// TEAM_BOARDS). A
+ * question is the owner's to answer, so a member sees it and its options as plain text, with a
+ * line saying who answers. There's nothing to tap, because the server would refuse the tap.
+ */
+export const AskOwnerContext = createContext<string | null>(null);
+
 // A card is draggable and opens on click, so its buttons keep those to themselves.
 const quiet = {
   onPointerDown: (e: React.SyntheticEvent) => e.stopPropagation(),
@@ -38,6 +45,7 @@ type BlockProps = {
 
 export function AskBlock({ card, compact, before }: BlockProps) {
   const answer = useContext(AskContext);
+  const owner = useContext(AskOwnerContext);
   const [other, setOther] = useState("");
   const ask = card.ask;
   const send = (input: { choice?: number; text?: string }) => { before?.(); answer(card.id, input); };
@@ -61,6 +69,23 @@ export function AskBlock({ card, compact, before }: BlockProps) {
   }, [armed]);
 
   if (!ask) return null;
+  if (owner) {
+    return (
+      <div className={`ask readonly${compact ? " compact" : ""}`}>
+        <div className="ask-q"><span className="ask-mark" aria-hidden="true">?</span>{ask.question}</div>
+        <ol className="ask-options">
+          {ask.options.map((o, i) => (
+            <li key={i} className={`ask-opt static${ask.recommended === i ? " rec" : ""}`}>
+              <span className="ask-n">{i + 1}</span>
+              <span className="ask-text">{o}</span>
+              {ask.recommended === i && <span className="ask-rec">{compact ? "rec" : "recommended"}</span>}
+            </li>
+          ))}
+        </ol>
+        <p className="ask-owner">{compact ? `Waiting on ${owner}` : `Only ${owner}, the board's owner, can answer this. The answer shows up on the card when they do.`}</p>
+      </div>
+    );
+  }
   function pick(i: number) {
     if (compact && armed !== i && matchMedia(TOUCH).matches) { setArmed(i); return; }
     setArmed(null);
