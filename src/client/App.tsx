@@ -23,6 +23,7 @@ import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
+import { MembersDialog, SharedBadge, SharedButton, SharedNote } from "./Members";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
@@ -101,6 +102,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [asksOpen, setAsksOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   // The assistant panel. Whoever opened or closed it gets it back that way ("todo-chat"). With no
   // choice saved it waits for the board (receive, below): open beside a board that has cards,
   // closed on an empty one, so a new account's first screen is // START_HERE and the lanes.
@@ -480,14 +482,17 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
               <IconChat /><span className="label">Assistant</span>
             </button>
+            {/* Your own board only. It shows once someone's invited (// TEAM_BOARDS). */}
+            {!sharedBoard && <SharedButton userId={me.id} onOpen={() => setMembersOpen(true)} />}
             <div className="anchor">
-              <button className="btn icon account-btn" title={me.email} aria-label="Account" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser /></button>
+              <button className="btn icon account-btn" title={me.email} aria-label="Account" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser />{!sharedBoard && <SharedBadge userId={me.id} />}</button>
               {menuOpen && (
                 <Popover menu label={`Account, ${me.email}`} onClose={() => setMenuOpen(false)}>
                   <div className="menu">
                     <div className="who">{me.email}</div>
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
+                    {!sharedBoard && <button role="menuitem" onClick={() => { setMenuOpen(false); setMembersOpen(true); }}>Members<SharedNote userId={me.id} /></button>}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
@@ -568,6 +573,9 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           view={board} raw={raw} vault={board.sealed ? vault : null} userId={me.id} email={me.email} stub={encStub} say={(t: string) => say(t)}
           onEnabled={unlockWith} onDisabling={expectPlain} onDisabled={lock} onClose={() => setEncOpen(false)}
         />
+      )}
+      {membersOpen && !sharedBoard && (
+        <MembersDialog me={me} onClose={() => setMembersOpen(false)} onEncryption={() => { setMembersOpen(false); setEncOpen(true); }} />
       )}
 
       {toast && (
