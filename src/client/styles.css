@@ -596,7 +596,9 @@ button.chip.tag:hover { border-color: var(--accent); }
 /* ============================================================ chat */
 
 .chat {
-  width: 360px; height: 100%;
+  /* A grid item is at least as tall as its content unless told otherwise, and a long transcript
+     would push the message box off the bottom of the screen instead of scrolling the log. */
+  width: 360px; height: 100%; min-height: 0;
   display: flex; flex-direction: column;
   background: var(--surface); border-left: var(--border-w) solid var(--line);
 }

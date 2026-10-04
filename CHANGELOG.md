@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two changes a few milliseconds apart could leave the board showing the older one until the next change
 - With the assistant open and more lanes than fit, the board no longer sits scrolled a little sideways with the first lane tight against the left edge
 - "Add a card" in an empty lane opens right under the lane's name instead of leaving a blank gap above the box
+- A long conversation with the assistant scrolls inside the panel instead of pushing the message box off the bottom of the screen
 
 ## [0.1.0] - 2026-10-03
 
