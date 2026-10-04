@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cleanTag, type Lane } from "../shared";
-import { formatBytes, uploadFile } from "./Attachments";
+import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
@@ -22,12 +22,14 @@ type Props = {
   knownTags: string[];
   /** Set on an encrypted board: files are encrypted before upload. */
   vault: Vault | null;
+  /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
+  filesNote?: string;
   /** Adds the card and resolves to its id. */
   onAdd(input: NewCardInput): Promise<string>;
   onClose(): void;
 };
 
-export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -49,7 +51,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
   // Dropping files on the dialog or pasting a screenshot queues them, the same as in the card editor.
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || filesNote) return;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
     const onOver = (e: DragEvent) => { if (hasFiles(e)) { e.preventDefault(); setOver(true); } };
     const onLeave = (e: DragEvent) => { if (!el.contains(e.relatedTarget as Node | null)) setOver(false); };
@@ -73,7 +75,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
       el.removeEventListener("drop", onDrop);
       el.removeEventListener("paste", onPaste);
     };
-  }, []);
+  }, [filesNote]);
 
   const dirty = !!(title.trim() || notes.trim() || due || tags.trim() || files.length);
   // The X and Esc ask before throwing away what was typed or queued. Once the card is added
@@ -148,6 +150,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
         </div>
         <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} />
         {error && <div className="dialog-error" role="alert">{error}</div>}
+        {filesNote ? <NoFiles note={filesNote} /> : (
         <div className={`attachments${over ? " over" : ""}`}>
           <div className="attachments-head">
             <span>Attachments</span>
@@ -170,6 +173,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
             </ul>
           )}
         </div>
+        )}
       </div>
       {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (
       <div className="dialog-foot">

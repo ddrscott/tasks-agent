@@ -49,6 +49,16 @@ export async function uploadFile(cardId: string, file: File, vault: Vault | null
   else await upload(cardId, file);
 }
 
+/** Where a card's files would go, on a board with nowhere to store them (the demo). */
+export function NoFiles({ note }: { note: string }) {
+  return (
+    <div className="attachments">
+      <div className="attachments-head"><span>Attachments</span></div>
+      <p className="attachments-empty">{note}</p>
+    </div>
+  );
+}
+
 type Props = {
   cardId: string;
   vault: Vault | null;

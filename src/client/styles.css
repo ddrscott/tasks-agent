@@ -1125,3 +1125,35 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
 .msg.notice { font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); padding: 8px 10px; }
 button.att-thumb { padding: 0; cursor: pointer; }
 button.att-name { background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+
+/* ============================================================ demo board */
+
+/* /tasks/demo (Demo.tsx): the strip under the top bar that says the board is a demo in this tab. */
+.demo-strip {
+  flex: none; display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+  padding: 8px 24px; background: var(--surface); border-bottom: var(--border-w) solid var(--line);
+}
+.demo-strip .h { flex: none; }
+.demo-strip p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.demo-short { display: none; }
+.demo-links { flex: none; display: flex; gap: 6px; }
+.demo-links .btn { height: 30px; text-decoration: none; }
+.demo-note { width: 300px; max-width: calc(100vw - 32px); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.demo-note p { margin: 0; font-size: 13px; line-height: 1.5; }
+.demo-note a { color: var(--accent-text); text-underline-offset: 3px; }
+
+@media (max-width: 900px) {
+  .demo-strip { padding: 8px 16px; }
+  .demo-more { display: none; }
+  .demo-short { display: inline; }
+}
+@media (max-width: 560px) {
+  .demo-strip { padding: 8px 12px; }
+  .demo-strip p { flex-basis: 60%; font-size: 12px; }
+  .demo-links { flex: 1 1 100%; }
+  .demo-links .btn { flex: 1; justify-content: center; }
+  .demo-reset { display: none; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .demo-links .btn { height: 36px; }
+}

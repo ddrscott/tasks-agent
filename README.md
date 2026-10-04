@@ -60,6 +60,21 @@ run ahead of whatever serves the zone.
   (`src/client/FirstRun.tsx`): connect an agent, tag a card `#agent`, answer its questions,
   with a link to `/tasks/connect`. It goes away with the first card, and an encrypted board
   never shows it.
+- **Demo board.** `/tasks/demo` is the real board UI for someone who hasn't signed up
+  (`src/client/Demo.tsx`). It renders before the sign-in check and never opens the agent or
+  presence sockets: the board is React state in the tab, changed through the same functions in
+  `src/shared.ts`, with undo and redo kept in memory. The seed board, its three sessions, and the
+  script one pretend agent follows are in `src/client/demoData.ts`. Answer its question and it
+  goes back to working, updates the card's `STATUS:` line, moves the card to Done, then picks up
+  the next card and asks again. Where the agent is comes from the board itself, so undoing an
+  answer puts it back to waiting. A strip under the top bar says it's a demo and nothing is
+  saved, with links to sign up and to Connect; a reload or Start over resets it. The only
+  request the page makes is the `GET /tasks/api/me` every page starts with. What needs an
+  account says so instead of failing: the Assistant button explains itself, and the card dialogs
+  show a note where Attachments go. There's no account menu, encryption, or billing there.
+  Search is the in-tab keyword search an encrypted board uses (`localSearch.ts`). The top bar is
+  written out again in `Demo.tsx`, so a button added to the real one in `App.tsx` needs adding
+  there too.
 - **Done = the last lane.** Cards carry no checkbox; the lane is the status. A ✓
   appears on hover or keyboard focus (a reopen arrow in the last lane), `x` does the
   same, and the card editor has Mark done / Reopen, which is the path on touch
