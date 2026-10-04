@@ -490,6 +490,8 @@ button.chip.tag:hover { border-color: var(--accent); }
 .quick-add .btn:hover { color: var(--ink); }
 .quick-add textarea { resize: none; display: block; min-height: 64px; }
 .quick-add .row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.quick-add .row .btn { width: auto; flex: none; }
+.quick-add .row .btn.primary, .quick-add .row .btn.primary:hover { color: var(--accent-ink); }
 .quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; }
 
 .add-lane { flex: 0 0 auto; }
@@ -604,6 +606,8 @@ dialog[open] { animation: pop .18s cubic-bezier(.2, .8, .2, 1); }
 .dialog-body label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 .dialog-body .title-input { font-size: 18px; font-weight: 600; font-family: var(--font-display); }
 .dialog-body textarea { field-sizing: content; flex: none; min-height: 110px; max-height: 55dvh; resize: vertical; }
+/* The title is a textarea so it can wrap (TitleInput.tsx), but it starts one line tall. */
+.dialog-body textarea.title-input { min-height: 0; max-height: 40dvh; resize: none; line-height: 1.3; }
 
 /* Notes, read as markdown. Clicking the box swaps in the textarea above. */
 .notes-read { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
@@ -911,7 +915,7 @@ a.att-name:hover { color: var(--accent); }
   .topbar { gap: 6px; padding: 12px; }
   .topbar .actions { gap: 4px; }
   .ask-opt { min-height: 42px; }
-  .search { width: 34px; padding: 0; justify-content: center; }
+  .search { width: 34px; padding: 0; justify-content: center; flex: none; }
   .search:focus-within { position: absolute; left: 12px; right: 12px; width: auto; padding: 0 10px; z-index: 20; }
   .search input { width: 0; }
   .search:focus-within input { width: auto; }
@@ -926,6 +930,12 @@ a.att-name:hover { color: var(--accent); }
   .topbar .actions { gap: 4px; }
   .theme-grid { grid-template-columns: repeat(2, 1fr); }
 
+  /* Theme is in the account menu on a phone; its button gives its place in the bar to bigger buttons. */
+  .theme-anchor > .btn { display: none; }
+  .popover:has(> .theme-grid) { position: fixed; top: 62px; left: 16px; right: 16px; }
+  /* Collapsed, the search box is just its icon. The input lies over the whole button so a tap focuses it. */
+  .search:not(:focus-within) input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+
   /* Card dialogs take the whole screen above the keyboard: no margin to spend on a phone, and Tags
      and the buttons stay reachable while typing. --vvh and --vvt come from viewport.ts. */
   dialog { max-height: calc(var(--vvh, 100dvh) - 32px); }
@@ -938,11 +948,35 @@ a.att-name:hover { color: var(--accent); }
   .card-dialog .dialog-body { padding: max(12px, env(safe-area-inset-top)) 12px 12px; gap: 10px; }
   .card-dialog .dialog-body label { gap: 4px; }
   .card-dialog .dialog-body textarea, .card-dialog .md-view { min-height: 84px; }
+  .card-dialog .dialog-body textarea.title-input { min-height: 0; }
   .card-dialog .dialog-row { gap: 8px; }
   .card-dialog .dialog-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
   /* Under 16px, iOS zooms the page when a field takes focus. */
   .dialog-body .field, .dialog-body .title-input { font-size: 16px; }
   .dialog-body .title-input { font-size: 17px; }
+}
+
+/* ============================================================ touch screens */
+
+@media (hover: none) and (pointer: coarse) {
+  /* Fingers need about 40px. */
+  .btn { height: 40px; }
+  .btn.icon, .search { width: 40px; }
+  .search { height: 40px; }
+  .lane-head { padding: 6px 4px 4px 14px; gap: 4px; }
+  .lane-head .btn { height: 40px; width: 40px; }
+  .lane-name { padding: 8px 4px; }
+  .quick-add .btn, .attachments-head .btn { height: 40px; }
+  .menu button { padding: 11px 10px; font-size: 14px; }
+  .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
+  .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }
+  /* Shortcut hints are for keyboards. */
+  .quick-add .hint, .add-lane-form .hint, .menu kbd, .search kbd { display: none; }
+  /* Under 16px, iOS zooms the page when a field takes focus. */
+  .field, .search input, .quick-add textarea, .composer textarea, input.lane-name { font-size: 16px; }
+}
+@media (hover: none) and (pointer: coarse) and (min-width: 561px) {
+  .search { width: min(320px, 34vw); }
 }
 
 /* ============================================================ end-to-end encryption */

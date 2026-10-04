@@ -8,6 +8,7 @@ import { cleanTag, type Lane } from "../shared";
 import { formatBytes, uploadFile } from "./Attachments";
 import { IconClip, IconClose, IconPlus } from "./icons";
 import { TagField } from "./TagField";
+import { TitleInput } from "./TitleInput";
 import type { Vault } from "./vault";
 
 export type NewCardInput = { laneId: string; title: string; notes: string; due: string | null; tags: string[] };
@@ -117,10 +118,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, onAdd, onClose }: Pro
     >
       <div className="dialog-body">
         <h2 className="h">NEW_CARD</h2>
-        <input
-          className="field title-input" value={title} maxLength={200} aria-label="Title" placeholder="What needs doing?" autoFocus
-          onChange={(e) => setTitle(e.target.value)} onKeyDown={submitOnEnter}
-        />
+        <TitleInput value={title} onChange={setTitle} onEnter={() => void add()} placeholder="What needs doing?" autoFocus />
         <label>
           Notes
           <textarea

@@ -8,7 +8,7 @@ export function ThemePicker({ current, onPick, open, setOpen }: { current: strin
   const [, force] = useState(0);
   const close = () => { applyTheme(current); setOpen(false); };
   return (
-    <div className="anchor">
+    <div className="anchor theme-anchor">
       <button className="btn icon" title="Theme (t)" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}><IconPalette /></button>
       {open && (
         <Popover onClose={close}>

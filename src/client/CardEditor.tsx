@@ -4,6 +4,7 @@ import { AskBlock } from "./Ask";
 import { Attachments } from "./Attachments";
 import { Markdown, toggleTask } from "./Markdown";
 import { TagField } from "./TagField";
+import { TitleInput } from "./TitleInput";
 import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
@@ -86,11 +87,7 @@ export function CardEditor({ card, lanes, knownTags, vault, onSave, onMove, onDe
       onClick={(e) => { if (e.target === ref.current) close(); }}
     >
       <div className="dialog-body">
-        <input
-          className="field title-input" value={title} maxLength={200} aria-label="Title"
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") close(); }}
-        />
+        <TitleInput value={title} onChange={setTitle} onEnter={close} />
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={close} />
         {editing ? (
