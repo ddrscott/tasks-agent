@@ -71,6 +71,8 @@ export function seedBoard(theme: string): Board {
   const first = PLOT[0];
   return {
     theme,
+    // Agents have been at this board for a while, so nothing on it says "No agent connected yet".
+    agentSeenAt: iso(2900 * MIN),
     lanes: [
       { id: "todo", name: "To do" },
       { id: "doing", name: "Doing" },
