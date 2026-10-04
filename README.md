@@ -551,8 +551,13 @@ strip, and the not-found page link to it too.
     finished and to stop waiting on it, the same rule that ends its claim (`// SESSIONS`).
   - **When it can't go on.** A refused tool call, a missing tool, a command that keeps
     failing: the rules have the agent call `ask_ceo` on the card with what it needs and options
-    that are whole actions ("I've allowed it in the terminal, try again", "Do it another way:
-    …", "Skip this card"), so it lands on the card face and in "need you". Writing blocked in
+    that are whole actions the owner can settle from the board, so it lands on the card face and
+    in "need you". The one it recommends has to work without the missing permission: "Do it
+    another way: …" with the tools it has (write the result into the card's notes, say), or
+    "Skip this card" when there's no other way. "I've allowed it in the terminal, try again" can
+    be offered, never recommended, and once per card: in a headless session, or one that only
+    runs what was approved up front, there's nothing in the terminal to allow, so the retry is
+    refused again and the agent would ask the same thing twice. Writing blocked in
     the notes isn't enough, because nobody sees it. It can't cover a permission
     prompt that's still open in an interactive terminal, since the agent is stopped inside the
     tool call; the Sessions hooks report that one as a session that needs input.
