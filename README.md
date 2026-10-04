@@ -78,8 +78,8 @@ run ahead of whatever serves the zone.
   the newest release, and in all) are counted from `CHANGELOG.md` when the build starts
   (`counts` in `vite.config.ts`); never type one in. Nothing on the page claims users, stars,
   logos, or quotes we don't have, and a row goes away if it stops being true. The copy holds to
-  the same rule: an answer reaches an agent on the event feed right away and any other agent
-  the next time it reads the board, so the page says both.
+  the same rule: an agent in any MCP client holds in `wait_for_answer` and gets the answer
+  within a few seconds, so the page says that and doesn't name the event feed.
 - **Pricing has an address.** `/tasks/pricing` is the landing page scrolled to `// PRICING`,
   signed in or out. Signed in, a "signed in as" card with a link to the board stands where the
   form would (`SignedInCard`).
@@ -665,7 +665,8 @@ When an agent needs you to decide something, it asks on the card and you answer 
   Taking `#needs-ceo` off by hand clears the question without an answer.
 - **The agent waits for it.** `wait_for_answer` over MCP holds for up to 30 seconds and
   returns as soon as one of the cards it was given is answered, with that card in full. It also
-  returns when a card was deleted or its question was cleared by hand. The working rules have
+  returns when a card was deleted, was moved to the last lane with its question still open, or
+  had its question cleared by hand. The working rules have
   an agent call it in a loop for up to 10 minutes (`// CONNECT_AN_AGENT`). No shell, no feed.
 - **The feed says it too.** The `answered` event on the feed (`// AGENT_EVENTS`) carries `answer`
   and `question`, so the agent acts on it without reading the card:
