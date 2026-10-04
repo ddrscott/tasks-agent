@@ -152,7 +152,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   }, [swap]);
 
   const actions: Actions = useMemo(() => ({
-    addCard: (laneId, title, top) => act("Add card", (b) => ops.addCard(b, { title, laneId, top }).board),
+    addCard: (laneId, title, top) => act("Add card", (b) => ops.addCard(b, { ...ops.splitTitleTags(title), laneId, top }).board),
     moveCard: (id, laneId, index) => act("Move card", (b) => ops.moveCard(b, id, laneId, index)),
     addLane: (name) => act("Add lane", (b) => ops.addLane(b, name).board),
     renameLane: (id, name) => act("Rename lane", (b) => ops.renameLane(b, id, name)),

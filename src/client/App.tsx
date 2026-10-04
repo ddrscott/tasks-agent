@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, tagsByUse, tidyTags, type Board, type Card } from "../shared";
+import { clean, splitTitleTags, tagsByUse, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -299,7 +299,11 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const knownTags = useMemo(() => (board ? tagsByUse(board) : []), [board]);
 
   const actions: Actions = useMemo(() => ({
-    addCard: async (laneId, title, top) => agent.stub.addCard(laneId, await out(clean(title, 200)), top),
+    // Quick add: "Write a haiku #agent" is the title plus a tag. It's split here, in the tab, before anything is sealed.
+    addCard: async (laneId, typed, top) => {
+      const { title, tags } = splitTitleTags(typed);
+      return agent.stub.addCard(laneId, await out(clean(title, 200)), top, tags.length ? { tags: await Promise.all(tags.map(out)) } : undefined);
+    },
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index),
     addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },
     renameLane: async (id, name) => { laneClash(name, id); return agent.stub.renameLane(id, await out(clean(name, 40))); },

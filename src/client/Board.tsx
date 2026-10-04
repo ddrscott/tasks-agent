@@ -496,7 +496,7 @@ function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; set
   return (
     <div className="quick-add">
       <textarea
-        ref={ref} className="field" rows={2} placeholder={`What needs doing? (paste a list to add several)`} value={text} aria-label={`New card in ${lane.name}`}
+        ref={ref} className="field" rows={2} placeholder="What needs doing? End with #agent to tag it, or paste a list." value={text} aria-label={`New card in ${lane.name}`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
