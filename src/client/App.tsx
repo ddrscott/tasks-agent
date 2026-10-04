@@ -25,6 +25,7 @@ import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
+import { useTitle } from "./title";
 
 type Me = { email: string; id: string; model: string };
 type Page = "board" | "connect" | "privacy" | "terms";
@@ -71,6 +72,7 @@ export function App() {
 }
 
 function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; onConnect(hash?: string): void }) {
+  useTitle("Board");
   async function signOut() {
     await fetch(api("/api/auth/logout"), { method: "POST" });
     onSignOut();

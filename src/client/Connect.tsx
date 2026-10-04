@@ -8,6 +8,7 @@ import eventsScript from "../../scripts/tasks-events.mjs?raw";
 import presenceScript from "../../scripts/tasks-presence.mjs?raw";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
+import { useTitle } from "./title";
 import { IconCheck, IconTrash } from "./icons";
 
 // Everything about working the board with outside agents, at /tasks/connect: how to connect
@@ -195,6 +196,7 @@ function DownloadButton({ name, text }: { name: string; text: string }) {
 }
 
 export function Connect({ onBack }: { onBack(): void }) {
+  useTitle("Connect an agent");
   const url = `${location.origin}${BASE}/mcp`;
   const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
   const [name, setName] = useState("");
