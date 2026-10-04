@@ -122,6 +122,39 @@ section("access rules (pure)");
   ok("a look-alike letter is refused", inviteEmail("аna@example.com") === null && inviteEmail("ana@exаmple.com") === null);
   ok("not-an-email is refused", inviteEmail("ana") === null && inviteEmail("ana@") === null && inviteEmail("a b@example.com") === null && inviteEmail(null) === null && inviteEmail("ana@example") === null);
 
+  // What a member may grow the board to, checked on the result of every change they make.
+  const L = rules.MEMBER_LIMITS;
+  const withCard = (patch) => ({ ...b, cards: b.cards.map((c) => (c.id === card.id ? { ...c, ...patch } : c)) });
+  const code = (m) => rules.errorCode(m ?? "");
+  ok("a member's title is held to 200 characters", memberChangeError(b, withCard({ title: "t".repeat(L.title) })) === null && code(memberChangeError(b, withCard({ title: "t".repeat(L.title + 1) }))) === "too_big");
+  ok("a member's notes are held to 4,000 characters", memberChangeError(b, withCard({ notes: "n".repeat(L.notes) })) === null && code(memberChangeError(b, withCard({ notes: "n".repeat(L.notes + 1) }))) === "too_big");
+  ok("a member's tags are held to 10 of 32 characters", memberChangeError(b, withCard({ tags: Array.from({ length: L.tags }, (_, i) => `t${i}`) })) === null
+    && code(memberChangeError(b, withCard({ tags: Array.from({ length: L.tags + 1 }, (_, i) => `t${i}`) }))) === "too_big" && code(memberChangeError(b, withCard({ tags: ["x".repeat(L.tag + 1)] }))) === "too_big");
+  ok("a member's due date has to be a date", code(memberChangeError(b, withCard({ due: "x".repeat(500) }))) === "too_big" && memberChangeError(b, withCard({ due: "2026-10-04" })) === null);
+  // Text that looks encrypted skips the trimming every edit gets (tidy in shared.ts). The guard checks the result instead.
+  const sealedLooking = `eyJhbGciOiJkaXIifQ..${"A".repeat(16)}.${"B".repeat(20_000)}.${"C".repeat(22)}`;
+  const viaOps = shared.updateCard(b, card.id, { title: sealedLooking });
+  ok("text dressed up as ciphertext doesn't get a member past the limits", viaOps.cards[0].title.length > 20_000 && code(memberChangeError(b, viaOps)) === "too_big" && code(memberChangeError(b, shared.updateCard(b, card.id, { notes: sealedLooking }))) === "too_big");
+  ok("a card the member didn't touch isn't measured", memberChangeError(withCard({ notes: "n".repeat(9000) }), shared.addCard(withCard({ notes: "n".repeat(9000) }), { title: "Two" }).board) === null);
+  const many = (n, notes = "") => ({ ...b, cards: Array.from({ length: n }, (_, i) => ({ ...card, id: `c${i}`, notes })) });
+  const full = many(L.cards);
+  ok(`a member can't add a card past ${L.cards}`, memberChangeError(many(L.cards - 1), shared.addCard(many(L.cards - 1), { title: "last" }).board) === null && code(memberChangeError(full, shared.addCard(full, { title: "one more" }).board)) === "board_full");
+  ok("on a full board a member can still edit, move, and delete", memberChangeError(full, shared.updateCard(full, "c1", { title: "edited" })) === null && memberChangeError(full, shared.moveCard(full, "c1", full.lanes[1].id, 0)) === null && memberChangeError(full, shared.deleteCards(full, ["c1"])) === null);
+  const heavy = many(300, "n".repeat(3600));
+  ok("a member can't grow a board past 1 MB", JSON.stringify(heavy).length > L.boardBytes && code(memberChangeError(heavy, shared.addCard(heavy, { title: "more" }).board)) === "board_full" && code(memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "n".repeat(3700) }))) === "board_full");
+  ok("and can still shrink one that's over", memberChangeError(heavy, shared.deleteCards(heavy, ["c1"])) === null && memberChangeError(heavy, shared.updateCard(heavy, "c1", { notes: "short" })) === null);
+  ok("the owner isn't held to a member's limits", !throws(() => assertMayChange("owner", null, full, shared.addCard(full, { title: "one more" }).board)));
+
+  // The token bucket every member frame is charged to.
+  const { spendToken, MEMBER_RATE: R } = rules;
+  let bucket; let passed0 = 0; let refused0 = 0; let flood0 = false;
+  for (let i = 0; i < R.burst + R.strikes; i++) { const r = spendToken(bucket, 1000); bucket = r.bucket; if (r.ok) passed0++; else refused0++; flood0 = r.flood; }
+  ok(`a burst gets ${R.burst} frames through and the rest are refused`, passed0 === R.burst && refused0 === R.strikes);
+  ok(`${R.strikes} refusals in a row is a flood`, flood0 === true);
+  ok(`the bucket refills at ${R.perSecond} a second`, spendToken({ ...bucket }, 2000).ok === true && (() => { let b2 = { ...bucket }; let n = 0; for (let i = 0; i < 20; i++) { const r = spendToken(b2, 2000); b2 = r.bucket; if (r.ok) n++; } return n; })() === R.perSecond);
+  ok("a member who goes quiet is forgiven", (() => { const r = spendToken({ ...bucket }, 1000 + (R.burst / R.perSecond) * 1000 + 1); return r.ok && r.bucket.strikes === 0; })());
+  ok("an error's code comes off before a person reads it", rules.plainError(rules.SLOW_DOWN).startsWith("Slow down.") && rules.errorCode(rules.SLOW_DOWN) === "slow_down" && rules.plainError("No code here") === "No code here");
+
   const by = { email: "w@example.com" };
   const b2 = shared.addCard(b, { title: "Two" }).board;
   const stamped = shared.stampBy(b, b2, by);
@@ -180,17 +213,40 @@ async function account(name) {
   return { name, email, cookie, id: me.data.id };
 }
 
+// The board charges every frame a member sends to a token bucket (MEMBER_RATE in
+// src/member-rules.ts). This script sends them faster than a person could, so it keeps the same
+// count, a little on the safe side, and waits when it would run dry. The flood section goes
+// around it on purpose.
+const pacers = new Map();
+async function pace(who, n = 1) {
+  if (!who?.id) return;
+  const { burst, perSecond } = rules.MEMBER_RATE;
+  const p = pacers.get(who.id) ?? { tokens: burst - 6, at: Date.now() };
+  pacers.set(who.id, p);
+  for (;;) {
+    const now = Date.now();
+    p.tokens = Math.min(burst - 6, p.tokens + ((now - p.at) / 1000) * perSecond * 0.9);
+    p.at = now;
+    if (p.tokens >= n) { p.tokens -= n; return; }
+    await sleep(Math.ceil(((n - p.tokens) / (perSecond * 0.9)) * 1000) + 20);
+  }
+}
+
 /** Open the board socket and keep every frame. Resolves either way; `status` is the HTTP status of a refused upgrade. */
-function open(who, { board, path = "/agent", headers = {}, extra = "" } = {}) {
+async function open(who, { board, path = "/agent", headers = {}, extra = "", unpaced = false } = {}) {
+  const member = !!board && !!who && board !== who.id && !unpaced;
+  if (member) await pace(who);
   return new Promise((resolve) => {
     const url = `${WS_BASE}/tasks${path}?_pk=${randomBytes(6).toString("hex")}${board ? `&board=${board}` : ""}${extra}`;
     const ws = new WebSocket(url, { headers: { ...(who?.cookie ? { Cookie: who.cookie } : {}), ...headers }, handshakeTimeout: 15_000 });
     const frames = [];
+    let bytes = 0;
     let wake = [];
     const poke = () => { const w = wake; wake = []; for (const f of w) f(); };
     let done = false;
     const sock = {
-      ws, frames, status: null, closed: null, opened: false,
+      ws, frames, status: null, closed: null, closedAt: null, opened: false,
+      get bytes() { return bytes; },
       /** The first frame matching `pred`, already seen or arriving within `ms`. Null on timeout. */
       async wait(pred, ms = 5000, from = 0) {
         const end = Date.now() + ms;
@@ -210,6 +266,7 @@ function open(who, { board, path = "/agent", headers = {}, extra = "" } = {}) {
       send(frame) { try { ws.send(typeof frame === "string" ? frame : JSON.stringify(frame)); return true; } catch { return false; } },
       /** Call a method the way the SDK's client does. */
       async rpc(method, args = [], ms = 8000) {
+        if (member) await pace(who);
         const id = randomBytes(6).toString("hex");
         const from = frames.length;
         if (!sock.send({ type: "rpc", id, method, args })) return { success: false, error: "socket closed", closed: true };
@@ -222,10 +279,16 @@ function open(who, { board, path = "/agent", headers = {}, extra = "" } = {}) {
     };
     const finish = () => { if (!done) { done = true; resolve(sock); } };
     ws.on("open", () => { sock.opened = true; finish(); });
-    ws.on("message", (d) => { let f; try { f = JSON.parse(d.toString()); } catch { f = { raw: d.toString() }; } frames.push(f); poke(); });
+    ws.on("message", (d) => {
+      bytes += d.length;
+      let f; try { f = JSON.parse(d.toString()); } catch { f = { raw: d.toString() }; }
+      // When it arrived, kept off to the side so comparing frames as JSON still works.
+      if (f && typeof f === "object") Object.defineProperty(f, "_at", { value: Date.now(), enumerable: false });
+      frames.push(f); poke();
+    });
     ws.on("unexpected-response", (_req, res) => { sock.status = res.statusCode; res.resume(); finish(); });
     ws.on("error", () => finish());
-    ws.on("close", (code, reason) => { sock.closed = { code, reason: reason.toString() }; poke(); finish(); });
+    ws.on("close", (code, reason) => { sock.closed = { code, reason: reason.toString() }; sock.closedAt = Date.now(); poke(); finish(); });
   });
 }
 
@@ -275,7 +338,11 @@ const revoked = await account("revoked");
 const late = await account("late");
 const decliner = await account("decliner");
 const encOwner = await account("enc");
-ok("ten accounts signed in", [owner, writer, viewer, stranger, removed, leaver, revoked, late, decliner, encOwner].every((u) => /^[0-9a-f]{32}$/.test(u.id)));
+// A board of their own for the flood section, so nothing it does lands on the board above.
+const floodOwner = await account("floodowner");
+const flooder = await account("flooder");
+const watcher = await account("watcher");
+ok("thirteen accounts signed in", [owner, writer, viewer, stranger, removed, leaver, revoked, late, decliner, encOwner, floodOwner, flooder, watcher].every((u) => /^[0-9a-f]{32}$/.test(u.id)));
 
 // ---------- a WebSocket upgrade anywhere but the three socket addresses ----------
 
@@ -507,6 +574,7 @@ section("a viewer changes nothing");
   }
   // The SDK's own frames, sent raw.
   const mark = viewerSock.frames.length;
+  await pace(viewer, 10);
   viewerSock.send({ type: "cf_agent_state", state: { lanes: [], cards: [], theme: "paper" } });
   viewerSock.send({ type: "cf_agent_chat_clear" });
   viewerSock.send({ type: "cf_agent_chat_messages", messages: [{ id: "x", role: "user", parts: [{ type: "text", text: "planted by a viewer" }] }] });
@@ -644,8 +712,8 @@ section("questions, MCP, the event feed, presence");
 
 section("attachments");
 {
-  const up = (who, extra, body = new TextEncoder().encode("hello from the check")) =>
-    call(who, "POST", `/api/attachments?${extra}`, body, { "Content-Type": "text/plain", "X-Filename": "note.txt", "Content-Length": String(body.length) });
+  const up = async (who, extra, body = new TextEncoder().encode("hello from the check")) =>
+    (extra.includes("board=") && who !== stranger && await pace(who), call(who, "POST", `/api/attachments?${extra}`, body, { "Content-Type": "text/plain", "X-Filename": "note.txt", "Content-Length": String(body.length) }));
   const ownerUp = await up(owner, `card=${seed}`);
   const fileId = ownerUp.data?.attachment?.id;
   ok("the owner attaches a file", ownerUp.status === 200 && /^a[0-9a-f]{16}$/.test(fileId ?? ""), ownerUp);
@@ -766,6 +834,128 @@ section("open sockets follow membership");
   ok("and gets nothing after that", leaverSock.frames.length === leaverFrames);
   ok("and can't call anything on it", (await leaverSock.rpc("addCard", [lanes[0].id, "Ghost"], 1500)).success === false && (await leaverSock.rpc("search", [{ query: "seed" }], 1500)).success === false);
   ok("and they can't come back without a new invite", refused(await open(leaver, { board: owner.id }), 404));
+}
+
+// ---------- a member who floods ----------
+
+section("a member who floods");
+{
+  const { burst, perSecond, strikes } = rules.MEMBER_RATE;
+  const codeOf = (r) => rules.errorCode(r?.error ?? "");
+  makePro(floodOwner);
+  for (const [u, role] of [[flooder, "writer"], [watcher, "viewer"]]) {
+    const r = await invite(floodOwner, u.email, role);
+    await call(u, "POST", "/api/invites/accept", { token: tokenOf(r) });
+  }
+  const fo = await open(floodOwner);
+  await fo.wait((f) => f.type === "cf_agent_state");
+  const lane = fo.state().lanes[0].id;
+  const watch = await open(watcher, { board: floodOwner.id });
+  await watch.wait((f) => f.type === "cf_agent_state");
+  const w = await open(flooder, { board: floodOwner.id, unpaced: true });
+  await w.wait((f) => f.type === "cf_agent_state");
+
+  // 400 writes as fast as the socket takes them, each with the biggest notes a card holds.
+  const N = 400;
+  const notes = "x".repeat(4000);
+  const b0 = watch.bytes; const f0 = watch.frames.length; const mark = w.frames.length; const t0 = Date.now();
+  for (let i = 0; i < N; i++) w.send({ type: "rpc", id: `flood${i}`, method: "addCard", args: [lane, `flood ${i}`, false, { notes }] });
+  const shut = await w.waitClosed(30_000);
+  const took = (w.closedAt ?? Date.now()) - t0;
+  await sleep(1000);
+  const replies = w.frames.slice(mark).filter((f) => f.type === "rpc");
+  const through = replies.filter((r) => r.success).length;
+  const slowed = replies.filter((r) => !r.success);
+  const pushes = watch.frames.slice(f0).filter((f) => f.type === "cf_agent_state").length;
+  const pushed = watch.bytes - b0;
+  console.log(`     … ${N} writes sent: ${through} got through, ${slowed.length} refused, socket closed after ${took} ms; a watching member was sent the board ${pushes} times, ${pushed.toLocaleString("en-US")} bytes`);
+  ok(`of ${N} writes in a burst, no more than the bucket's ${burst} get through`, through > 0 && through <= burst, through);
+  ok("the rest are refused with slow_down, in words a person can read", slowed.length >= strikes && slowed.every((r) => codeOf(r) === "slow_down" && rules.plainError(r.error).startsWith("Slow down.")), slowed[0]);
+  ok(`a socket still flooding after ${strikes} refusals is closed (4429)`, shut?.code === 4429, shut);
+  ok("the board holds what got through and nothing more", fo.state().cards.length === through, [fo.state().cards.length, through]);
+  ok("a watching member was sent the board a handful of times, not once per write", pushes >= 1 && pushes <= 6 && pushed < 2_000_000, [pushes, pushed]);
+
+  // Straight back in: the bucket is per member, not per socket, so a new socket buys nothing.
+  const back = await open(flooder, { board: floodOwner.id, unpaced: true });
+  const mark2 = back.frames.length;
+  if (back.opened) for (let i = 0; i < 60; i++) back.send({ type: "rpc", id: `again${i}`, method: "addCard", args: [lane, `again ${i}`] });
+  const shut2 = back.opened ? await back.waitClosed(10_000) : { code: 4429 };
+  const through2 = back.frames.slice(mark2).filter((f) => f.type === "rpc" && f.success).length;
+  ok("reconnecting doesn't refill the bucket: a few calls, then closed again", through2 <= 12 && (shut2?.code === 4429 || !back.opened), [through2, shut2, how(back)]);
+
+  console.log(`     … waiting ${burst / perSecond + 1}s for the flooder's bucket to refill`);
+  await sleep((burst / perSecond + 1) * 1000);
+  pacers.delete(flooder.id);
+  const calm = await open(flooder, { board: floodOwner.id });
+  await calm.wait((f) => f.type === "cf_agent_state");
+  const one = await calm.rpc("addCard", [lane, "After the flood"]);
+  const t1 = Date.now();
+  const seen = await watch.wait((f) => f.type === "cf_agent_state" && f.state.cards.some((c) => c.id === one.result), 3000);
+  ok("after a quiet spell the member writes again", one.success === true, one);
+  ok("and a single change still reaches other members promptly", !!seen && seen._at - t1 < 1000, seen ? seen._at - t1 : "never");
+
+  // Size limits, live. Each is one frame, so the bucket isn't what refuses them.
+  const sealedLooking = `eyJhbGciOiJkaXIifQ..${"A".repeat(16)}.${"B".repeat(6000)}.${"C".repeat(22)}`;
+  const longTitle = await calm.rpc("updateCard", [one.result, { title: sealedLooking }]);
+  ok("a title dressed up as ciphertext is still held to 200 characters", longTitle.success === false && codeOf(longTitle) === "too_big", longTitle);
+  const longNotes = await calm.rpc("addCard", [lane, "Long notes", false, { notes: sealedLooking }]);
+  ok("and notes to 4,000", longNotes.success === false && codeOf(longNotes) === "too_big", longNotes);
+  ok("the card is as it was", fo.state().cards.find((c) => c.id === one.result)?.title === "After the flood");
+  const big = await open(flooder, { board: floodOwner.id });
+  await big.wait((f) => f.type === "cf_agent_state");
+  big.send({ type: "rpc", id: "big", method: "addCard", args: [lane, "big", false, { notes: "x".repeat(40_000) }] });
+  const bigShut = await big.waitClosed(5000);
+  ok("a frame over 32 KB closes the socket (1009) and adds nothing", bigShut?.code === 1009 && !fo.state().cards.some((c) => c.title === "big"), bigShut);
+
+  // The card ceiling. The owner fills the board in one step; a member can't add to it.
+  const max = rules.MEMBER_LIMITS.cards;
+  await fo.rpc("clearLane", [lane]);
+  const batch = (from, n) => ({ name: "add_cards", input: { cards: Array.from({ length: n }, (_, i) => ({ title: `filler ${from + i}` })) } });
+  const filled = await fo.rpc("applyLocal", [{ text: "fill the board", calls: [batch(0, 250), batch(250, 250), batch(500, 250), batch(750, 250)], engine: "needle-rs", confidence: 1 }], 30_000);
+  await fo.wait((f) => f.type === "cf_agent_state" && f.state.cards.length === max, 10_000);
+  ok(`the owner fills the board to ${max} cards`, filled.success === true && fo.state().cards.length === max, fo.state().cards.length);
+  const over = await calm.rpc("addCard", [lane, "One too many"]);
+  ok(`a member can't add card ${max + 1}`, over.success === false && codeOf(over) === "board_full", over);
+  const bulk = await calm.rpc("applyLocal", [{ text: "add", calls: [batch(2000, 50)], engine: "needle-rs", confidence: 1 }]);
+  ok("or fifty through the assistant", bulk.success === true && bulk.result.outcomes[0].ok === false, bulk.result?.outcomes);
+  const victim = fo.state().cards[0].id;
+  ok("a member can still delete on a full board", (await calm.rpc("deleteCard", [victim])).success === true);
+  ok("and then add one", (await calm.rpc("addCard", [lane, "Fits again"])).success === true && (await calm.rpc("addCard", [lane, "Doesn't"])).success === false);
+  ok("the owner can go past it", (await fo.rpc("addCard", [lane, "Owner's own"])).success === true);
+  await fo.rpc("clearLane", [lane]);
+
+  // Tabs. A fifth socket for one member closes their oldest.
+  const tabs = [];
+  for (let i = 0; i < 4; i++) { const t = await open(watcher, { board: floodOwner.id }); await t.wait((f) => f.type === "cf_agent_state"); tabs.push(t); }
+  const oldest = await watch.waitClosed(5000);
+  await sleep(300);
+  const stillOpen = [watch, ...tabs].filter((t) => !t.closed).length;
+  ok("one member holds four sockets on a board; a fifth closes the oldest", oldest?.code === 1008 && stillOpen === 4, [oldest, stillOpen]);
+
+  // The access check a socket remembers. A demotion the board is told about holds from the very
+  // next frame; one it's never told about holds within two seconds for a socket that's sending.
+  ok("the writer writes, so their access was just checked", (await calm.rpc("addCard", [lane, "Before the demotion"])).success === true);
+  const told = calm.frames.length;
+  const tRole = Date.now();
+  await call(floodOwner, "POST", "/api/board/members/role", { email: flooder.email, role: "viewer" });
+  const atOnce = await calm.rpc("addCard", [lane, "Right after the demotion"]);
+  const frame = await calm.wait((f) => f.type === "tasks_access" && f.effective === "viewer", 3000, told);
+  console.log(`     … demotion: told in ${frame ? frame._at - tRole : "?"} ms`);
+  ok("a demotion holds on the very next frame, remembered check or not", atOnce.success === false && !!frame && frame._at - tRole < 2000, atOnce);
+  await call(floodOwner, "POST", "/api/board/members/role", { email: flooder.email, role: "writer" });
+  ok("promoted again, they write", (await calm.rpc("addCard", [lane, "Writer again"])).success === true);
+  d1(`UPDATE board_members SET role = 'viewer' WHERE owner_id = ${q(floodOwner.id)} AND member_email = ${q(flooder.email)}`);
+  const tQuiet = Date.now();
+  let landed = null;
+  while (Date.now() - tQuiet < 6000) {
+    const r = await calm.rpc("addCard", [lane, "After a demotion nobody announced"]);
+    if (!r.success) { landed = Date.now() - tQuiet; break; }
+    await sleep(250);
+  }
+  console.log(`     … a demotion written straight to the database, no signal: refused after ${landed} ms`);
+  ok("a demotion the board was never told about holds within the 2-second cache", landed !== null && landed < 2600, landed);
+
+  for (const t of [fo, calm, back, big, w, watch, ...tabs]) t.close();
 }
 
 section("open sockets follow the owner's plan");

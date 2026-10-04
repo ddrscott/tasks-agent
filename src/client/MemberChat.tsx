@@ -5,6 +5,7 @@
 // an edit, under the writer's own role. The conversation is kept in this tab and nowhere else;
 // the server writes nothing a member says into the owner's chat.
 
+import { plainError } from "../member-rules";
 import { useEffect, useRef, useState } from "react";
 import { IconClose, IconSend } from "./icons";
 import { useNeedle } from "./needle";
@@ -65,7 +66,7 @@ export function MemberChat({ agent, board, owner, open, onClose, inputRef }: Pro
       for (const o of res.outcomes) say({ kind: o.ok ? "ok" : "fail", text: o.summary });
     } catch (e) {
       // The server's refusal, in its own words: view only, or a change that's the owner's to make.
-      say({ kind: "fail", text: (e as Error).message || "That didn't work." });
+      say({ kind: "fail", text: plainError((e as Error).message ?? "") || "That didn't work." });
     } finally {
       setBusy(false);
     }

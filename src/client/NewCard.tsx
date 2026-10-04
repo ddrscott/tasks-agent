@@ -3,6 +3,7 @@
 // card. Files wait in the dialog and upload once the card exists to hang them on.
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
+import { plainError } from "../member-rules";
 import { useEffect, useRef, useState } from "react";
 import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
@@ -117,7 +118,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
         setAddedId(id);
       }
     } catch (e) {
-      setError((e as Error).message || "That didn't save. Try again.");
+      setError(plainError((e as Error).message ?? "") || "That didn't save. Try again.");
       setBusy(false);
       return;
     }

@@ -35,6 +35,7 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
+import { plainError } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string };
@@ -482,7 +483,8 @@ function Workspace({ me, onSignOut, onConnect, shared, boards, onSwitch, onLost,
   // A change the server turned down: say why in its words, and put the board back the way the
   // server has it, since a drag had already moved the card on screen.
   const refused = useCallback((e: unknown) => {
-    say(e instanceof Error && e.message ? e.message : "That didn't work.", false, DESTRUCTIVE_TOAST_MS);
+    // The server's own sentence, without the code some of them start with ("[slow_down] Slow down. …").
+    say(e instanceof Error && e.message ? plainError(e.message) : "That didn't work.", false, DESTRUCTIVE_TOAST_MS);
     if (newest.current && !dragging.current) setBoard(newest.current);
   }, [say]);
 

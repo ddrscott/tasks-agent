@@ -13,8 +13,8 @@ import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, syncSharing } from "./members";
 import {
-  assertMayChange, CLOSE_NO_ACCESS, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  type Access, type AccessFrame, type AccessReason, type Effective,
+  assertMayChange, CLOSE_FLOOD, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_MEMBER, H_USER, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  plainError, SLOW_DOWN, spendToken, type Access, type AccessFrame, type AccessReason, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -54,10 +54,33 @@ const callers = new AsyncLocalStorage<Caller>();
 // whose attachment they wrote, so nothing they broadcast (chat messages, stream chunks, MCP
 // server lists, state) reaches a member, and no frame a member sends reaches their handlers.
 const MEMBER_TAG = "tasks-member";
-const MAX_SOCKETS_PER_MEMBER = 8;
-const MEMBER_FRAME_MAX = 256 * 1024;
-/** What a member's socket remembers between messages. `at` is when its access was last checked against D1. */
-type MemberMeta = { tm: 1; id: string; email: string; effective: Effective; reason: AccessReason; role: Access["role"]; plan: Access["plan"]; ownerEmail: string | null; at: number };
+/** One person, a handful of tabs. A fifth closes the oldest. */
+const MAX_SOCKETS_PER_MEMBER = 4;
+/** Every member's sockets on one board together. Past it, a new one is refused until some close. */
+const MAX_MEMBER_SOCKETS = 48;
+/** The biggest frame a member may send. A card's notes are 4,000 characters; a local assistant turn is eight small calls. */
+const MEMBER_FRAME_MAX = 32 * 1024;
+/**
+ * How long a member's access check is trusted before D1 is asked again. Without it every frame
+ * costs two D1 reads, so a flood of frames is a flood of reads. It's only ever trusted when it
+ * was made after the last membership signal (`epoch`, below), so a removal or a role change
+ * still holds from the member's very next frame.
+ */
+const ACCESS_CACHE_MS = 2000;
+/** The least time between two pushes of the board to members' sockets: five a second, however fast it changes. */
+const PUSH_INTERVAL_MS = 200;
+/**
+ * What a member's socket remembers between messages. `at` is when its access was last read
+ * from D1, and `ep` is the membership epoch that read started under.
+ */
+type MemberMeta = { tm: 1; id: string; email: string; effective: Effective; reason: AccessReason; role: Access["role"]; plan: Access["plan"]; ownerEmail: string | null; at: number; ep: number };
+
+/** The id of an RPC frame, read without parsing it: a refused frame shouldn't cost a JSON.parse of 32 KB. */
+function rpcIdOf(message: string): string | null {
+  const head = message.slice(0, 300);
+  if (!head.includes('"rpc"')) return null;
+  return /"id"\s*:\s*"([^"\\]{1,100})"/.exec(head)?.[1] ?? null;
+}
 
 function memberMeta(ws: WebSocket): MemberMeta | null {
   try {
@@ -172,6 +195,24 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return JSON.stringify(frame);
   }
 
+  /**
+   * The membership epoch. It moves the moment the Worker says membership or the owner's plan
+   * changed (membersChanged), before anything is awaited, and every access check a socket
+   * remembers is stamped with the epoch it started under. A remembered check from an older
+   * epoch is never trusted: the next frame asks D1 again. It starts at the clock so nothing
+   * remembered by an earlier instance of this object can match.
+   */
+  private epoch = Date.now();
+  /** Token buckets, one per member id (spendToken in member-rules.ts). In memory: an idle board forgets them, and that's fine. */
+  private buckets = new Map<string, Bucket>();
+
+  /** Spend one of a member's tokens. */
+  private spend(memberId: string) {
+    const r = spendToken(this.buckets.get(memberId), Date.now());
+    this.buckets.set(memberId, r.bucket);
+    return r;
+  }
+
   private recheckMs(): number {
     const n = Number((this.env as { MEMBER_RECHECK_SECONDS?: string }).MEMBER_RECHECK_SECONDS);
     return (Number.isFinite(n) && n >= 5 ? n : 30) * 1000;
@@ -189,12 +230,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * Returns what the member may do now.
    */
   private async refresh(ws: WebSocket, m: MemberMeta): Promise<MemberMeta | null> {
+    // Stamped with when and under which epoch the read began, not when it came back: an answer
+    // that was already on its way when membership changed must not count as newer than the change.
+    const ep = this.epoch;
+    const at = Date.now();
     const a = await access(this.env, { id: m.id, email: m.email }, this.name, { sealed: !!this.state.sealed });
     if (a.effective === "none" || a.role === "owner") {
       this.dropMember(ws, m, a.reason === "encrypted" ? "encrypted" : "removed");
       return null;
     }
-    const next: MemberMeta = { ...m, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at: Date.now() };
+    const next: MemberMeta = { ...m, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at, ep };
     try { ws.serializeAttachment(next); } catch { return null; }
     if (next.effective !== m.effective || next.reason !== m.reason || next.role !== m.role || next.plan !== m.plan) sendTo(ws, this.accessFrame(next));
     return next;
@@ -208,13 +253,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     try { who = JSON.parse(decodeURIComponent(raw)) as typeof who; } catch { return refuse(); }
     if (typeof who.id !== "string" || typeof who.email !== "string" || who.id === this.name) return refuse();
     await this.__unsafe_ensureInitialized();
+    // Connecting costs a token too, so reconnecting isn't a way around the bucket.
+    if (!this.spend(who.id).ok) return new Response("Slow down", { status: 429, headers: { "Cache-Control": "no-store" } });
+    const ep = this.epoch;
+    const at = Date.now();
     const a = await access(this.env, { id: who.id, email: who.email }, this.name, { sealed: !!this.state.sealed });
     if (a.effective === "none" || a.role === "owner") return refuse();
     // One person, a handful of tabs. The oldest gives way.
     const mine = this.ctx.getWebSockets(`m:${who.id}`);
-    for (const old of mine.slice(0, Math.max(0, mine.length - MAX_SOCKETS_PER_MEMBER + 1))) { try { old.close(1008, "too many tabs"); } catch { /* gone */ } }
+    const giveWay = mine.slice(0, Math.max(0, mine.length - MAX_SOCKETS_PER_MEMBER + 1));
+    for (const old of giveWay) { try { old.close(1008, "too many tabs"); } catch { /* gone */ } }
+    // And a ceiling for the board as a whole, whatever MAX_BOARD_MEMBERS is set to.
+    if (this.ctx.getWebSockets(MEMBER_TAG).length - giveWay.length >= MAX_MEMBER_SOCKETS) {
+      return new Response("This board has too many open tabs right now. Try again in a minute.", { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
     const pair = new WebSocketPair();
-    const meta: MemberMeta = { tm: 1, id: who.id, email: who.email, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at: Date.now() };
+    const meta: MemberMeta = { tm: 1, id: who.id, email: who.email, role: a.role, effective: a.effective, reason: a.reason, plan: a.plan, ownerEmail: a.ownerEmail, at, ep };
     this.ctx.acceptWebSocket(pair[1], [MEMBER_TAG, `m:${who.id}`]);
     pair[1].serializeAttachment(meta);
     // The same three frames useAgent expects from the SDK, so the client needs no second transport.
@@ -227,13 +281,34 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /**
    * A frame from a member's socket. Exactly one kind does anything: an RPC call to a method on
-   * the short list in member-rules.ts. Their access is read from D1 again before every call, so
-   * a role change or a removal holds from the very next frame even if no signal arrived. State
-   * pushes, chat requests, tool results, and everything else the SDK protocol has are dropped
-   * here without reaching the SDK.
+   * the short list in member-rules.ts. State pushes, chat requests, tool results, and everything
+   * else the SDK protocol has are dropped here without reaching the SDK.
+   *
+   * Before anything is parsed or read, the frame is measured and metered: one over
+   * MEMBER_FRAME_MAX closes the socket, and every frame costs a token from the member's bucket.
+   * With the bucket empty the call is refused with SLOW_DOWN, at no cost in D1 reads, and a
+   * socket that keeps sending anyway is closed.
+   *
+   * Then their access. It's the answer D1 gave within the last ACCESS_CACHE_MS, if that answer
+   * is from the current membership epoch; otherwise D1 is asked again. A removal, a role
+   * change, or a plan change the Worker signalled moves the epoch, so it holds from the very
+   * next frame. One that was never signalled holds within ACCESS_CACHE_MS for a member who's
+   * sending, and at the next sweep for one who isn't.
    */
   private async memberMessage(ws: WebSocket, was: MemberMeta, message: string | ArrayBuffer) {
-    if (typeof message !== "string" || message.length > MEMBER_FRAME_MAX) return;
+    const size = typeof message === "string" ? message.length : message.byteLength;
+    if (size > MEMBER_FRAME_MAX) {
+      try { ws.close(CLOSE_TOO_BIG, "frame too big"); } catch { /* already closed */ }
+      return;
+    }
+    const spent = this.spend(was.id);
+    if (!spent.ok) {
+      const id = typeof message === "string" ? rpcIdOf(message) : null;
+      if (id) sendTo(ws, JSON.stringify({ type: "rpc", id, done: true, success: false, error: SLOW_DOWN }));
+      if (spent.flood) { try { ws.close(CLOSE_FLOOD, "slow down"); } catch { /* already closed */ } }
+      return;
+    }
+    if (typeof message !== "string") return;
     let f: { type?: unknown; id?: unknown; method?: unknown; args?: unknown };
     try { f = JSON.parse(message) as typeof f; } catch { return; }
     if (!f || typeof f !== "object") return;
@@ -244,7 +319,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (f.type !== "rpc" || typeof f.id !== "string" || f.id.length > 100) return;
     const reply = (r: { success: true; result: unknown } | { success: false; error: string }) =>
       sendTo(ws, JSON.stringify({ type: "rpc", id: f.id, done: true, ...r }));
-    const m = await this.refresh(ws, was);
+    const fresh = was.ep === this.epoch && Date.now() - was.at < ACCESS_CACHE_MS;
+    const m = fresh ? was : await this.refresh(ws, was);
     if (!m) return;
     const needs = memberCallNeeds(f.method);
     if (!needs || !Array.isArray(f.args)) return reply({ success: false, error: OWNER_ONLY });
@@ -280,11 +356,31 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
-   * Send the board to members' sockets after a change. A socket whose access was checked
-   * within the recheck window gets it now; an older one is checked first and gets it only if
-   * it still has a way in.
+   * Send the board to members' sockets. A socket whose access was checked within the recheck
+   * window gets it now; an older one is checked first and gets it only if it still has a way in.
+   */
+  private pushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pushedAt = 0;
+
+  /**
+   * The board changed: get it to members' sockets. One change goes out at once. A burst is
+   * coalesced: after a push, the next waits until PUSH_INTERVAL_MS has passed and then sends
+   * the board as it is by then, so 400 writes in a few seconds are a couple of dozen frames per
+   * socket instead of 400 copies of a growing board.
    */
   private pushMembers() {
+    if (!this.ctx.getWebSockets(MEMBER_TAG).length) return;
+    const wait = this.pushedAt + PUSH_INTERVAL_MS - Date.now();
+    // An encrypted board closes its members' sockets, and that never waits.
+    if (wait <= 0 || this.state.sealed) return this.flushMembers();
+    this.pushTimer ??= setTimeout(() => {
+      this.pushTimer = null;
+      try { this.flushMembers(); } catch (e) { console.warn("member push failed", (e as Error).message); }
+    }, wait);
+  }
+
+  private flushMembers() {
+    this.pushedAt = Date.now();
     const sockets = this.ctx.getWebSockets(MEMBER_TAG);
     if (!sockets.length) return;
     const sealed = !!this.state.sealed;
@@ -315,6 +411,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * before the owner's request has even answered.
    */
   async membersChanged() {
+    // First, and before any await: nothing a socket remembers about its access counts from here on.
+    this.epoch += 1;
     await this.recheck(this.ctx.getWebSockets(MEMBER_TAG), false);
   }
 
@@ -330,6 +428,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!sockets.length) return;
     await syncSharing(this.env, this.name).catch((e: Error) => console.warn("sharing state check failed", e.message));
     await this.recheck(sockets, false);
+    // Buckets of members who are gone or have been quiet don't need keeping.
+    const here = new Set(this.ctx.getWebSockets(MEMBER_TAG).map((ws) => memberMeta(ws)?.id));
+    for (const id of this.buckets.keys()) if (!here.has(id)) this.buckets.delete(id);
     if (this.ctx.getWebSockets(MEMBER_TAG).length) await this.schedule(this.recheckMs() / 1000, "sweepMembers");
   }
 
@@ -695,7 +796,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       }, group, actor);
       return { ok: true, summary, board: ops.describeBoard(board), ids };
     } catch (e) {
-      return { ok: false, summary: (e as Error).message };
+      return { ok: false, summary: plainError((e as Error).message) };
     }
   }
 
@@ -893,8 +994,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /** What the upload endpoint may accept: files encrypted under `kid`, and plain ones only while turning encryption off. */
-  uploadPolicy(): { kid: string | null; plainStaging: boolean } {
+  uploadPolicy(memberId?: string): { kid: string | null; plainStaging: boolean; slow?: true } {
     const kid = this.state.sealed?.kid ?? null;
+    // A member's uploads draw on the same bucket as their socket, and are turned away here,
+    // before the file is read or stored.
+    if (memberId && !this.spend(memberId).ok) return { kid, plainStaging: false, slow: true };
     return { kid, plainStaging: !!kid && Number(this.metaValue("plain_staging_until") ?? 0) > Date.now() };
   }
 

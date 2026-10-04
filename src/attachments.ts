@@ -23,6 +23,7 @@ import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
 import { kidOf } from "./sealed";
 import { access } from "./members";
+import { plainError, SLOW_DOWN } from "./member-rules";
 import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
@@ -93,7 +94,8 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   // ones only while the owner is turning encryption off (beginDisable). A plain board takes
   // encrypted files only as staged uploads, which is how turning encryption on works.
   const agent = await getAgentByName(env.TodoAgent, ownerId);
-  const policy = await agent.uploadPolicy();
+  const policy = await agent.uploadPolicy(where.member ? user.id : undefined);
+  if (policy.slow) return json({ error: plainError(SLOW_DOWN), code: "slow_down" }, 429);
   if (where.member && policy.kid) return notFound(); // an encrypted board has no members
   if (policy.kid) {
     if (!sealed && !(staged && policy.plainStaging)) return json({ error: "This board is encrypted, so files have to be too. Reload the page." }, 400);
@@ -141,7 +143,7 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   const r = await agent.attach(cardId!, att, { id: user.id, email: user.email });
   if (!r.ok) {
     await env.ATTACHMENTS.delete(key);
-    return json({ error: r.error }, 400);
+    return json({ error: plainError(r.error) }, 400);
   }
   return json({ attachment: att });
 }

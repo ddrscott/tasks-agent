@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Leave a shared board from the account menu
 - A shared board shows who last changed each card, and whether an agent or the assistant did it for them
 - When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened
+- A shared board holds up under a member's script: changes sent faster than a person could are told to slow down, a member can't grow someone's board past 1,000 cards or 1 MB, and a burst of changes reaches everyone else's tab a few times a second instead of once per change
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it

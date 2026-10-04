@@ -67,6 +67,65 @@ export const READ_ONLY_LAPSED = "This board is view only until its owner's Pro p
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+// ---------- how much a member may send, and how big they may make the board ----------
+
+/**
+ * Every frame a member's socket sends costs one token from a bucket kept per member (not per
+ * socket, so more tabs don't mean more room). The bucket holds `burst` and refills at
+ * `perSecond`: a person dragging cards and ticking boxes never gets near it, and a script gets
+ * `burst` calls and then `perSecond` a second. A frame that finds the bucket empty is refused
+ * with SLOW_DOWN. `strikes` refusals without the bucket ever refilling to full is a flood, and
+ * the socket that sent the last one is closed (CLOSE_FLOOD).
+ */
+export const MEMBER_RATE = { burst: 40, perSecond: 4, strikes: 100 } as const;
+export type Bucket = { tokens: number; at: number; strikes: number };
+
+/** Take one token. `ok` is whether the frame may run; `flood` is whether to close the socket. Mutates and returns the bucket. */
+export function spendToken(b: Bucket | undefined, now: number, rate: { burst: number; perSecond: number; strikes: number } = MEMBER_RATE): { bucket: Bucket; ok: boolean; flood: boolean } {
+  const bucket = b ?? { tokens: rate.burst, at: now, strikes: 0 };
+  bucket.tokens = Math.min(rate.burst, bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * rate.perSecond);
+  bucket.at = now;
+  // Quiet for long enough to fill up again: whatever happened before is forgiven.
+  if (bucket.tokens >= rate.burst) bucket.strikes = 0;
+  if (bucket.tokens >= 1) { bucket.tokens -= 1; return { bucket, ok: true, flood: false }; }
+  bucket.strikes += 1;
+  return { bucket, ok: false, flood: bucket.strikes >= rate.strikes };
+}
+
+/** Errors a member's client treats specially start with a code in brackets, like the board's `[board_shared]`. */
+export const errorCode = (message: string) => /^\[([a-z_]+)\]/.exec(message)?.[1] ?? null;
+/** The same error without its code, to show a person. */
+export const plainError = (message: string) => message.replace(/^\[[a-z_]+\]\s*/, "");
+export const SLOW_DOWN = "[slow_down] Slow down. That's too many changes at once. Wait a few seconds and try again.";
+
+/**
+ * The most a member may grow someone else's board to. The field sizes are the ones every edit
+ * already gets (clean and tidyNotes in shared.ts); here they're checked on the result, so no
+ * path a member's change takes can skip them (text that looks encrypted is passed through
+ * untrimmed by those, and a shared board is never encrypted). `cards` and `boardBytes` are
+ * ceilings on growth only: on a board already over one, a member can still edit, move, and
+ * delete, and can't add.
+ */
+export const MEMBER_LIMITS = {
+  title: 200, notes: 4000, tags: 10, tag: 32,
+  /** One card as JSON, files and all. */
+  cardBytes: 16 * 1024,
+  cards: 1000,
+  /** The whole board as JSON. Its Durable Object stores it in one 2 MB row, and every change sends all of it to every open tab. */
+  boardBytes: 1024 * 1024,
+} as const;
+
+function cardTooBig(c: Card): string | null {
+  const L = MEMBER_LIMITS;
+  if (typeof c.title !== "string" || !c.title || c.title.length > L.title) return `[too_big] A card's title can be up to ${L.title} characters.`;
+  if (typeof c.notes !== "string" || c.notes.length > L.notes) return `[too_big] A card's notes can be up to ${L.notes.toLocaleString("en-US")} characters.`;
+  if (c.due !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.due))) return "[too_big] Due dates must look like 2026-09-30.";
+  const tags = c.tags ?? [];
+  if (!Array.isArray(tags) || tags.length > L.tags || tags.some((t) => typeof t !== "string" || !t || t.length > L.tag)) return `[too_big] A card can have ${L.tags} tags of up to ${L.tag} characters each.`;
+  if (JSON.stringify(c).length > L.cardBytes) return "[too_big] That card is too big to save.";
+  return null;
+}
+
 /**
  * Why a writer's change is refused, or null when it's allowed. A writer changes cards and
  * nothing else, so this compares the board before and after instead of trusting which action
@@ -83,6 +142,11 @@ export function memberChangeError(before: Board, after: Board): string | null {
   const done = doneLaneId(after.lanes);
   for (const c of after.cards) {
     const p: Card | undefined = was.get(c.id);
+    // A card this change added or touched has to fit the limits; one it left alone is the owner's business.
+    if (!p || !same(p, c)) {
+      const big = cardTooBig(c);
+      if (big) return big;
+    }
     // A question is asked by an agent and answered by the owner. A member's change can't add,
     // edit, answer, or clear one, and can't rewrite the last answer either.
     if (!same(p?.ask, c.ask) || !same(p?.answer, c.answer)) return "Questions on a card are the board owner's to answer.";
@@ -91,6 +155,13 @@ export function memberChangeError(before: Board, after: Board): string | null {
   }
   for (const p of before.cards) {
     if (p.ask && !now.has(p.id)) return "That card has a question waiting on the board's owner.";
+  }
+  if (after.cards.length > before.cards.length && after.cards.length > MEMBER_LIMITS.cards) {
+    return `[board_full] This board has ${MEMBER_LIMITS.cards.toLocaleString("en-US")} cards, the most a member can add to. Delete some, or ask the owner.`;
+  }
+  const size = JSON.stringify(after).length;
+  if (size > MEMBER_LIMITS.boardBytes && size > JSON.stringify(before).length) {
+    return "[board_full] This board is as big as a member can make it (1 MB of cards). Delete some cards or shorten some notes, or ask the owner.";
   }
   return null;
 }
@@ -146,3 +217,7 @@ export type AccessFrame = { type: "tasks_access" } & Access & {
 };
 /** WebSocket close code for a member who lost the board. */
 export const CLOSE_NO_ACCESS = 4403;
+/** Close code for a member's socket that kept sending after it was told to slow down. The app may reconnect. */
+export const CLOSE_FLOOD = 4429;
+/** Close code for a frame bigger than a member may send (MEMBER_FRAME_MAX in agent.ts). */
+export const CLOSE_TOO_BIG = 1009;

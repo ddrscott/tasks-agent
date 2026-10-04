@@ -1225,7 +1225,8 @@ each card.
   member or pending invite throws an error whose message starts with `[board_shared]`.
 - **Limits.** `MAX_BOARD_MEMBERS` (10) people per board, pending invites included, expired
   ones too until they're revoked. `MAX_DAILY_INVITE_EMAILS` (20) invite emails per owner per
-  UTC day, resends included. An invite link works once, for 7 days.
+  UTC day, resends included. An invite link works once, for 7 days. What a member can send and
+  how big they can make the board is under **What a member can cost you**, below.
 - **Not in v1:** transferring ownership, more than one owner, tag scopes, and member access
   over MCP. A member's token, OAuth grant, event feed, and Sessions reach only their own board.
 
@@ -1299,7 +1300,9 @@ and Sessions live in the owner's `Presence` object, which members don't reach.
   Then the server closes it with code **4403**. Treat the frame as the end and close the
   socket from the client too: under the dev server a socket that never sent a frame doesn't
   always see the close event. A reconnect is refused with the 404 above.
-- `cf_agent_state` is the same `Board` the owner gets, on connect and after every change. Its
+- `cf_agent_state` is the same `Board` the owner gets, on connect and after changes: at once
+  for one change, and at most every 200 ms through a burst (each push is the board as it
+  stands, so nothing is missed). Its
   `theme` is the owner's: a member's app should keep using the theme from their own board.
 - Never sent to a member: the chat transcript, chat stream frames, the undo stack or its
   labels, usage, tokens, billing, the MCP server list, Sessions, claims.
@@ -1321,6 +1324,31 @@ the owner's until it's added to the list. A `cf_agent_use_chat_request` gets an 
 messages, tool results, and anything else are dropped. A member's `applyLocal` changes the board
 and writes nothing into the owner's chat transcript.
 
+**What a member can cost you.** A writer is someone else's script as far as the board knows, so
+everything a member sends is metered and everything they can grow is capped. The numbers are
+constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/agent.ts`.
+
+| | Limit | What happens past it |
+|---|---|---|
+| Frames from one member, all their tabs together | a token bucket: 40 at once, refilling 4 a second | the call answers `[slow_down] Slow down. …` and costs no D1 read |
+| Refusals before the bucket has refilled to full (10 quiet seconds) | 100 | the socket is closed with code **4429**; a new one gets what the bucket holds, and connecting costs a token (an empty bucket answers the upgrade 429) |
+| One frame | 32 KB, text only | the socket is closed with code **1009** |
+| Sockets per member on one board | 4 | a fifth closes the oldest (code 1008) |
+| Member sockets on one board | 48 | the upgrade answers 503 until some close |
+| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date, 16 KB as JSON | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
+| Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
+| The board as JSON | 1 MB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine |
+| Board pushes to one member socket | at most one every 200 ms | a burst of writes is coalesced: each socket gets the board as it stands, five times a second at most. One change on a quiet board goes out at once |
+
+The bucket is per member id and lives in the board object's memory; uploads draw on it too
+(`429 slow_down`, before the file is read). The owner isn't metered or capped by any of this:
+their own path has the field sizes and no ceiling on cards. An error whose message starts with a
+code in brackets is shown without it (`plainError`). Measured with `check:members`: 400
+`addCard` frames with 4,000-character notes, sent as fast as the socket takes them, used to all
+succeed in about 4.5 seconds and push 337 MB to each watching socket (the whole board, once per
+write). Now 38 get through, 100 are refused, the socket is closed in about 0.3 seconds, and a
+watching socket is sent the board twice, about 160 KB.
+
 **The write guard.** One place, `guard` in `src/agent.ts`, run twice on every change: in
 `mutate` before anything is written, and in the `setState` override that every path ends in.
 Who's calling comes from an `AsyncLocalStorage` set where the request entered the object, never
@@ -1329,12 +1357,19 @@ compares the board before and after instead of trusting which action ran: lanes 
 board setting must come out identical, and a card's `ask` and `answer` must be untouched. So
 the assistant's lane tools fail for a writer the same way the lane callables do.
 
-**Live effect.** A member's access is read from D1 again before every call they make, so a
-removal or a downgrade holds from their very next frame. On top of that:
+**Live effect.** A removal or a downgrade holds from the member's very next frame.
 
 - Removing a member, a role change, and leaving call `TodoAgent.membersChanged` before the
   request answers; the Stripe webhook does the same when the owner's plan changes. Every member
   socket is rechecked then: closed, or sent a new `tasks_access`.
+- Each socket remembers its last access check for 2 seconds (`ACCESS_CACHE_MS`), so a member
+  sending many frames costs two D1 reads every 2 seconds instead of two per frame. The memory
+  only counts if the check began after the last `membersChanged`: that call moves the board's
+  membership epoch before it awaits anything, and a check stamped with an older epoch is
+  never trusted, including one that was already on its way to D1 when the change landed. So a
+  signalled change waits on nothing. A change with no signal (a row edited by hand, a plan
+  that ran out with no webhook) holds within 2 seconds on a socket that's sending, and at the
+  next sweep on one that isn't.
 - The backstop: while any member is connected the board rechecks them all every
   `MEMBER_RECHECK_SECONDS` (30), and a state push to a socket not checked within that window
   waits for a recheck. 30 seconds because it only matters when the signal was lost (a failed
