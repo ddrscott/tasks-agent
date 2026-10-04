@@ -13,11 +13,16 @@
 // Claims live here too. A lead agent claims a card with its session id over MCP
 // (claim_card); the object is single-threaded, so two leads can't both win. A claim holds
 // while its session is live and can be taken over once the session has gone quiet.
+// A session with no hooks (any MCP client) is heard from through its claims alone, and its
+// row is written by the claim rules in presence-shared.ts.
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 
-import { STALE_MS, type Claim, type PresenceView, type Session, type SessionState } from "./presence-shared";
+import {
+  afterClaim, afterRelease, known, LAPSED, STALE_MS,
+  type Claim, type ClaimRow, type PresenceView, type Session, type SessionState,
+} from "./presence-shared";
 
 export { STALE_MS, type Claim, type PresenceView, type Session, type SessionState };
 
@@ -115,8 +120,8 @@ export function reportFrom(body: unknown, hints: { machine?: string | null; agen
   const link = clean(hints.link, 300);
   return {
     id,
-    project: basename(cwd) || "unknown",
-    machine: clean(hints.machine, 60) || "unknown",
+    project: basename(cwd),
+    machine: clean(hints.machine, 60),
     agent: clean(hints.agent, 40),
     cwd,
     link: /^https:\/\/[^\s]+$/.test(link) ? link : "",
@@ -143,6 +148,12 @@ export class Presence extends DurableObject<Env> {
       id TEXT PRIMARY KEY, project TEXT NOT NULL, machine TEXT NOT NULL, agent TEXT NOT NULL,
       state TEXT NOT NULL, last TEXT NOT NULL, cwd TEXT NOT NULL, link TEXT NOT NULL,
       started_at INTEGER NOT NULL, seen_at INTEGER NOT NULL)`);
+    // hooks: 1 once a hook has reported for the session. A row with 0 has only ever claimed cards
+    // over MCP, and is written by the claim rules in presence-shared.ts instead.
+    try {
+      this.sql.exec("ALTER TABLE sessions ADD COLUMN hooks INTEGER NOT NULL DEFAULT 0");
+      this.sql.exec("UPDATE sessions SET hooks = 1 WHERE cwd != ''");
+    } catch { /* the column is already there */ }
     this.sql.exec(`CREATE TABLE IF NOT EXISTS claims (
       card_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, agent TEXT NOT NULL, claimed_at INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
@@ -184,6 +195,9 @@ export class Presence extends DurableObject<Env> {
     // A claim whose session is gone or has been quiet too long is free again.
     this.sql.exec(
       "DELETE FROM claims WHERE session_id NOT IN (SELECT id FROM sessions WHERE seen_at >= ?)", now - CLAIM_LIVE_MS);
+    // A session that only ever claimed is "working" because it holds a card. With none left, it isn't.
+    this.sql.exec(
+      "UPDATE sessions SET state = 'idle', last = ? WHERE hooks = 0 AND state = 'working' AND id NOT IN (SELECT session_id FROM claims)", LAPSED);
   }
 
   view(): PresenceView {
@@ -225,10 +239,10 @@ export class Presence extends DurableObject<Env> {
     if (r.routine && prev?.state === "working" && now - prev.seen_at < WORKING_EVERY_MS) return "skipped";
     const state = r.state === "keep" ? prev?.state ?? "idle" : r.state;
     this.sql.exec(
-      `INSERT INTO sessions (id, project, machine, agent, state, last, cwd, link, started_at, seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO sessions (id, project, machine, agent, state, last, cwd, link, started_at, seen_at, hooks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        ON CONFLICT(id) DO UPDATE SET project = excluded.project, machine = excluded.machine, agent = excluded.agent,
-         state = excluded.state, last = excluded.last, cwd = excluded.cwd, link = excluded.link, seen_at = excluded.seen_at`,
+         state = excluded.state, last = excluded.last, cwd = excluded.cwd, link = excluded.link, seen_at = excluded.seen_at, hooks = 1`,
       r.id, r.project, r.machine, r.agent || prev?.agent || "", state, r.last, r.cwd, r.link || prev?.link || "",
       prev?.started_at ?? now, now,
     );
@@ -247,8 +261,9 @@ export class Presence extends DurableObject<Env> {
   /**
    * Claim a card for a session. Refused while another live session holds it. Claiming also
    * counts as the session reporting in, so a lead with no hooks installed can still hold cards.
+   * `title` is the card's, from the board (mcp.ts), for the session's last-action line.
    */
-  claim(user: string, input: { cardId: string; sessionId: string; agent?: string; machine?: string; project?: string }):
+  claim(user: string, input: { cardId: string; sessionId: string; title?: string; agent?: string; machine?: string; project?: string }):
     { ok: true; claim: Claim; tookOver?: string } | { ok: false; holder: Claim; session: Session | null } {
     this.user(user);
     const now = Date.now();
@@ -256,39 +271,70 @@ export class Presence extends DurableObject<Env> {
     const sessionId = clean(input.sessionId, 80);
     const agent = clean(input.agent, 40) || "agent";
     this.expire(now);
-    this.sql.exec(
-      `INSERT INTO sessions (id, project, machine, agent, state, last, cwd, link, started_at, seen_at)
-       VALUES (?, ?, ?, ?, 'working', ?, '', '', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET seen_at = excluded.seen_at, agent = CASE WHEN sessions.agent = '' THEN excluded.agent ELSE sessions.agent END`,
-      sessionId, clean(input.project, 80) || "unknown", clean(input.machine, 60) || "unknown", agent, `claimed card ${cardId}`, now, now,
-    );
     const held = this.sql.exec("SELECT * FROM claims WHERE card_id = ?", cardId).toArray()[0] as
       { card_id: string; session_id: string; agent: string; claimed_at: number } | undefined;
-    if (held && held.session_id !== sessionId) {
-      // expire() already dropped claims of quiet sessions, so this holder is live.
-      const view = this.view();
+    // expire() already dropped claims of quiet sessions, so a holder that's left is live.
+    const won = !held || held.session_id === sessionId;
+    if (won) {
+      this.sql.exec(
+        `INSERT INTO claims (card_id, session_id, agent, claimed_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(card_id) DO UPDATE SET session_id = excluded.session_id, agent = excluded.agent`,
+        cardId, sessionId, agent, held?.claimed_at ?? now,
+      );
+    }
+    this.heard(sessionId, now, agent, (prev, holds) => afterClaim(
+      prev, { agent: clean(input.agent, 40), machine: known(clean(input.machine, 60)), project: known(clean(input.project, 80)) },
+      clean(input.title, 80), won, holds,
+    ));
+    void this.ctx.storage.setAlarm(now + STALE_MS + 1000);
+    this.broadcast();
+    if (!won) {
       return {
         ok: false,
         holder: { cardId, sessionId: held.session_id, agent: held.agent, claimedAt: held.claimed_at },
-        session: view.sessions.find((s) => s.id === held.session_id) ?? null,
+        session: this.view().sessions.find((s) => s.id === held.session_id) ?? null,
       };
     }
-    this.sql.exec(
-      `INSERT INTO claims (card_id, session_id, agent, claimed_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(card_id) DO UPDATE SET session_id = excluded.session_id, agent = excluded.agent`,
-      cardId, sessionId, agent, held?.claimed_at ?? now,
-    );
-    this.broadcast();
     return { ok: true, claim: { cardId, sessionId, agent, claimedAt: held?.claimed_at ?? now } };
   }
 
-  /** Give a card back. Only the session holding it can. */
-  release(input: { cardId: string; sessionId: string }): boolean {
-    const before = this.sql.exec("SELECT COUNT(*) AS n FROM claims").toArray()[0].n as number;
-    this.sql.exec("DELETE FROM claims WHERE card_id = ? AND session_id = ?", clean(input.cardId, 40), clean(input.sessionId, 80));
-    const after = this.sql.exec("SELECT COUNT(*) AS n FROM claims").toArray()[0].n as number;
-    if (after !== before) this.broadcast();
-    return after !== before;
+  /**
+   * A claim or release counts as hearing from the session. One that reports through hooks only
+   * has its clock moved: the hooks say what it's doing. One that doesn't gets its row from `rule`.
+   */
+  private heard(sessionId: string, now: number, agent: string, rule: (prev: ClaimRow | null, holds: number) => ClaimRow) {
+    const prev = this.sql.exec("SELECT project, machine, agent, state, last, hooks FROM sessions WHERE id = ?", sessionId).toArray()[0] as
+      (ClaimRow & { hooks: number }) | undefined;
+    if (prev?.hooks) {
+      this.sql.exec("UPDATE sessions SET seen_at = ?, agent = CASE WHEN agent = '' THEN ? ELSE agent END WHERE id = ?", now, agent, sessionId);
+      return;
+    }
+    const holds = this.sql.exec("SELECT COUNT(*) AS n FROM claims WHERE session_id = ?", sessionId).toArray()[0].n as number;
+    const row = rule(prev ?? null, holds);
+    this.sql.exec(
+      `INSERT INTO sessions (id, project, machine, agent, state, last, cwd, link, started_at, seen_at, hooks)
+       VALUES (?, ?, ?, ?, ?, ?, '', '', ?, ?, 0)
+       ON CONFLICT(id) DO UPDATE SET project = excluded.project, machine = excluded.machine, agent = excluded.agent,
+         state = excluded.state, last = excluded.last, seen_at = excluded.seen_at`,
+      sessionId, row.project, row.machine, row.agent, row.state, row.last.slice(0, 120), now, now,
+    );
+  }
+
+  /** Give a card back. Only the session holding it can. `title` is the card's, when it still exists. */
+  release(input: { cardId: string; sessionId: string; title?: string }): boolean {
+    const now = Date.now();
+    const cardId = clean(input.cardId, 40);
+    const sessionId = clean(input.sessionId, 80);
+    this.expire(now);
+    const held = this.sql.exec("SELECT agent FROM claims WHERE card_id = ? AND session_id = ?", cardId, sessionId).toArray()[0] as { agent: string } | undefined;
+    if (!held) return false;
+    this.sql.exec("DELETE FROM claims WHERE card_id = ? AND session_id = ?", cardId, sessionId);
+    // A session whose row is gone (it ended) has nothing to update: releasing doesn't bring it back.
+    if (this.sql.exec("SELECT 1 FROM sessions WHERE id = ?", sessionId).toArray().length) {
+      this.heard(sessionId, now, "", (prev, holds) => afterRelease(prev!, clean(input.title, 80), holds));
+    }
+    this.broadcast();
+    return true;
   }
 
   /** The browser's live list. The Worker has already checked the session cookie; `x-user` names the user. */
@@ -319,5 +365,6 @@ export function describeSession(s: Session | null, now: number): string {
   if (!s) return "a session that hasn't reported";
   const ago = Math.max(0, Math.round((now - s.seenAt) / 1000));
   const seen = ago < 90 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
-  return `${s.agent || "agent"} on ${s.machine} in ${s.project}, ${s.state.replace("-", " ")}, seen ${seen} (session ${s.id})`;
+  const where = `${known(s.machine) ? ` on ${s.machine}` : ""}${known(s.project) ? ` in ${s.project}` : ""}`;
+  return `${s.agent || "agent"}${where}, ${s.state.replace("-", " ")}, seen ${seen} (session ${s.id})`;
 }

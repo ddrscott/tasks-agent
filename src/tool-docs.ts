@@ -73,7 +73,8 @@ export const TOOL_DOCS = {
     description:
       "Claim a card for your session before you work on it, so two agents never take the same one. " +
       "Refused while another live session holds the card; that answer names the holder. " +
-      "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours.",
+      "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours. " +
+      "Pass agent, machine, and project when you know them: that's how the owner tells your session from the others.",
     about: "Claim a card for one agent session, so two agents never take the same one.",
   },
   release_card: {

@@ -165,7 +165,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       if (no) return no;
       const title = await agent.cardTitle(input.id);
       if (title === null) return text(`There is no card with id ${input.id}.`, true);
-      const r = await presence.claim(user.id, { cardId: input.id, sessionId: input.session_id, agent: input.agent, machine: input.machine, project: input.project });
+      const r = await presence.claim(user.id, { cardId: input.id, sessionId: input.session_id, title, agent: input.agent, machine: input.machine, project: input.project });
       if (r.ok) return text(`Claimed "${title}" [${input.id}] for session ${input.session_id}.`);
       return text(`"${title}" [${input.id}] is already claimed by ${describeSession(r.session, Date.now())}. Leave it and take another card.`, true);
     });
@@ -181,7 +181,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     }, async (input: { id: string; session_id: string }) => {
       const no = await locked();
       if (no) return no;
-      const released = await presence.release({ cardId: input.id, sessionId: input.session_id });
+      const released = await presence.release({ cardId: input.id, sessionId: input.session_id, title: (await agent.cardTitle(input.id)) ?? undefined });
       return text(released ? `Released [${input.id}].` : `Session ${input.session_id} doesn't hold a claim on [${input.id}].`);
     });
 
