@@ -727,6 +727,8 @@ a.att-name:hover { color: var(--accent); }
 .sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .sess-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
 .sess-empty code { font: 12px var(--font-mono); color: var(--ink); }
+.sess-empty a, .sess-foot a { color: var(--accent); text-underline-offset: 3px; }
+.sess-foot { margin: 0; padding-top: 10px; border-top: var(--border-w) solid var(--line); font: 12px var(--font-mono); color: var(--muted); }
 .sess-project { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .sess-project span { font-weight: 400; font-size: 11px; color: var(--muted); }
 .sess-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px/1.45 var(--font-mono); min-width: 0; }
@@ -899,6 +901,14 @@ a.att-name:hover { color: var(--accent); }
 .snippet-head .btn { height: 28px; }
 .snippet pre { margin: 0; padding: 12px; overflow-x: auto; font: 12.5px/1.55 var(--font-mono); }
 
+.client-panel li .snippet, .connect-notes li .snippet { margin-top: 8px; }
+.step-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* Linked to by #sessions, #working, and #tools; the sticky bar would cover the heading otherwise. */
+.connect-step, .connect-tools { scroll-margin-top: 72px; }
+.connect-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.connect-notes li { min-width: 0; }
+.connect-notes li > b { font-size: 14px; font-weight: 600; }
+.connect-notes li p { margin-top: 2px; color: var(--muted); font-size: 14px; }
 .connect-tools { display: flex; flex-direction: column; gap: 12px; padding-top: 24px; border-top: var(--border-w) solid var(--line); }
 .connect-tools ul { list-style: none; margin: 0; padding: 0; }
 .connect-tools li { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
