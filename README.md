@@ -373,19 +373,19 @@ cd ~/code/receptionist && tasks-gauntlet     # once per repo; then everything is
   critic round pass.
 - **Not a lead's card.** Its cards carry `#gauntlet` and never `#agent`, so a lead agent leaves
   them alone and the two can run in one repo.
-- **`scripts/tasks-gauntlet`** (install it on PATH next to `tasks-events`) starts
-  `claude --agent gauntlet` in a tmux session named `gauntlet-<project>`, with permission
-  prompts off (`--permission-mode bypassPermissions`), `ANTHROPIC_API_KEY` unset so it bills the
-  subscription, and a loop that brings it back a minute after it exits. `attach`, `status`,
-  and `stop` do what they say. An agent file can't turn prompts off for its own main session,
-  which is why the launcher does it. Claude Code wants that mode accepted once per machine by
-  hand: `claude --dangerously-skip-permissions`.
+- **`scripts/tasks-gauntlet`** (install it on PATH next to `tasks-events`) runs
+  `claude --agent gauntlet` in the foreground with permission prompts off
+  (`--permission-mode bypassPermissions`) and `ANTHROPIC_API_KEY` unset so it bills the
+  subscription. Start it under whatever keeps your sessions alive (relay-tty, tmux); it doesn't
+  restart itself. Extra arguments go to `claude`. An agent file can't turn prompts off for its
+  own main session, which is why the launcher does it. Claude Code wants that mode accepted
+  once per machine by hand: `claude --dangerously-skip-permissions`.
 - **What's taken away.** With prompts off, the launcher denies the tools a night shift never
   needs: Gmail, Drive, Calendar, Docs, the Cloudflare and Stripe servers, analytics, `sudo`,
   force-push, and questions in the terminal. Denies hold in that mode. The rest of the list
   above is the agent's instructions (`~/.claude/agents/gauntlet.md`), not a lock.
 - **A restart loses nothing.** Status lines, the round log, and claims are on the board, so a
-  session that died reads where it was. A claim lapses after 15 minutes either way.
+  session you start again reads where it was. A claim lapses after 15 minutes either way.
 
 ## // SESSIONS
 
