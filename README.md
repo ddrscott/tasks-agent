@@ -617,18 +617,24 @@ build it measured about 250 ms.
 
 ## // VERSION_AND_CHANGELOG
 
-The footer on every page ends with the running version, like `$ 7270832 · Oct 3`: the short git
-commit the build came from and the day it was built. Clicking it opens `// WHATS_NEW`, the
-newest entries of `CHANGELOG.md`.
+The footer on every page ends with the running version, like `$ v0.1.0 · 7270832`: the release
+in `package.json` and the short git commit the build came from. Before the first release it shows
+the commit and the build day instead. Clicking it opens `// WHATS_NEW`, the newest entries of
+`CHANGELOG.md`, with a link to the whole file.
 
-- `vite.config.ts` works all of this out when the build starts and bakes it in as `__BUILD__`
-  (`src/client/Footer.tsx` reads it). Nothing is fetched at run time.
+- `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
+  versioning. **Add a line under `[Unreleased]` with every change someone would notice**, in the
+  right group (Added, Changed, Fixed, Security), at the end of the group, in plain words for
+  the person using the app. Backticks render as code; nothing else is formatted.
+- `vite.config.ts` reads the version, the commit, and the changelog when the build starts and
+  bakes them in as `__BUILD__` (`src/client/Footer.tsx` reads it). Nothing is fetched at run
+  time. The footer shows the newest two releases with entries, 14 lines at most, newest first
+  within each group.
 - A `+` after the commit means the build had uncommitted changes, so the commit doesn't fully
   say what's running. A deploy from a clean `main` never has one.
-- **Add a changelog entry with every change someone would notice.** Under a `## YYYY-MM-DD`
-  heading (add today's at the top if it's missing), write one `- ` line per change, newest
-  first, in plain words for the person using the app, with no markdown inside the line. The
-  footer shows the newest 3 days, up to 12 lines.
+- Cutting a release: `[Unreleased]` becomes `[X.Y.Z] - YYYY-MM-DD` with a fresh empty
+  `[Unreleased]` above it, `version` in `package.json` is set to match, and the commit is tagged
+  `vX.Y.Z`.
 - To check a deploy landed, compare the footer with `git rev-parse --short HEAD`.
 
 ## // DEPLOY

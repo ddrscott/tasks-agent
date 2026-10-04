@@ -817,7 +817,13 @@ a.att-name:hover { color: var(--accent); }
 .popover:has(> .changes) { top: auto; bottom: calc(100% + 8px); right: auto; left: 0; text-align: left; }
 .changes { width: 380px; max-width: calc(100vw - 32px); max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 12px; font: 13px/1.5 var(--font-ui); color: var(--ink); }
 .changes section { display: flex; flex-direction: column; gap: 6px; }
-.changes h3 { margin: 0; font: 600 12px var(--font-mono); color: var(--muted); }
+.changes h3 { margin: 0; display: flex; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); }
+.changes h3 span { font-weight: 400; color: var(--muted); }
+.changes-group { display: flex; flex-direction: column; gap: 4px; }
+.changes h4 { margin: 4px 0 0; font: 600 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.changes code { font: 12px var(--font-mono); background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); padding: 0 4px; }
+.changes-foot a { color: var(--muted); }
+.changes-foot a:hover { color: var(--accent); }
 .changes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .changes li::marker { color: var(--accent); }
 .changes p { margin: 0; color: var(--muted); }
