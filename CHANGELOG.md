@@ -10,9 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The footer shows the running version; click it for the latest changes
 - Sort a lane from its menu by due date, title, newest, oldest, or recently updated — Undo puts it back
+- Attach files while creating a card — they upload as soon as the card is added
+- The Tags field suggests tags you've already used; tap one to add it
 
 ### Changed
 - The + on a lane opens a full new-card dialog with notes, due date, and tags; "Add a card" at the bottom is still the quick way
+- On a phone, the card dialogs fill the screen and stay above the keyboard, so Tags and the buttons are always reachable
+- Bigger buttons on touch screens, and Theme moves into the account menu on a phone
+- Long card titles wrap in the card dialogs instead of scrolling out of view
+
+### Fixed
+- Tapping the search icon on a phone opens search
+- iPhones no longer zoom in when you tap a field
+- The "Add card" label in quick add was unreadable against its button
 
 ## [0.1.0] - 2026-10-03
 

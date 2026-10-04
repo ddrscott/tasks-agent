@@ -57,11 +57,24 @@ run ahead of whatever serves the zone.
   same, and the card editor has Mark done / Reopen, which is the path on touch
   screens.
 - **Adding a card.** The + in a lane's header opens the full `// NEW_CARD` dialog
-  (`src/client/NewCard.tsx`): title, notes, lane, due date, and tags in one go. Nothing is
-  added until Add card, so Cancel or Esc leaves no empty card behind, and the card goes in
-  as one change, so one Undo takes it back out. Files attach after the card exists. "Add a
-  card" at the bottom of a lane (and `n`) is still the quick way: type a title and hit
-  Enter, or paste a list to add one card per line.
+  (`src/client/NewCard.tsx`): title, notes, lane, due date, tags, and files in one go.
+  Nothing is added until Add card, so Cancel or Esc leaves no empty card behind, and the
+  card goes in as one change, so one Undo takes it back out. Files picked, dropped, or
+  pasted wait in the dialog and upload once the card exists; if one fails, the card stays
+  and the button retries the upload. "Add a card" at the bottom of a lane (and `n`) is
+  still the quick way: type a title and hit Enter, or paste a list to add one card per line.
+- **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
+  shows the tags already on the board above the input, most used first (`tagsByUse` in
+  `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first
+  match. It reads the board in the tab, so it works on an encrypted board.
+- **On a phone.** Up to 560px wide, the card dialogs take the whole screen with 12px
+  padding and size to the space above the on-screen keyboard, so Tags and the buttons stay
+  reachable while typing. Android Chrome shrinks the page for the keyboard
+  (`interactive-widget=resizes-content` in `index.html`); iOS Safari doesn't, so
+  `src/client/viewport.ts` copies the visual viewport's height and offset into `--vvh` and
+  `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
+  hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
+  The Theme button leaves the top bar on a phone; it's in the account menu.
 - **Sorting a lane.** A lane's menu (the dots) has Sort by: due date, title A–Z, newest
   first, oldest first, and recently updated. It reorders that lane's cards once, the same
   as dragging them, so Undo puts the old order back and you can keep dragging afterwards.
@@ -467,7 +480,8 @@ TodoAgent (`src/search.ts`), so results never cross between users.
 ## // ATTACHMENTS
 
 Cards take files: the Attach files button, dropping files on an open card, or pasting a
-screenshot into it. `POST /tasks/api/attachments?card=<id>` streams the body into R2,
+screenshot into it. The New card dialog takes them the same way and uploads them once the
+card is added. `POST /tasks/api/attachments?card=<id>` streams the body into R2,
 then tells the card's agent over RPC (`attach`, which the browser can't call). Only
 name, size, and type go into the board, so agents and the assistant see file names.
 
