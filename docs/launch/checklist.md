@@ -45,8 +45,9 @@ Do these top to bottom. Each later step assumes the earlier ones.
       for launch?
 - [ ] From that new account: follow the four steps of `// START_HERE` on the empty board. Add
       the sample agent card, copy the command, and paste it on a machine that has never
-      connected. The agent asks its question on the card; answer it from your phone. That's the
-      whole pitch, so it has to work cold. Then add a card of your own with `#agent` at the end
+      connected. The agent asks its question on the card; answer it from your phone, then watch
+      it write the plan in the card's notes and move the card to Done with nothing to approve
+      in the terminal. That's the whole pitch, so it has to work cold. Then add a card of your own with `#agent` at the end
       of its title and check the agent picks it up.
 - [ ] Do the OAuth way once too: `/tasks/connect`, step 02, the `claude mcp add` command, then
       `/mcp` and Authenticate in Claude Code.
@@ -71,6 +72,9 @@ Do these top to bottom. Each later step assumes the earlier ones.
 - [ ] Paste `https://askscottpierce.com/tasks/` into a Slack DM to yourself, an iMessage, and a
       draft post on X and on LinkedIn. Each should show the title, the description, and the board
       picture (`og.png`). LinkedIn's Post Inspector (linkedin.com/post-inspector) forces a refresh.
+- [ ] Do the same with `https://askscottpierce.com/tasks/demo`, the link the Show HN and the
+      first comment carry. Each page previews as itself now, so it should read "Demo board · Tasks"
+      with the demo's own description, not the front page's.
 - [ ] If the landing changed tonight, make sure `og.png` still matches it. `npm run og` redraws it.
       Previews are cached, so a changed image needs a new file name (README,
       `// LINK_PREVIEWS_AND_TITLES`).
@@ -92,7 +96,8 @@ they show what's live. It takes two commands, because `05` is a signed-in pictur
 - [ ] Open all seven PNGs (six images and the thumbnail) and look at them, and read each
       headline against what's live. If a run fails, it says which thing on the page it was
       waiting for. If the wording of the quick start changed, `05` still shoots (it goes by the
-      section's structure), but check the headline "Four steps to a working agent" is still true.
+      section's structure, and draws the steps a little smaller when they run longer, so the
+      command stays in the picture), but check the headline "Four steps to a working agent" is still true.
 - [ ] Commit the new images.
 
 ### 5a. Know this before the comments start

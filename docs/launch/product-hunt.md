@@ -1,7 +1,7 @@
 # Product Hunt launch copy
 
 Everything the submission form asks for, ready to paste. Anything marked **SCOTT:** is a blank or
-a call only you can make. Every claim here was checked against `README.md` on 2026-10-03; if the
+a call only you can make. Every claim here was checked against `README.md` on 2026-10-04; if the
 product changes, change the copy.
 
 Counts are checked by `npm run check:launch`, which reads the `<!-- count: … -->` lines in this
@@ -19,7 +19,7 @@ From Product Hunt's own launch guide,
 | Description | "max 500 characters" | 260 (see below) |
 | Launch tags | "up to 3" | 3 |
 | Thumbnail | square, "We recommend 240x240", under 3 MB | 240x240 PNG |
-| Gallery | "Two required", "recommended size ... is 1270x760", under 3 MB each | seven at 2540x1520 (1270x760 at 2x) |
+| Gallery | "Two required", "recommended size ... is 1270x760", under 3 MB each | six at 2540x1520 (1270x760 at 2x) |
 | Video | "Only YouTube links are supported", not private, full URL | see `video.md` |
 | Pricing | "free, paid, and paid (with a free trial or plan)" | see `// PRICING` |
 | First comment | asked for in the form, shows right under the gallery | 150 to 250 words |
@@ -230,7 +230,7 @@ Linear is a team issue tracker, and a good one. Tasks is a lot smaller: one pers
 **Does it work with Cursor / Codex / ChatGPT?**
 
 ```
-Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the live event feed and step-by-step session reporting are Claude Code only today, because they run on its hooks. Other agents show in Sessions as working while they hold a card, and see your answer the next time they read the board.
+Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the live event feed and step-by-step session reporting are Claude Code only today, because they run on its hooks. Other agents show in Sessions as working while they hold a card, and wait for your answer with a tool call that comes back when you tap.
 ```
 
 **What about privacy?**
