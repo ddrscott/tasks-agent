@@ -550,7 +550,8 @@ strip, and the not-found page link to it too.
   command to find; `get_board` with `tag: "agent"`; ANSWERED cards first; claim, `get_card`, move to
   Doing; a `STATUS:` line kept under any `ANSWER:` lines, which `update_card` would wipe if the
   notes weren't sent back whole (leaving `tags` out keeps the tags); `ask_ceo` with the session
-  id, keep the claim, move on; Done and `release_card`; and at the very end, hold nothing.
+  id, keep the claim, move on; Done and `release_card`, with the card's id and the reason in
+  the commit (`// DEVELOP`); and at the very end, hold nothing.
   - **The session id needs no shell.** `get_started` makes an id for the call (`tasks-` and 8
     characters; nothing is stored until it claims) and the rules say to use it. That works in
     every client and under the quick start's permissions, where `echo $CLAUDE_CODE_SESSION_ID`
@@ -1353,6 +1354,18 @@ The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
 `src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
 `src/auth.ts` (redirect and cookie paths), `src/agent-rules.ts` (the default `base`),
 `vite.config.ts` (`build.assetsDir`), and `wrangler.jsonc` (`routes`, `run_worker_first`).
+
+### Commits
+
+The commit log is the record of what happened here and why. Work comes off the Tasks board, and
+a card can be edited or deleted later, so the commit has to stand on its own.
+
+- A commit that came from a card ends with a `Card: <id>` trailer, above `Co-Authored-By`.
+  `git log --grep 'Card: cd68g'` finds everything done for that card, and `get_card` with the id
+  gets the card's notes, question, answer, and files.
+- When the subject doesn't say why, add a short body: what was asked, why this way, and what was
+  ruled out. A few lines, not a summary of the session.
+- Step 7 of the working rules (`src/agent-rules.ts`) tells agents the same thing.
 
 `.dev.vars` sets `DEV_LOGIN_CODES=1`, which skips sending email: the code shows
 on the sign-in screen and in the terminal. Copy `.dev.vars.example` to create it.
