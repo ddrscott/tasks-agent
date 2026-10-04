@@ -682,6 +682,31 @@ const AUDIT_PAGE = 25;
 
 type AuditKind = "" | "membership" | "cards";
 
+// Clearing a lane writes one `card_deleted` entry per card, and a few hundred of those in a
+// row push every invite and role change off the screen. So the tab draws a run of them as one
+// line that opens. This is how the list is drawn and nothing else: the log, its numbering,
+// and both downloads still hold every entry.
+const isCardAction = (a: AuditAction) => a === "card_deleted" || a === "card_restored";
+/** The fewest entries in a row, by one person, doing the same thing the same way, that are drawn as one line. */
+const FOLD_MIN = 3;
+/** While a page ends inside such a run, the tab keeps reading, this many entries at a time and this many times at most. */
+const RUN_PAGE = 200;
+const RUN_HOPS = 10;
+export type AuditRow = { run: false; entry: AuditEntry } | { run: true; entries: AuditEntry[] };
+/** Entries as the tab draws them: a run of card deletions (or returns) by one person as one row. Exported for check:members. */
+export function foldAudit(entries: AuditEntry[]): AuditRow[] {
+  const rows: AuditRow[] = [];
+  for (let i = 0; i < entries.length;) {
+    const e = entries[i];
+    let j = i + 1;
+    if (isCardAction(e.action)) while (j < entries.length && entries[j].action === e.action && entries[j].actor === e.actor && entries[j].detail?.via === e.detail?.via) j++;
+    if (j - i >= FOLD_MIN) rows.push({ run: true, entries: entries.slice(i, j) });
+    else for (let k = i; k < j; k++) rows.push({ run: false, entry: entries[k] });
+    i = j;
+  }
+  return rows;
+}
+
 function AuditLog({ me }: { me: Props["me"] }) {
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
@@ -699,16 +724,27 @@ function AuditLog({ me }: { me: Props["me"] }) {
     setBusy(true);
     setError(null);
     try {
-      const query = `limit=${AUDIT_PAGE}${before ? `&before=${before}` : ""}${who ? `&who=${encodeURIComponent(who)}` : ""}${kind ? `&kind=${kind}` : ""}`;
-      const r = await fetch(api(`/api/board/audit?${query}`), { headers: { Accept: "application/json" } });
-      const data = (await r.json().catch(() => null)) as { entries?: AuditEntry[]; next?: number | null; people?: string[] } | null;
-      if (!r.ok || !Array.isArray(data?.entries)) throw new Error(r.status === 401 ? SIGNED_OUT : "The audit log didn't load. Try again in a minute.");
-      // A slower answer for a filter that's since been changed is dropped.
-      if (n !== asked.current) return;
-      const page = data.entries;
+      const page: AuditEntry[] = [];
+      let cursor = before;
+      let more: number | null = null;
+      // A page that ends on a card entry may have stopped in the middle of a run (a cleared
+      // lane is hundreds of them), so keep reading until the run is over, in bigger pages.
+      for (let hop = 0; ; hop++) {
+        const query = `limit=${hop ? RUN_PAGE : AUDIT_PAGE}${cursor ? `&before=${cursor}` : ""}${who ? `&who=${encodeURIComponent(who)}` : ""}${kind ? `&kind=${kind}` : ""}`;
+        const r = await fetch(api(`/api/board/audit?${query}`), { headers: { Accept: "application/json" } });
+        const data = (await r.json().catch(() => null)) as { entries?: AuditEntry[]; next?: number | null; people?: string[] } | null;
+        if (!r.ok || !Array.isArray(data?.entries)) throw new Error(r.status === 401 ? SIGNED_OUT : "The audit log didn't load. Try again in a minute.");
+        // A slower answer for a filter that's since been changed is dropped.
+        if (n !== asked.current) return;
+        if (Array.isArray(data.people)) setPeople(data.people);
+        page.push(...data.entries);
+        more = data.next ?? null;
+        const last = page[page.length - 1];
+        if (!more || !last || !isCardAction(last.action) || hop >= RUN_HOPS) break;
+        cursor = more;
+      }
       setEntries((have) => (before && have ? [...have, ...page] : page));
-      setNext(data.next ?? null);
-      if (Array.isArray(data.people)) setPeople(data.people);
+      setNext(more);
     } catch (e) {
       if (n === asked.current) setError(e instanceof TypeError ? OFFLINE : (e as Error).message);
     } finally {
@@ -722,8 +758,30 @@ function AuditLog({ me }: { me: Props["me"] }) {
   const paged = useRef(false);
   useEffect(() => { if (changed > 0 && !paged.current) void load(null); }, [changed, load]);
 
+  // Which folded runs are open, by the id of their newest entry.
+  const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
+  const toggle = (id: number) => setOpened((was) => { const s = new Set(was); if (!s.delete(id)) s.add(id); return s; });
+  const rows = entries ? foldAudit(entries) : [];
   // A resend only records a `from` when the role changed with it (reissue in src/members.ts).
   const role = (e: AuditEntry) => (e.action === "invite_resent" && !e.from && e.to ? `${e.to} (unchanged)` : e.from || e.to ? `${e.from ?? "none"} → ${e.to ?? "none"}` : "");
+  /** One entry as a table row. */
+  const one = (e: AuditEntry) => (
+    <tr key={e.id}>
+      <td data-th="When">
+        <time dateTime={iso(e.at)}>{stampSeconds(e.at)}</time>
+        <span className="audit-utc">{iso(e.at)}</span>
+        <span className="audit-utc">entry {e.seq}</span>
+      </td>
+      <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (billing or plan change)" : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
+      <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
+      {e.detail ? (
+        <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
+      ) : (
+        <td data-th="To whom" className="audit-who">{e.target ? <span>{e.target}</span> : <span className="audit-none">the whole board</span>}</td>
+      )}
+      <td data-th="Role" className="audit-role">{role(e) ? <span>{role(e)}</span> : <span className="audit-none">{e.detail ? "none" : "no change"}</span>}</td>
+    </tr>
+  );
   return (
     <>
       <p className="mem-summary">
@@ -769,23 +827,33 @@ function AuditLog({ me }: { me: Props["me"] }) {
             <tr><th scope="col">When</th><th scope="col">Who did it</th><th scope="col">What</th><th scope="col">To whom or what</th><th scope="col">Role change</th></tr>
           </thead>
           <tbody>
-            {entries.map((e) => (
-              <tr key={e.id}>
-                <td data-th="When">
-                  <time dateTime={iso(e.at)}>{stampSeconds(e.at)}</time>
-                  <span className="audit-utc">{iso(e.at)}</span>
-                  <span className="audit-utc">entry {e.seq}</span>
-                </td>
-                <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (billing or plan change)" : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
-                <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
-                {e.detail ? (
-                  <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
-                ) : (
-                  <td data-th="To whom" className="audit-who">{e.target ? <span>{e.target}</span> : <span className="audit-none">the whole board</span>}</td>
-                )}
-                <td data-th="Role" className="audit-role">{role(e) ? <span>{role(e)}</span> : <span className="audit-none">{e.detail ? "none" : "no change"}</span>}</td>
-              </tr>
-            ))}
+            {rows.flatMap((row, at) => {
+              if (!row.run) return [one(row.entry)];
+              const run = row.entries;
+              const newest = run[0];
+              const oldest = run[run.length - 1];
+              const open = opened.has(newest.id);
+              // The run reaches the end of what's loaded and there's more to load: it may go on.
+              const atLeast = at === rows.length - 1 && !!next;
+              const count = `${run.length.toLocaleString("en-US")}${atLeast ? " or more" : ""}`;
+              const head = (
+                <tr key={`run-${newest.id}`} className="audit-run">
+                  <td data-th="When">
+                    <time dateTime={iso(newest.at)}>{stampSeconds(newest.at)}</time>
+                    <span className="audit-utc">{oldest.at === newest.at ? iso(newest.at) : `${iso(oldest.at)} to ${iso(newest.at)}`}</span>
+                    <span className="audit-utc">entries {oldest.seq} to {newest.seq}</span>
+                  </td>
+                  <td data-th="Who did it" className="audit-who"><span>{newest.actor}{newest.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
+                  <td data-th="What"><span>{newest.action === "card_deleted" ? `Deleted ${count} cards` : `Brought back ${count} cards`}{newest.detail?.via ? ` ${VIA[newest.detail.via]}` : ""}</span><span className="audit-code">{newest.action} × {count}</span></td>
+                  <td data-th="Cards" className="audit-card">
+                    <span>“{newest.detail?.title}” and {(run.length - 1).toLocaleString("en-US")} more{atLeast ? ", at least" : ""}</span>
+                    <button type="button" className="linkish audit-open" aria-expanded={open} onClick={() => toggle(newest.id)}>{open ? "Hide them" : `Show all ${run.length.toLocaleString("en-US")}`}</button>
+                  </td>
+                  <td data-th="Role" className="audit-role"><span className="audit-none">none</span></td>
+                </tr>
+              );
+              return open ? [head, ...run.map(one)] : [head];
+            })}
           </tbody>
         </table>
       )}
@@ -793,8 +861,8 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <div className="mem-actions">
           {next
             ? <button type="button" className="btn" disabled={busy} onClick={() => { paged.current = true; void load(next); }}>{busy ? "Loading…" : "Show older entries"}</button>
-            : <span className="mem-foot">{filtered ? "That's every match" : "That's the whole log"}: {entries.length} {entries.length === 1 ? "entry" : "entries"}.</span>}
-          {next && <span className="mem-foot">Showing the newest {entries.length}{filtered ? " that match" : ""}.</span>}
+            : <span className="mem-foot">{filtered ? "That's every match" : "That's the whole log"}: {entries.length.toLocaleString("en-US")} {entries.length === 1 ? "entry" : "entries"}{rows.length < entries.length ? `, shown as ${rows.length} lines` : ""}.</span>}
+          {next && <span className="mem-foot">Showing the newest {entries.length.toLocaleString("en-US")}{filtered ? " that match" : ""}{rows.length < entries.length ? `, as ${rows.length} lines` : ""}.</span>}
         </div>
       )}
     </>

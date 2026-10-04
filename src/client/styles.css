@@ -1532,6 +1532,9 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .audit-who, .audit-role { font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .audit-card { overflow-wrap: anywhere; }
 .audit-you, .audit-none { color: var(--muted); }
+/* A run of card entries drawn as one line (foldAudit in Members.tsx). */
+.audit-open { display: block; margin-top: 2px; font: 12px var(--font-mono); color: var(--accent-text); text-align: left; }
+.audit-open:hover { color: var(--ink); }
 
 .enc-shared { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); }
 .enc-fields { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }

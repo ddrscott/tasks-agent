@@ -1231,7 +1231,16 @@ each card.
   appears in the log, as the one who did it or the one it was done to). The server filters
   (`?kind=` and `?who=` on `GET /api/board/audit`), over the whole log, because the list is
   paged and filtering the 25 on screen would hide matches further back. Downloads are never
-  filtered.
+  filtered. **A run of card entries is one line.** Clearing a lane writes one `card_deleted`
+  entry per card, and 733 of those in a row buried every invite and role change. So three or
+  more `card_deleted` (or `card_restored`) entries in a row, by the same person, done the same
+  way, are drawn as one row: "Deleted 733 cards", the first title "and 732 more", the span of
+  times and entry numbers, and Show all 733, which opens the run into its rows and closes it
+  again (`foldAudit` in `Members.tsx`). When a page ends inside a run the tab keeps reading,
+  200 entries at a time and up to ten times, so the run is whole; past that the row says
+  "or more" and Show older entries carries on. It's how the tab draws the list and nothing
+  else: the stored log, each entry's number, the API's pages, and both downloads are exactly
+  as they were, one entry per card.
 - **"Shared with N"** is a button in the top bar, left of the account button, on a board with
   at least one member or pending invite ("Invited N" until someone accepts). It opens
   Members. When the top bar runs out of room it's the last button to give way: the count moves onto

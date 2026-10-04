@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When a pasted list leaves lines behind for different reasons, it gives each reason with the line it's about, not only the first one
 - On a shared board, a writer editing a card with an open question sees `#needs-ceo` locked under the Tags field, with the reason, instead of finding out on Save that they can't remove it
 - If a card you're editing on a shared board turns read only under you (you were made a viewer, the owner's plan lapsed, or the owner tagged it for an agent), what you typed stays on screen to copy, with a note that it wasn't saved. It used to vanish
+- In the audit log, a run of deleted cards by one person (clearing a lane, say) shows as one line you can open, like "Deleted 733 cards", so invites and role changes aren't buried. The downloads still list every card
 
 ## [0.2.0] - 2026-10-04
 
