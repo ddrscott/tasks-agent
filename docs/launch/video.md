@@ -11,8 +11,9 @@ voice-over needed; the captions carry it. Not recorded yet.
 - Reload the page right before each take. A reload starts the demo's script over.
 - Move the mouse slowly and stop it before you click.
 - Captions: white on the bottom third, one line each, on screen long enough to read twice.
-- The demo's agent runs on timers (`STEP_MS` in `src/client/Demo.tsx`). After you answer, it
-  says it's working about 2.5 seconds later, finishes the card about 8 seconds after that, picks
+- The demo's agent runs on timers (`STEP_MS` in `src/client/Demo.tsx`). The moment you answer,
+  its line says working and the card says `answered: …`. It writes its new status about 2.5
+  seconds later, finishes the card about 8 seconds after that, picks
   up the next card 5 seconds later, and asks its next question 6 seconds after that. The beats
   below are timed to that. If those numbers change, re-time beats 4 through 6.
 - Product Hunt takes a YouTube link only, and the video can't be private. Unlisted is fine.
@@ -23,8 +24,8 @@ voice-over needed; the captions carry it. Not recorded yet.
 |---|---|---|---|
 | 1 | 0:00 to 0:06 | The demo board, still. Three lanes. In Doing, the card "Migrate the orders table to the new schema" has an orange `$ needs input` line and a question with three buttons. | Your coding agents work from this board. |
 | 2 | 0:06 to 0:14 | Slow push in on that card. The question reads "The old orders.total column: drop it in this migration, or keep it a week?" The first option is outlined and marked REC. | This one hit a decision it shouldn't make alone. So it asked. |
-| 3 | 0:14 to 0:19 | Mouse moves to "Keep it a week, drop it in a follow-up" and clicks. The buttons go away, and so does "need you" in the top bar: nothing is waiting. | One tap. |
-| 4 | 0:19 to 0:31 | Hold on the card. Its line changes to `$ working`, and under it the card shows the agent's status, "working — …", quoting the answer. Open the card: the notes start with `ANSWER:` and the same `STATUS: working` line. Close it. | The answer goes on the card, and the agent picks it up. |
+| 3 | 0:14 to 0:19 | Mouse moves to "Keep it a week, drop it in a follow-up" and clicks. The buttons go away, and so does "need you" in the top bar: nothing is waiting. In the same moment the card's line changes to `$ working` and under it the card says "answered: Keep it a week, drop it in a follow-up". | One tap. |
+| 4 | 0:19 to 0:31 | Hold on the card. A couple of seconds later "answered: …" gives way to the agent's status, "working — got your answer (…)", quoting the answer. Open the card: the notes start with `ANSWER:` and the same `STATUS: working` line. Close it. | The answer goes on the card, and the agent picks it up. |
 | 5 | 0:31 to 0:38 | The card moves to Done on its own. | It finishes the card and moves it to Done. |
 | 6 | 0:38 to 0:50 | "Rate limit the public search endpoint" moves from To do to Doing by itself, shows "picked up — reading the search handler" on its face (its `STATUS:` line), then a new question appears on it in place of that line. "Need you" comes back in the top bar. | Then it claims the next one. And asks again when it needs to. |
 | 7 | 0:50 to 0:58 | Click "need you" in the top bar. The list opens: the open question with its buttons, and under it the line for the session that's waiting on it. | One list of everything waiting on you. |
