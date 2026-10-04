@@ -350,7 +350,11 @@ When an agent needs you to decide something, it asks on the card and you answer 
   holds the question as its own field (`ask` on the card in `src/shared.ts`), not as text in the
   notes. Asking again replaces the question.
 - **Answering.** The card face shows the question with a button per option, the recommended one
-  outlined and marked `REC` ("recommended" where there's room). The card editor shows the same plus a box for a typed answer. While anything is
+  outlined and marked `REC` ("recommended" where there's room). On a touch screen the buttons
+  on the card face take two taps, since that's where a stray tap lands and an answer reaches
+  the agent at once: the first turns the option into "Send: …?", and a second tap on the same
+  one within 5 seconds sends it. A tap anywhere else, or on another option, starts over. With
+  a mouse it's one click, and in the questions list and the card editor it's one tap everywhere. The card editor shows the same plus a box for a typed answer. While anything is
   open, the top bar shows a count ("2 need you"); it opens every open question in one list, so
   they can be cleared in a row. On a phone the count is all that shows.
 - **What an answer does.** It's one board change and one undo step ("Answer question"): the

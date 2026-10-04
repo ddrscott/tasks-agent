@@ -1,8 +1,9 @@
 // Questions an agent put on a card (the ask_ceo MCP tool), answered with one tap: a button per
 // option on the card itself, the same in the card editor with a box for anything else, and a
-// count in the top bar that opens them all so they can be cleared in a row.
+// count in the top bar that opens them all so they can be cleared in a row. On a touch screen
+// the buttons on the card itself take two taps, because the board is where stray taps land.
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Card } from "../shared";
 import { Popover } from "./Board";
 
@@ -19,6 +20,11 @@ const quiet = {
   onKeyDown: (e: React.SyntheticEvent) => e.stopPropagation(),
 };
 
+/** The same test the stylesheet uses for touch screens. */
+const TOUCH = "(hover: none) and (pointer: coarse)";
+/** How long a first tap on a card-face answer waits for its second. */
+const ARMED_MS = 5000;
+
 type BlockProps = {
   card: Card;
   /** On a card face: options only. Elsewhere there's also a box for a typed answer. */
@@ -31,21 +37,45 @@ export function AskBlock({ card, compact, before }: BlockProps) {
   const answer = useContext(AskContext);
   const [other, setOther] = useState("");
   const ask = card.ask;
-  if (!ask) return null;
   const send = (input: { choice?: number; text?: string }) => { before?.(); answer(card.id, input); };
+
+  // On a card face on a touch screen, the first tap on an option only arms it ("Send: …?") and
+  // a second tap on the same one sends. An answer goes to the agent the moment it's sent, and
+  // Undo can't take that back. A tap anywhere else, or five seconds, disarms it.
+  const [armed, setArmed] = useState<number | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (armed === null) return;
+    const timer = setTimeout(() => setArmed(null), ARMED_MS);
+    // Taps on this question's own options are left to pick(): the same one sends, another one arms instead.
+    const away = (e: PointerEvent) => {
+      const opt = e.target instanceof Element ? e.target.closest(".ask-opt") : null;
+      if (!opt || !root.current?.contains(opt)) setArmed(null);
+    };
+    // Capture phase, because cards stop pointer events from bubbling to keep taps from starting a drag.
+    document.addEventListener("pointerdown", away, true);
+    return () => { clearTimeout(timer); document.removeEventListener("pointerdown", away, true); };
+  }, [armed]);
+
+  if (!ask) return null;
+  function pick(i: number) {
+    if (compact && armed !== i && matchMedia(TOUCH).matches) { setArmed(i); return; }
+    setArmed(null);
+    send({ choice: i });
+  }
   return (
-    <div className={`ask${compact ? " compact" : ""}`} onClick={(e) => e.stopPropagation()}>
+    <div ref={root} className={`ask${compact ? " compact" : ""}`} onClick={(e) => e.stopPropagation()}>
       <div className="ask-q"><span className="ask-mark" aria-hidden="true">?</span>{ask.question}</div>
       <div className="ask-options">
         {ask.options.map((o, i) => (
           <button
             key={i} type="button" tabIndex={compact ? -1 : 0} {...quiet}
-            className={`ask-opt${ask.recommended === i ? " rec" : ""}`}
+            className={`ask-opt${ask.recommended === i ? " rec" : ""}${armed === i ? " armed" : ""}`}
             title={ask.recommended === i ? "The agent recommends this one" : undefined}
-            onClick={(e) => { e.stopPropagation(); send({ choice: i }); }}
+            onClick={(e) => { e.stopPropagation(); pick(i); }}
           >
             <span className="ask-n">{i + 1}</span>
-            <span className="ask-text">{o}</span>
+            <span className="ask-text">{armed === i ? `Send: ${o}?` : o}</span>
             {/* The outline alone reads as "selected", so the pick is always named; a card face has room for three letters. */}
             {ask.recommended === i && <span className="ask-rec">{compact ? "rec" : "recommended"}</span>}
           </button>

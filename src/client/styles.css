@@ -440,6 +440,10 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .ask-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ask-rec { flex: none; font: 10px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
 .ask.compact .ask-rec { font-weight: 600; padding: 1px 4px; border: 1px solid var(--accent); border-radius: var(--radius-sm); }
+/* After the first tap on a touch screen: the option now asks to be tapped again (Ask.tsx). */
+.ask-opt.armed, .ask-opt.armed:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.ask-opt.armed .ask-n { color: var(--accent-ink); }
+.ask.compact .ask-opt.armed .ask-rec { color: var(--accent-ink); border-color: var(--accent-ink); }
 .ask-other { display: flex; gap: 6px; }
 .ask-other .field { flex: 1; min-width: 0; padding: 7px 10px; font-size: 13px; }
 .asks-btn { border-color: var(--accent); }
