@@ -464,6 +464,9 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .lane-head .btn { height: 28px; width: 28px; }
 
 .cards { flex: 1; min-height: 60px; overflow-y: auto; padding: 4px 10px 6px; display: flex; flex-direction: column; gap: 8px; }
+/* An empty lane with quick add open has nothing in the list, not even the hint, so the list gives up
+   the room it holds for a drop and the input sits right under the lane's name. */
+.cards:empty { min-height: 0; padding-top: 0; padding-bottom: 0; }
 .lane-empty {
   border: 1px dashed var(--line); border-radius: var(--radius-sm);
   color: var(--muted); font-size: 13px; text-align: center; padding: 18px 12px;
