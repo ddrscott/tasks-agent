@@ -738,11 +738,13 @@ a.att-name:hover { color: var(--accent); }
 .sess-links a:hover, .sess-resume:hover { color: var(--accent); }
 .sess-id { color: var(--muted); }
 
-.menu { min-width: 220px; padding: 6px; display: flex; flex-direction: column; }
+.menu { min-width: 220px; max-width: min(300px, calc(100vw - 32px)); padding: 6px; display: flex; flex-direction: column; }
 .menu .who { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }
 .menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; }
 .menu button:hover { background: var(--surface-2); }
 .menu button.danger { color: var(--danger); }
+/* After the first tap on Clear or Delete: the label now says what a second tap does. */
+.menu button.danger.armed, .menu button.danger.armed:hover { background: var(--danger); color: var(--bg); font-weight: 600; }
 .menu-group { display: flex; flex-direction: column; margin: 4px 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
@@ -913,7 +915,10 @@ a.att-name:hover { color: var(--accent); }
   }
   .composer .foot { display: none; }
   .main .site-footer { padding: 4px 120px 8px 16px; } /* clear the floating Ask button */
-  .toast { bottom: 80px; }
+  .toast { bottom: 80px; width: max-content; max-width: calc(100vw - 32px); }
+  /* An open quick add sits at the bottom of its lane, right where the toast lands, and Undo would
+     cover Add card. While one is open the toast goes to the top of the screen instead. */
+  .app:has(.quick-add textarea) .toast { bottom: auto; top: calc(8px + env(safe-area-inset-top)); }
 }
 
 @media (max-width: 560px) {

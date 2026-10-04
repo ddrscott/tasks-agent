@@ -35,10 +35,14 @@ type Props = {
   onOpen(card: Card): void;
   onOptimistic(board: Board): void;
   onDragging(active: boolean): void;
-  toast(text: string, undo?: boolean): void;
+  /** `ms` is how long it stays; destructive actions ask for longer than the default. */
+  toast(text: string, undo?: boolean, ms?: number): void;
 };
 
 const LANE_PREFIX = "lane:";
+/** How long the toast stays after something was deleted: long enough to notice and reach Undo. */
+export const DESTRUCTIVE_TOAST_MS = 10_000;
+const count = (n: number, word = "card") => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // On a narrow screen the board shows one lane at a time and snaps to it (styles.css, max-width:
 // 900px). There, holding a dragged card in the strip along either side edge brings in the next
@@ -247,6 +251,10 @@ function LaneView(props: Props & {
   const { setNodeRef } = useDroppable({ id: LANE_PREFIX + lane.id });
   const [renaming, setRenaming] = useState(false);
   const [menu, setMenu] = useState(false);
+  // Clear and Delete take two taps on the same item: the first only changes its label to say
+  // what the second will do. Closing the menu, however it closes, starts over.
+  const [armed, setArmed] = useState<"clear" | "delete" | null>(null);
+  useEffect(() => { if (!menu) setArmed(null); }, [menu]);
   const adding = props.quickAddLane === lane.id;
   const matching = props.tagFilter ? cards.filter((c) => hasTag(c, props.tagFilter!)).length : cards.length;
 
@@ -307,12 +315,30 @@ function LaneView(props: Props & {
                   </div>
                 )}
                 {cards.length > 0 && (
-                  <button className="danger" onClick={() => { setMenu(false); void actions.clearLane(lane.id).then(() => props.toast(`Cleared ${cards.length} from ${lane.name}`, true)); }}>
-                    {props.isDone ? "Clear finished cards" : "Clear all cards"}
+                  <button
+                    className={`danger${armed === "clear" ? " armed" : ""}`}
+                    onClick={() => {
+                      if (armed !== "clear") { setArmed("clear"); return; }
+                      const n = cards.length;
+                      setMenu(false);
+                      void actions.clearLane(lane.id).then(() => props.toast(`Cleared ${count(n)} from ${lane.name}`, true, DESTRUCTIVE_TOAST_MS));
+                    }}
+                  >
+                    {armed === "clear" ? `Tap again to clear ${count(cards.length)}` : props.isDone ? "Clear finished cards" : "Clear all cards"}
                   </button>
                 )}
                 {props.lanes.length > 1 && (
-                  <button className="danger" onClick={() => { setMenu(false); void actions.deleteLane(lane.id).then(() => props.toast(`Deleted lane ${lane.name}`, true)); }}>Delete lane</button>
+                  <button
+                    className={`danger${armed === "delete" ? " armed" : ""}`}
+                    onClick={() => {
+                      if (armed !== "delete") { setArmed("delete"); return; }
+                      const what = `${lane.name}${cards.length ? ` and its ${count(cards.length)}` : ""}`;
+                      setMenu(false);
+                      void actions.deleteLane(lane.id).then(() => props.toast(`Deleted ${what}`, true, DESTRUCTIVE_TOAST_MS));
+                    }}
+                  >
+                    {armed === "delete" ? `Tap again to delete ${lane.name}${cards.length ? ` and its ${count(cards.length)}` : ""}` : "Delete lane"}
+                  </button>
                 )}
               </div>
             </Popover>

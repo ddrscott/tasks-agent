@@ -6,7 +6,7 @@ import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
 import { clean, tagsByUse, tidyTags, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
-import { BoardView, localToday, Popover, type Actions } from "./Board";
+import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { Chat } from "./Chat";
@@ -89,7 +89,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
   const [chatOpen, setChatOpen] = useState(() => {
     try { return localStorage.getItem("todo-chat") !== "closed" && innerWidth > 900; } catch { return innerWidth > 900; }
   });
-  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
@@ -259,10 +259,10 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
     agent.stub.undoRedo().then(setStack).catch(() => {});
   }, [board, agent]);
 
-  const say = useCallback((text: string, undo = false) => setToast({ text, action: undo ? "undo" : null, key: Date.now() }), []);
+  const say = useCallback((text: string, undo = false, ms?: number) => setToast({ text, action: undo ? "undo" : null, key: Date.now(), ms }), []);
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 5000);
+    const t = setTimeout(() => setToast(null), toast.ms ?? 5000);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -498,7 +498,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
             const to = board.lanes.find((l) => l.id === laneId)?.name ?? "lane";
             void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true));
           }}
-          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true)); }}
+          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS)); }}
           isDone={editingCard.laneId === doneLane && board.lanes.length > 1}
           onToggleDone={board.lanes.length > 1 ? () => {
             const reopen = editingCard.laneId === doneLane;
@@ -508,7 +508,7 @@ function Workspace({ me, onSignOut, onConnect }: { me: Me; onSignOut(): void; on
           } : undefined}
           onRemoveAttachment={(id) => {
             const name = editingCard.attachments?.find((a) => a.id === id)?.name ?? "file";
-            void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true));
+            void agent.stub.removeAttachment(editingCard.id, id).then(() => say(`Removed "${name}"`, true, DESTRUCTIVE_TOAST_MS));
           }}
           onClose={() => setEditing(null)}
         />

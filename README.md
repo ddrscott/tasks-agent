@@ -97,6 +97,13 @@ run ahead of whatever serves the zone.
   the order (`sortedIds` in `src/shared.ts`) and the server only applies it (`orderLane`),
   so it works on an encrypted board, where the server can't read titles or due dates.
   `npm run check:sort` covers both.
+- **Clearing and deleting a lane.** Clear all cards and Delete lane, in a lane's menu, take two
+  taps on the same item. The first changes its label to say what the second will do ("Tap
+  again to clear 21 cards", "Tap again to delete Doing and its 3 cards") and changes nothing;
+  closing the menu starts over. Both are still one Undo. Toasts after something is removed (a
+  cleared or deleted lane, a deleted card, a removed file) say how many and stay 10 seconds
+  instead of 5. Up to 900px wide, the toast moves to the top of the screen while a quick add
+  is open, so Undo never covers Add card.
 - **Tags.** A card can carry up to 10 tags, like `#agent` for work an AI agent owns.
   Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
