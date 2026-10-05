@@ -596,6 +596,16 @@ section("access rules (pure)");
     ok("what a person sees stays: a joiner inside an emoji family and between Devanagari letters, a variation selector on a heart, and an Arabic number sign in front of its digits", vis(`${cp(0x1f468)}${cp(0x200d)}${cp(0x1f469)}`) === `${cp(0x1f468)}${cp(0x200d)}${cp(0x1f469)}` && vis(`${cp(0x915)}${cp(0x94d)}${cp(0x200d)}${cp(0x937)}`) === `${cp(0x915)}${cp(0x94d)}${cp(0x200d)}${cp(0x937)}` && vis(`${cp(0x2764)}${cp(0xfe0f)}`) === `${cp(0x2764)}${cp(0xfe0f)}` && vis(`${cp(0x600)}${cp(0x661)}${cp(0x662)}`) === `${cp(0x600)}${cp(0x661)}${cp(0x662)}` && vis(`a${cp(0x200d)}b`) === "ab");
   }
 
+  // A member is told the owner's Pro plan isn't active, never that it "lapsed": an admin may have taken it back, and which it was isn't the member's to know.
+  ok("what a member reads when the board goes view only is true whether the plan ran out or an admin took it back", (() => {
+    const base = { board: "b".repeat(32), ownerEmail: "owner@example.com" };
+    const w = { ...base, role: "writer", effective: "writer", reason: null };
+    const wOff = { ...base, role: "writer", effective: "viewer", reason: "plan_lapsed" };
+    const vOff = { ...base, role: "viewer", effective: "viewer", reason: "plan_lapsed" };
+    const said = [memberUi.bannerText(wOff).rest, memberUi.bannerText(vOff).rest, memberUi.accessChangeText(w, wOff), memberUi.bannerText(wOff).lead, memberUi.bannerText(vOff).lead, rules.READ_ONLY_LAPSED];
+    return said.every((t) => typeof t === "string" && !/laps|expir|cancel|admin|took|taken/i.test(t)) && said.slice(0, 3).every((t) => t.includes("Pro plan isn't active right now")) && /Pro plan is back/.test(memberUi.accessChangeText(wOff, w));
+  })());
+
   // Which refused lines of a pasted list can be sent again as they are, and which have to be edited first.
   ok("a line refused for an owner tag, a look-alike, a blank title, or its size has to be edited: trying again can't help", (() => {
     const r = () => memberRoom(b);

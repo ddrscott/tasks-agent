@@ -39,7 +39,7 @@ type Props = {
   mode?: Mode;
   /** The owner's id, on a board someone shared with you: files go to and come from that board. */
   board?: string;
-  /** On a shared board: it's view only because its owner's Pro plan lapsed, not because of your role. */
+  /** On a shared board: it's view only because its owner's Pro plan isn't active (run out, or taken back by an admin: the member isn't told which), not because of your role. */
   lapsed?: boolean;
   /**
    * The owner's "These words are mine now": take the member's mark off this card, as it's
@@ -101,7 +101,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
         {hasDraft(unsaved) && (
           <Unsaved draft={unsaved} why={held
             ? `${owner ?? "The board's owner"} made this card a work order for their agents while you were editing it.`
-            : lapsed ? `${owner ?? "The board's owner"}'s Pro plan lapsed while you were editing this card, so the board is view only.`
+            : lapsed ? `${owner ?? "The board's owner"}'s Pro plan stopped being active while you were editing this card, so the board is view only.`
             : "Your role changed to viewer while you were editing this card."} />
         )}
         <AskBlock card={card} />

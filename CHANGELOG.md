@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Your agents are told a member wrote a card's title everywhere the title is repeated to them: the list of claimed cards in `get_board`, a refused claim, `ask_ceo`, and what `move_cards`, `update_card`, and `delete_cards` answer
 - On a shared board a member's title can't dress up one of your tags with a look-alike `#`, an odd dash or dot, a space after the `#`, or an invisible character inside the word. `#agent-smith` and `C# agent notes` are still fine
 - Typing a look-alike of one of the owner's tags in the middle of a line in Add a card says what it was read as ("#ag3nt reads as #agent."), the same as the card editor does
+- When a board you're a member of goes view only because of its owner's plan, it says their Pro plan isn't active right now, which is true whether the plan ran out or an admin took it back
 
 ### Fixed
 - Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board

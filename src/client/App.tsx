@@ -572,7 +572,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   }, [canWrite]);
   /** Why nothing can be typed here any more, for an editor that was open when it happened. Null while this account can write. */
   const frozen = !access || canWrite ? null
-    : access.reason === "plan_lapsed" ? `${access.ownerEmail}'s Pro plan lapsed, so this board is view only for now.`
+    : access.reason === "plan_lapsed" ? `${access.ownerEmail}'s Pro plan isn't active right now, so this board is view only.`
     : "Your role on this board is viewer now.";
 
   useEffect(() => {

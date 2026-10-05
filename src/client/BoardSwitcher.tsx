@@ -64,7 +64,7 @@ export function BoardSwitcher({ boards, access, onSwitch, onOpen }: Props) {
                   <span className="board-row-name">{b.ownerEmail}</span>
                   <span className="board-row-sub">
                     <span className="role-chip" data-role={b.effective}>{b.role}</span>
-                    {b.reason === "plan_lapsed" && <span>view only: the owner's plan lapsed</span>}
+                    {b.reason === "plan_lapsed" && <span>view only: the owner's Pro plan isn't active</span>}
                   </span>
                 </span>
               </button>

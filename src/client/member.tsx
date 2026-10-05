@@ -52,18 +52,25 @@ export const ROLE_LINE = {
   writer: "You can add, edit, move, and delete cards and attach files. Lanes, undo, the owner's agent cards, and board settings stay with the owner.",
 } as const;
 
-/** The line under the top bar of a shared board: whose it is, what you can do, and what would change that. */
+/**
+ * The line under the top bar of a shared board: whose it is, what you can do, and what would change that.
+ *
+ * Wherever a member is told the owner's Pro plan is why the board is view only, the words are
+ * "isn't active right now", never "lapsed" or "expired": the plan may have run out, or a site
+ * admin may have taken back a Pro they gave, and a member is told neither which nor that
+ * there's a difference. That's the owner's business.
+ */
 export function bannerText(a: MemberAccess): { lead: string; rest: string } {
   const o = a.ownerEmail;
   if (a.role === "writer" && a.reason === "plan_lapsed") {
-    return { lead: `${o}'s board is view only for now.`, rest: "Their Pro plan lapsed. Nothing was deleted, and you can change cards again when the plan is back." };
+    return { lead: `${o}'s board is view only for now.`, rest: "Their Pro plan isn't active right now. Nothing was deleted, and you can change cards again when it's back." };
   }
   if (a.effective === "writer") {
     return { lead: `You're a writer on ${o}'s board.`, rest: "You can change cards. Lanes, undo, questions, agent cards, and board settings are the owner's." };
   }
-  // A viewer while the owner's plan is lapsed: being made a writer wouldn't help, so don't send them to ask for it.
+  // A viewer while the owner's plan is off: being made a writer wouldn't help, so don't send them to ask for it.
   if (a.reason === "plan_lapsed") {
-    return { lead: `You're viewing ${o}'s board. View only.`, rest: "Their Pro plan lapsed, so nobody but them can change cards until it's back. Nothing was deleted." };
+    return { lead: `You're viewing ${o}'s board. View only.`, rest: "Their Pro plan isn't active right now, so nobody but them can change cards until it's back. Nothing was deleted." };
   }
   return { lead: `You're viewing ${o}'s board. View only.`, rest: `To change cards, ask ${o} to make you a writer.` };
 }
@@ -80,7 +87,7 @@ export function accessChangeText(was: MemberAccess, now: MemberAccess): string |
   }
   if (was.reason !== now.reason && now.role === "writer") {
     return lapsed
-      ? `${o}'s Pro plan lapsed, so this board is view only for now. Writing comes back when the plan does.`
+      ? `${o}'s Pro plan isn't active right now, so this board is view only. Writing comes back when the plan does.`
       : `${o}'s Pro plan is back. You can change cards again.`;
   }
   return null;
