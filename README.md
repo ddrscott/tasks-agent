@@ -1607,7 +1607,18 @@ tags that direct them are the owner's alone, and so are the cards that carry the
 
   The refusal says what it was read as: `[owner_tag] #ship_ok reads as #ship-ok. Only the
   board's owner can put #ship-ok on a card …`. A title's `#` words are read the same way, and
-  `\uff03agent` with a fullwidth # counts. Plain a-to-z words are only ever judged by 1 and 2,
+  `\uff03agent` with a fullwidth # counts. So does anything else drawn like a `#` (the music sharp, the
+  viewdata square, the equal-and-parallel sign, the Tifinagh yazh, the CJK well, a box-drawing
+  cross: `HASH`), a `#` with one space after it (`# agent`, though not `C# agent notes`, where
+  the `#` ends a word of its own), and a word broken up by any dash or hyphen Unicode has
+  (category Pd and the minus signs: `#ship-ok` with a non-breaking hyphen, `#needs-ceo` with
+  an en dash), by a dot or a middle dot (`#a.gent`), or by a character that takes no room.
+  Those last are asked of Unicode by category (Cf, format) instead of kept as a list, which
+  is how the shorthand, hieroglyph, and musical format controls and the Arabic number sign
+  got past the list (`ownerTagTyped`, `INVISIBLE`). The same category now comes out of what a
+  member stores (`ALWAYS_HIDDEN`), except the joiners with their own rule and the few format
+  characters a person sees. `#agent-smith`, `#gauntlets`, and `#needs-ceo-review` read as
+  none of the owner's and stay a member's to write. Plain a-to-z words are only ever judged by 1 and 2,
   so `agents`, `urgent`, `reagent`, `agency`, `shipping`, `ship`, `ok`, and `agent2` are a
   member's to use, and so is a word in another alphabet that isn't a letter away from an
   owner tag (Russian `\u0430\u0433\u0435\u043d\u0442` reads `areht`). **What it costs:** a real word in another

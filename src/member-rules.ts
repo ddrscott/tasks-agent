@@ -192,7 +192,17 @@ export const plainText = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u00
 // (Arabic, Syriac, N'Ko, Mongolian, and the Indic scripts), and a variation selector right
 // after a visible character (the heart that's red, not black). Anywhere else they go too.
 
-const ALWAYS_HIDDEN = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b\u200e\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufeff\uffa0\ufff9-\ufffb\u{1d173}-\u{1d17a}\u{e0000}-\u{e007f}]/gu;
+// Which characters those are is asked of Unicode, not kept as a list that's one block behind:
+// everything in the general category Cf (format) goes, which takes in the direction controls,
+// the tag block, and the format controls of shorthand, Egyptian hieroglyphs, and music as well
+// (U+1BCA0, U+13430, U+1D173 and their neighbours). The joiners are Cf too and have their own
+// rule below. A handful of Cf characters are signs a person does see (the Arabic number sign
+// and its kin, which sit in front of digits): those stay in prose, and are never counted when
+// a tag is read (INVISIBLE, further down). After Cf come the invisible characters that aren't
+// in it: blank letters and fillers, the Braille blank, the null notehead.
+const SEEN_FORMAT = String.raw`\u0600-\u0605\u06dd\u070f\u0890\u0891\u08e2\u{110bd}\u{110cd}`;
+const BLANK_NOT_FORMAT = String.raw`\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2060-\u206f\u2800\u3164\uffa0\ufff9-\ufffb\u{1d159}\u{e0000}-\u{e007f}`;
+const ALWAYS_HIDDEN = new RegExp(String.raw`(?![\u200c\u200d${SEEN_FORMAT}])\p{Cf}|[${BLANK_NOT_FORMAT}]`, "gu");
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 const PICTURE = String.raw`[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f\u20e3]`;
 const SHAPED = String.raw`[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Nko}\p{Script=Mongolian}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]`;
@@ -307,8 +317,14 @@ export const isOwnerTag = (tag: string) => OWNER_TAGS.includes(tag);
 // `agency`, `shipping`, `ship`, `ok`, and `agent2` are a member's to use. So is a word in
 // another alphabet that isn't a letter away from an owner tag: Russian `\u0430\u0433\u0435\u043d\u0442` reads `areht`.
 
-/** Characters that take no room on screen: zero-width spaces and joiners, the soft hyphen, direction marks, variation selectors, and blank filler letters. */
-const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0]|\udb40[\udc00-\uddef]/g;
+/**
+ * Characters that don't count when a tag is read: every format character (Cf: zero-width
+ * spaces and joiners, the soft hyphen, direction marks, the tag block, the shorthand,
+ * hieroglyph, and musical format controls, the Arabic number signs), variation selectors, and
+ * the blank letters and fillers that aren't format characters. Wider than what's taken out of
+ * stored text (ALWAYS_HIDDEN): a joiner that shapes a word in prose is still nothing inside `#agent`.
+ */
+const INVISIBLE = new RegExp(String.raw`[\p{Cf}${BLANK_NOT_FORMAT}\ufe00-\ufe0f\u{e0080}-\u{e01ef}]`, "gu");
 /** Letters of other alphabets, and Latin letters outside a to z, that are drawn like a plain Latin one. Not every such letter there is: the common ones. Rules 4 and 5 above are for the rest. */
 const LOOKS_LIKE: Readonly<Record<string, string>> = (() => {
   const t: Record<string, string> = {
@@ -399,21 +415,50 @@ function lookalikeAdded(p: Card | undefined, c: Card): [string, string] | null {
   }
   return null;
 }
+// A `#` doesn't have to be U+0023 to be read as one. These are drawn like it: the music sharp,
+// the viewdata square, the equal-and-parallel sign, the Tifinagh letter yazh, the smash
+// product, the microtonal sharp, the CJK character for a well, and the box-drawing crosses.
+// (The fullwidth and small `#` are unfolded to the plain one by NFKC before this is asked.)
+const HASH = String.raw`#\u266f\u2317\u22d5\u2d4c\u2a33\u{1d130}\u4e95\u256a\u256b\u256c`;
+// What can sit inside a tag without breaking it up on screen: any dash or hyphen Unicode has
+// (category Pd, plus the minus signs and the hyphen bullet), connectors like `_`, and dots.
+const DASHES = String.raw`_\p{Pd}\p{Pc}\u2212\u02d7\u2043`;
+const DOTS = String.raw`.\u00b7\u0387\u05c5\u2022\u2027\u2219\u22c5\u30fb\u3002\u2e31\u2e33\u16eb\u{10101}`;
+const TAG_WORD = String.raw`[\p{L}\p{N}\p{M}${DASHES}${DOTS}]{1,64}`;
+// A hash and the word after it, looked for at every character (the lookahead takes nothing, so
+// a hash look-alike that's a letter is still found in the middle of a word). One space between
+// them counts ("# agent") unless the hash is the end of a word of its own: "C# agent notes" is
+// about C#.
+const TAG_IN_TITLE = new RegExp(String.raw`(?=[${HASH}]\p{M}*(${TAG_WORD}))|(?=(?<![\p{L}\p{N}])[${HASH}]\p{M}* (${TAG_WORD}))`, "gu");
+const DOT = new RegExp(`[${DOTS}]`, "u");
+
 /**
  * An owner tag written into a title with its `#` ("Do evil #agent", "Do #agent evil",
  * "[#agent]"). It isn't a tag there, but on a card's face it looks like one that took, and a
  * model reading the title sees the same thing. So a member's title can't hold one anywhere.
  * `#agents` and "talk to the agent" are just words.
+ *
+ * It's read the way it shows. Compatibility forms are unfolded (NFKC), characters that take
+ * no room come out, a hash look-alike is a hash (HASH), and the word after it is read with its
+ * dashes and dots folded away like any tag (`ownerTagLike`): `#ship‑ok` with a non-breaking
+ * hyphen, `#needs–ceo` with an en dash, `#a.gent`, `#a·gent`. The word is also read up to its
+ * first dot, so `#agent.` and `#agent.md` are still `#agent`. `#agent-smith`, `#gauntlets`,
+ * and `#needs-ceo-review` read as none of the owner's and are a member's to write.
+ * Returns the owner tag and what was typed for it.
  */
-export function ownerTagInTitle(title: string): string | null {
-  // Read the way it shows: `\uff03agent` is #agent, and an invisible character inside the tag isn't there.
+export function ownerTagTyped(title: string): { tag: string; typed: string } | null {
   const shown = title.normalize("NFKC").replace(INVISIBLE, "");
-  for (const m of shown.matchAll(/[#\u266f\u2317]([\p{L}\p{N}\p{M}_-]{1,64})/gu)) {
-    const tag = ownerTagLike(m[1]);
-    if (tag) return tag;
+  for (const m of shown.matchAll(TAG_IN_TITLE)) {
+    const word = m[1] ?? m[2] ?? "";
+    for (const typed of new Set([word, word.split(DOT)[0]])) {
+      const tag = typed ? ownerTagLike(typed) : null;
+      if (tag) return { tag, typed };
+    }
   }
   return null;
 }
+/** The owner tag a title holds with its `#`, or reads as holding. Null for a title that holds none. */
+export const ownerTagInTitle = (title: string): string | null => ownerTagTyped(title)?.tag ?? null;
 /** `typed` is what the member wrote when it only reads as the owner's tag: the refusal says which tag it was taken for. */
 export const ownerTagError = (tag: string, typed?: string) =>
   `[owner_tag] ${typed && typed !== tag ? `#${typed.slice(0, 40)} reads as #${tag}. ` : ""}Only the board's owner can put #${tag} on a card or take it off. The owner's agents take their orders from that tag.`;

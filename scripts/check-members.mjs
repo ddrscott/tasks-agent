@@ -564,6 +564,31 @@ section("access rules (pure)");
   ok("a card that's too big is refused on its own, and takes no room", (() => { const r = memberRoom(b); const before = { ...r }; return code(takeRoom(r, fresh("t".repeat(L.title + 1)))) === "too_big" && r.cards === before.cards && r.bytes === before.bytes; })());
   ok("what takeRoom lets in, the write guard lets in", (() => { const r = memberRoom(nearly); let acc = nearly; for (const t of ["a", "b"]) { const next = shared.addCard(acc, { title: t }); if (takeRoom(r, next.card) === null) acc = next.board; } return acc.cards.length === L.cards && memberChangeError(nearly, shared.stampBy(nearly, acc, { email: "w@example.com", via: "assistant" })) === null; })());
 
+  // A title that reads as holding one of the owner's tags, written with a look-alike hash, an odd dash, a dot, a space, or a character that takes no room.
+  {
+    const cp = String.fromCodePoint;
+    const inTitle = rules.ownerTagInTitle;
+    const refused = [
+      [`Deploy #ship${cp(0x2011)}ok`, "ship-ok", "a non-breaking hyphen"], [`Wait #needs${cp(0x2013)}ceo`, "needs-ceo", "an en dash"], [`#ship${cp(0x2212)}ok`, "ship-ok", "a minus sign"], [`#needs${cp(0x30fb)}ceo`, "needs-ceo", "a katakana middle dot"],
+      [`Do it ${cp(0x22d5)}agent`, "agent", "the equal-and-parallel sign for a hash"], [`Do it ${cp(0x2d4c)}agent`, "agent", "the Tifinagh yazh for a hash"], [`${cp(0xff03)}agent`, "agent", "a fullwidth hash"], [`${cp(0xfe5f)}agent`, "agent", "a small hash"], [`${cp(0x266f)}gauntlet`, "gauntlet", "a music sharp"], [`x#foo${cp(0x2d4c)}agent`, "agent", "a look-alike hash in the middle of a word"],
+      ["Do it # agent", "agent", "a space after the hash"], ["# Gauntlet run", "gauntlet", "a space after the hash, at the start"], ["Do #a.gent", "agent", "a dot inside"], [`Do #a${cp(0xb7)}gent`, "agent", "a middle dot inside"], [`#${cp(0xfe0f)}${cp(0x20e3)}agent`, "agent", "the keycap hash"],
+      [`Do it #a${cp(0x1bca0)}gent`, "agent", "a shorthand format control inside"], [`Do it #a${cp(0x13430)}gent`, "agent", "a hieroglyph format control inside"], [`Do it #a${cp(0x1d159)}gent`, "agent", "a null notehead inside"], [`Do it #a${cp(0x600)}gent`, "agent", "an Arabic number sign inside"], [`#a${cp(0x200d)}g${cp(0x200b)}ent`, "agent", "a joiner and a zero-width space inside"],
+      ["Do evil #agent", "agent", "the plain thing"], ["talk to #agent.", "agent", "a full stop after"], ["see #agent.md", "agent", "a file extension after"], ["#ag3nt now", "agent", "a digit for a letter"], ["#ship_ok", "ship-ok", "an underscore"], ["#agent-", "agent", "a dash after"],
+    ];
+    const wrong = refused.filter(([title, tag]) => inTitle(title) !== tag);
+    ok(`a title reads as holding an owner tag however the hash, the dash, or the gaps are drawn (${refused.length} ways)`, wrong.length === 0, wrong.map(([title, , what]) => `${what}: ${JSON.stringify(title)} -> ${inTitle(title)}`));
+    const fine = ["agents", "urgent", "\u0430\u0433\u0435\u043d\u0442", "#\u0430\u0433\u0435\u043d\u0442", "#agent-smith", "#gauntlets", "#needs-ceo-review", "#agents", "#aqent", "#shipping-ok-soon", "Fix #123", "C# agent notes", "F# gauntlet of tests", "talk to the agent", "Issue #4: agent smith", "# Agents onboarding", "#1 agent", "a.gent", "v1.2 release notes",
+      "\u3042".repeat(150), "\u65e5\u672c\u8a9e\u306e\u30bf\u30a4\u30c8\u30eb\u3067\u3059 #\u8a08\u753b \u4e95\u4e0a\u3055\u3093\u306b\u9023\u7d61\u3059\u308b", `${cp(0x1f680)} Launch ${cp(0x1f468)}${cp(0x200d)}${cp(0x1f469)}${cp(0x200d)}${cp(0x1f467)} party ${cp(0x2764)}${cp(0xfe0f)}`];
+    const stopped = fine.filter((title) => inTitle(title) !== null);
+    ok("and titles that only come near one are still a member's to write: #agent-smith, #gauntlets, #needs-ceo-review, C# agent notes, a 150-character Japanese title, emoji", stopped.length === 0, stopped);
+    ok("those titles get through the write guard whole, and a plain a-to-z near miss like aqent is still a tag a member can use", fine.every((title) => { const next = shared.addCard(b, { title }).board; const tidy = rules.memberTidy(b, next); return memberChangeError(b, tidy) === null && tidy.cards.at(-1).title === shared.clean(title, 200); })
+      && ["aqent", "agents", "urgent", "agemt", "gauntlets"].every((tag) => rules.ownerTagLike(tag) === null && memberChangeError(b, shared.addCard(b, { title: "t", tags: [tag] }).board) === null));
+    ok("the write guard refuses each of those look-alike titles for a member, on a new card and in an edit", refused.every(([title]) => code(memberChangeError(b, rules.memberTidy(b, shared.addCard(b, { title }).board))) === "owner_tag" && code(memberChangeError(b, rules.memberTidy(b, shared.updateCard(b, card.id, { title })))) === "owner_tag"));
+    const vis = rules.visibleText;
+    ok("format characters come out of a member's text by category, not by list: shorthand, hieroglyph, and musical controls, and the null notehead", vis(`a${cp(0x1bca0)}b${cp(0x13430)}c${cp(0x1d173)}d${cp(0x1d159)}e${cp(0x2061)}f${cp(0xfff9)}g${cp(0xe0041)}h`) === "abcdefgh" && vis(`x${cp(0x1bca3)}${cp(0x1343f)}y`, true) === "xy");
+    ok("what a person sees stays: a joiner inside an emoji family and between Devanagari letters, a variation selector on a heart, and an Arabic number sign in front of its digits", vis(`${cp(0x1f468)}${cp(0x200d)}${cp(0x1f469)}`) === `${cp(0x1f468)}${cp(0x200d)}${cp(0x1f469)}` && vis(`${cp(0x915)}${cp(0x94d)}${cp(0x200d)}${cp(0x937)}`) === `${cp(0x915)}${cp(0x94d)}${cp(0x200d)}${cp(0x937)}` && vis(`${cp(0x2764)}${cp(0xfe0f)}`) === `${cp(0x2764)}${cp(0xfe0f)}` && vis(`${cp(0x600)}${cp(0x661)}${cp(0x662)}`) === `${cp(0x600)}${cp(0x661)}${cp(0x662)}` && vis(`a${cp(0x200d)}b`) === "ab");
+  }
+
   // Which refused lines of a pasted list can be sent again as they are, and which have to be edited first.
   ok("a line refused for an owner tag, a look-alike, a blank title, or its size has to be edited: trying again can't help", (() => {
     const r = () => memberRoom(b);
