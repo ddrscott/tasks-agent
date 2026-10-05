@@ -2072,6 +2072,9 @@ address or a guess, and nothing on screen offers a change the server would refus
 - **Attachments** on a shared board go through `?board=`. A viewer gets Open and Download and
   no Attach or Remove. A file a member attached says "attached by dana@example.com, a member"
   under its name.
+- **A writer's delete** says who can take it back: `Deleted "Ship the invoice". Only
+  dana@example.com can bring it back, with Undo on their board.` The owner's toast has the
+  Undo; the writer's never did, and used to say nothing about it.
 
 ## // SEARCH
 

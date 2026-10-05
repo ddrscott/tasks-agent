@@ -933,7 +933,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
             const to = board.lanes.find((l) => l.id === laneId)?.name ?? "lane";
             void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true), refused);
           }}
-          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS), refused); }}
+          // The owner gets the Undo for a writer's delete (in their toast, and in their undo history). The writer has none, so their toast says who does.
+          onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(access ? `Deleted "${t}". Only ${access.ownerEmail} can bring it back, with Undo on their board.` : `Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS), refused); }}
           onClaim={member ? undefined : () => void agent.stub.claimWords(editingCard.id).then(() => say("Marked as your words. Your agents will read this card as yours.", true), refused)}
           isDone={editingCard.laneId === doneLane}
           onToggleDone={doneLane ? () => {
