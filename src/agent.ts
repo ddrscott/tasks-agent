@@ -964,7 +964,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const card = board.cards.find((c) => c.id === input.id)!;
       // The title it repeats may be a member's words: say so right there, the same as get_board would.
       const theirs = ops.memberNote(card, email ?? this.ownerEmail());
-      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]${theirs ? ` (${theirs.replace(/^ — /, "")})` : ""}: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG, email ?? this.ownerEmail()) };
+      return { ok: true, summary: ops.oneLine(`Asked on "${card.title}" [${card.id}]${theirs ? ` (${theirs.replace(/^ — /, "")})` : ""}: ${card.ask!.question}`), board: ops.describeBoard(board, NEEDS_CEO_TAG, email ?? this.ownerEmail()) };
     } catch (e) {
       return { ok: false, summary: (e as Error).message };
     }
@@ -1149,7 +1149,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const member = named.flatMap((id) => {
         const card = before.cards.find((c) => c.id === id);
         const line = card ? ops.memberLine(card, owner) : "";
-        return line ? [`  - [${id}]${line}`] : [];
+        return line ? [`  - ${ops.oneLine(`[${id}]${line}`)}`] : [];
       }).join("\n");
       return { ok: true, summary, board: ops.describeBoard(board, undefined, this.ownerEmail()), ids, ...(member ? { member } : {}) };
     } catch (e) {

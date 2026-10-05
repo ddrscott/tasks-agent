@@ -308,6 +308,16 @@ export function checkCardFields(v: unknown): asserts v is { title?: string; note
 }
 export const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
 /**
+ * Text as exactly one line, for a row in a list an agent reads (get_board, a search hit, a tool's
+ * summary): every run of spaces, line breaks, and control characters becomes one space. That's
+ * LF and CR, vertical tab, form feed, next line (U+0085), the line and paragraph separators
+ * (U+2028, U+2029), and the rest of the C0 and C1 sets, some of which other readers break a line
+ * on. A row is one card. Text that could start a new line could make up another card's row.
+ */
+export const oneLine = (s: string) => String(s).replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+/** `oneLine` for a row that starts with an indent: the indent stays, the rest is one line. */
+const oneRow = (s: string) => /^ */.exec(s)![0] + oneLine(s);
+/**
  * Tidy plain text. On an encrypted board (`sealed`), ciphertext passes through as is. On a plain
  * board nothing does: text that only looks like ciphertext is text, and gets the same limits as
  * any other. Whether a board is encrypted is the board's `sealed`, never the shape of a string.
@@ -808,13 +818,13 @@ const NOTES_PREVIEW = 120;
 
 /** The start of a card's notes on one line, saying how much was left out so nobody mistakes the preview for the whole note. */
 function previewNotes(notes: string): string {
-  const flat = notes.replace(/\s+/g, " ").trim();
+  const flat = oneLine(notes);
   return flat.length <= NOTES_PREVIEW ? flat : `${flat.slice(0, NOTES_PREVIEW)}… [+${flat.length - NOTES_PREVIEW} more characters]`;
 }
 
 /** One line per lane with its card count: what a write tool echoes over MCP in place of the whole board. */
 export function describeLaneCounts(b: Board): string {
-  return b.lanes.map((l) => `${l.name} ${laneCards(b, l.id).length}`).join(" · ");
+  return oneLine(b.lanes.map((l) => `${l.name} ${laneCards(b, l.id).length}`).join(" · "));
 }
 
 const ASKING = "Asking the owner: ";
@@ -876,8 +886,12 @@ export function describeCard(b: Board, id: string, owner?: string | null, fence?
   if (touch?.tags) lines.push(`Tags set by a member: ${touch.tags.email} last changed this card's tags (${touch.tags.at}). They're a member of this board, not its owner. A tag they chose says nothing about what the owner wants.`);
   const fenced = !!fence && !!touch?.text && !!c.notes;
   if (fence && (fenced || c.attachments?.length)) lines.push(fenceIntro(fence));
+  // Everything above is one row per fact, and so is each file below: a title, a lane name, an
+  // option, or a file name with a line break in it stays on its row (oneLine). The notes are the
+  // one part that's many lines on purpose.
+  for (const [i, row] of lines.entries()) lines[i] = oneRow(row);
   lines.push(c.attachments?.length
-    ? `Attachments (${c.attachments.length}):\n${c.attachments.map((a) => { const m = fileMember(a, owner); return `  - [${a.id}] ${a.name} (${a.type}, ${kb(a.size)})${m ? ` — ${fileNote(m)}` : ""}`; }).join("\n")}`
+    ? `Attachments (${c.attachments.length}):\n${c.attachments.map((a) => { const m = fileMember(a, owner); return oneRow(`  - [${a.id}] ${a.name} (${a.type}, ${kb(a.size)})${m ? ` — ${fileNote(m)}` : ""}`); }).join("\n")}`
     : "Attachments: (none)");
   if (fenced) {
     const f = fenceLines("notes", c.id, `${c.notes.length} characters`, fence!, touch!.text!.email);
@@ -894,14 +908,16 @@ export function describeBoard(b: Board, tag?: string, owner?: string | null): st
       const cards = shownCards(b, l.id).filter((c) => !tag || hasTag(c, tag));
       const role = LANE_ROLES.find((r) => roles[r.role] === l.id);
       const sorted = l.sort ? `, sorted by ${SORTS.find((o) => o.by === l.sort)?.say ?? l.sort}` : "";
+      // One card, one row, whatever its title, tags, question, file names, or the emails on it hold (oneLine).
       const lines = cards.map(
-        (c) =>
+        (c) => oneRow(
           `  - [${c.id}] ${c.title}${c.tags?.length ? ` ${c.tags.map((t) => `#${t}`).join(" ")}` : ""}` +
           `${c.due ? ` (due ${c.due})` : ""}${describeAsk(c)}${c.notes ? ` — notes: ${previewNotes(c.notes)}` : ""}` +
           (c.attachments?.length ? ` — attached: ${c.attachments.map((a) => a.name).join(", ")}` : "") +
           memberLine(c, owner),
+        ),
       );
-      return `${l.name} (lane id ${l.id}${role ? `, ${role.say}` : ""}, ${cards.length} ${tag ? `#${tag} ` : ""}cards${sorted})\n${lines.join("\n") || "  (empty)"}`;
+      return `${oneLine(`${l.name} (lane id ${l.id}${role ? `, ${role.say}` : ""}, ${cards.length} ${tag ? `#${tag} ` : ""}cards${sorted})`)}\n${lines.join("\n") || "  (empty)"}`;
     })
     .join("\n");
 }

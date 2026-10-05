@@ -90,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A note that only looks like encrypted text can't stop you from turning encryption off anymore. A member could leave one on a shared board, and after you encrypted it, decrypting said "Some of the board is still encrypted" until you edited that card
 - On a board that isn't encrypted, a tag typed to look like encrypted text is cleaned up like any other tag
 - When the board changes while a card is open, the lanes no longer flash on top of the card for half a second
+- Notes with line breaks in them can't pass for another card in what your agents and the assistant get back from a search. Each result is one line now, and it says so on that line when a member wrote the card. The same goes for every other list your agents read: one card, one line
 
 ## [0.2.0] - 2026-10-04
 

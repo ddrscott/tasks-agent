@@ -12,7 +12,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { doneLaneId } from "./lanes";
-import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, memberTouch, NEEDS_CEO_TAG, type Board, type Card, type MemberTouch } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, memberTouch, NEEDS_CEO_TAG, oneLine, type Board, type Card, type MemberTouch } from "./shared";
 
 // The tags live in shared.ts, where the app can reach them too.
 export { AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG };
@@ -39,9 +39,12 @@ export type TaskEvent =
   | ({ type: "answered"; answer?: string; question?: string; by: EventBy } & CardRef)
   | { type: "hello"; cards: CardRef[] };
 
+// An event is one line of JSON on the listener's stdout, and JSON leaves U+0085, U+2028, and
+// U+2029 as they are. So the text an event carries is made one line here (oneLine in shared.ts).
 const ref = (b: Board, c: Card): CardRef => {
-  const member = memberTouch(c);
-  return { id: c.id, title: c.title, lane: b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId, tags: c.tags ?? [], ...(member ? { member } : {}) };
+  const touch = memberTouch(c);
+  const member = touch?.files ? { ...touch, files: touch.files.map((f) => ({ ...f, name: oneLine(f.name) })) } : touch;
+  return { id: c.id, title: oneLine(c.title), lane: oneLine(b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId), tags: c.tags ?? [], ...(member ? { member } : {}) };
 };
 
 /**
@@ -67,7 +70,7 @@ export function agentEvents(before: Board, after: Board, by: EventBy): TaskEvent
     else if (p.laneId !== c.laneId) type = "moved";
     else if (p.title !== c.title || p.notes !== c.notes || p.due !== c.due || (p.tags ?? []).join() !== (c.tags ?? []).join()) type = "edited";
     if (type === "answered" && p?.ask && c.answer && c.answer.at !== p.answer?.at) {
-      out.push({ type, ...ref(after, c), answer: c.answer.answer, question: c.answer.question, by });
+      out.push({ type, ...ref(after, c), answer: oneLine(c.answer.answer), question: oneLine(c.answer.question), by });
     } else if (type) out.push({ type, ...ref(after, c), by } as TaskEvent);
   }
   const kept = new Set(after.cards.map((c) => c.id));

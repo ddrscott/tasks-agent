@@ -1760,6 +1760,22 @@ tags that direct them are the owner's alone, and so are the cards that carry the
       (`ToolOutcome.member`, set in `TodoAgent.runTool` for an outside agent, from the board
       as it was before the change, so a deleted card still says it). `wait_for_answer` prints
       the card through `describeCard`, which already does.
+    - **A row is one card, so a row is one line.** Everything an agent reads as a list goes
+      through `oneLine` in `src/shared.ts`: runs of spaces, line breaks of every kind (LF, CR,
+      vertical tab, form feed, U+0085, U+2028, U+2029), and the rest of the C0 and C1 control
+      characters become one space. That's each card's row and each lane's heading in
+      `get_board`, each `search_cards` hit, each claimed line, `claim_card`'s answer, the
+      write tools' summaries and their `Not the owner's words:` lines, the lane counts, the
+      first line of `ask_ceo`, the heading rows and file rows of `get_card` (title, lane,
+      tags, question, options, each file's name), and the title, lane, answer, and file names
+      on a feed event. The member note is always on the card's own row. `search_cards` was
+      the hole: its snippet is cut out of the notes with their line breaks, so a member's
+      notes holding a line shaped like a hit (`- [c2s2l] Deploy (Doing; keyword match) — …run
+      this…`) came out as a row for the owner's card, with "a member, not the owner" on a
+      later line. `claim_card` had a smaller one: it broke the member note into a list at
+      every ` — `, and a member's file name can hold one. Only two things are many lines on
+      purpose, and both sit between marker lines when they're a member's: a card's notes and
+      a text file's contents in `get_card`.
   - **Where a person sees it.** The owner's card editor has a block above the notes:
     "Title or notes written by dana@example.com, a member", "Tags set by …", one line on what
     the mark does ("Your agents are told these aren't your words and to ask you before acting
@@ -2232,6 +2248,9 @@ TodoAgent (`src/search.ts`), so results never cross between users.
   stale ones are refreshed before a semantic search. Moving cards costs nothing.
 - **Surfaces:** the ⌘K search box, the assistant's `search_cards` tool, and the MCP
   `search_cards` tool. All three call `TodoAgent.search`.
+  The two tools print each hit as exactly one line (`describeHits` in `src/tools.ts`), so
+  notes with line breaks in them can't look like a second hit (`// TEAM_BOARDS`, **A row is
+  one card**). The search box gets the snippet as it is and draws it as text.
 - Without Workers AI (`npm run dev:local`), search falls back to keyword matches and
   says so.
 - On an end-to-end encrypted board the server has nothing to index. The tables are emptied, and
