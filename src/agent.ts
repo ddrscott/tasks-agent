@@ -1171,15 +1171,20 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return card ? ops.memberLine(card, owner ?? this.ownerEmail()) : "";
   }
 
-  /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */
-  cardDetail(id: string, owner?: string): { text: string; attachments: Attachment[]; done: boolean } | null {
+  /**
+   * One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted.
+   * `fence` is the marker code the caller made for this answer (ops.fenceLines). `clash` says the
+   * card's own text happens to hold it, so the caller makes another and asks again.
+   */
+  cardDetail(id: string, owner?: string, fence?: string): { text: string; attachments: Attachment[]; done: boolean; clash?: true } | null {
     if (this.state.sealed) return null;
     // `owner` is the token's owner (mcp.ts): a card last changed by anyone else says so.
-    const text = ops.describeCard(this.state, id, owner ?? this.ownerEmail());
+    const text = ops.describeCard(this.state, id, owner ?? this.ownerEmail(), fence);
     if (text === null) return null;
     const card = this.state.cards.find((c) => c.id === id);
+    const clash = !!fence && !!card && [card.title, card.notes, ...(card.tags ?? []), ...(card.attachments ?? []).flatMap((a) => [a.name, a.type])].some((t) => t.includes(fence));
     // Done is being in the done lane, the same rule that ends a claim (endedCards in presence-shared.ts).
-    return { text, attachments: card?.attachments ?? [], done: !!card && card.laneId === ops.doneLaneId(this.state.lanes) };
+    return { text, attachments: card?.attachments ?? [], done: !!card && card.laneId === ops.doneLaneId(this.state.lanes), ...(clash ? { clash: true as const } : {}) };
   }
 
   /** Lane names and card counts, for what a write tool echoes over MCP. */

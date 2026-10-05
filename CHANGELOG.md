@@ -71,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changing a member's role while your Pro plan is lapsed says they stay view only until it's back, instead of "It took effect right away"
 - "These words are mine now" goes by the words you read. If a member changes the card's title, notes, or tags before your click lands, even a moment before, nothing is marked as yours and the card says it changed. Press again once you've read what it says now
 - If someone changes a card while you have it open on your own board, the card says who, and shows what it says now. Fields you haven't typed in take the new words, and anything you were typing stays put
+- `get_card` hands your agents each file's text between a begin line and an end line that carry a code made for that one answer, so a member's file can't pose as one of yours or as the board. Notes a member wrote are fenced the same way
+- `get_card` says so when a file it lists isn't shown (a PDF, a text file over 32 KB, an image that's too big), instead of skipping it without a word
 
 ## [0.2.0] - 2026-10-04
 

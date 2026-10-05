@@ -16,7 +16,7 @@ import { describeSession } from "./presence";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 import { WAIT_SECONDS, workingRules } from "./agent-rules";
-import { askState, fileMember, fileNote } from "./shared";
+import { askState, fenceLines, fileMember, fileNote } from "./shared";
 
 export const MCP_PATH = "/tasks/mcp";
 
@@ -84,6 +84,14 @@ function base64(bytes: Uint8Array): string {
 
 type Part = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
+/**
+ * A marker code for one answer: 20 hex characters nobody has seen before. get_card and
+ * wait_for_answer put it on the lines that open and close a member's notes and each file's
+ * contents (fenceLines in shared.ts), so nothing inside can close its own block.
+ */
+const newFence = () => [...crypto.getRandomValues(new Uint8Array(10))].map((n) => n.toString(16).padStart(2, "0")).join("");
+const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
 export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, user: User): Promise<Response> {
   const agent = await getAgentByName(env.TodoAgent, user.id);
   const presence = env.Presence.get(env.Presence.idFromName(user.id));
@@ -92,6 +100,17 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     // Every tool answers the same way on an end-to-end encrypted board: the server can't read it, so neither can an agent.
     const locked = async () => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
     const server = new McpServer({ name: "tasks", title: "Tasks", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+    // One card's text with a marker code made for it (newFence). The code has to be a string
+    // the card's own text doesn't hold, so on the one-in-never chance it does, another is made.
+    const readCard = async (id: string) => {
+      for (let i = 0; i < 5; i++) {
+        const fence = newFence();
+        const card = await agent.cardDetail(id, user.email, fence);
+        if (!card) return null;
+        if (!card.clash) return { card, fence };
+      }
+      return null;
+    };
 
     // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
     // an encrypted board like every other tool: there's nothing there for an agent to work.
@@ -133,36 +152,50 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     }, async (input: { id: string; files?: boolean }) => {
       const no = await locked();
       if (no) return no;
-      const card = await agent.cardDetail(input.id, user.email);
-      if (!card) return text(`There is no card with id ${input.id}.`, true);
+      let read = await readCard(input.id);
+      if (!read) return text(`There is no card with id ${input.id}.`, true);
+      if (input.files === false) return { content: [{ type: "text" as const, text: read.card.text }] };
+      // Text files are read first, so the marker code can be checked against what's in them: it
+      // has to be a string none of them holds. One made at random never is; this makes sure.
+      const bodies = new Map<string, { text: string; bytes: number } | null>();
+      for (const a of read.card.attachments) {
+        if (!TEXT_TYPES.test(a.type) || a.size > MAX_TEXT_BYTES) continue;
+        // Keys start with the user id (attachments.ts), so this can only reach the token owner's files.
+        const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
+        bodies.set(a.id, !obj || obj.customMetadata?.sealed === "1" || obj.size > MAX_TEXT_BYTES ? null : { text: await obj.text(), bytes: obj.size });
+      }
+      for (let i = 0; i < 5 && [...bodies.values()].some((f) => f?.text.includes(read!.fence)); i++) {
+        read = await readCard(input.id);
+        if (!read) return text(`There is no card with id ${input.id}.`, true);
+      }
+      const { card, fence } = read;
       const content: Part[] = [{ type: "text", text: card.text }];
-      if (input.files === false) return { content };
       let imageBytes = 0;
       for (const a of card.attachments) {
         const image = IMAGE_TYPES.has(a.type);
-        if (!image && !TEXT_TYPES.test(a.type)) continue;
+        const textual = TEXT_TYPES.test(a.type);
         // A file a member attached says so right here, on the line that names it, directly above
         // what's in it: the board recorded who uploaded it (Attachment.by), and an agent reading
         // the contents can't have missed whose they are. The card's text said it once already.
         const member = fileMember(a, user.email);
         const whose = member ? ` — ${fileNote(member)}` : "";
-        if (image && (a.size > MAX_IMAGE_BYTES || imageBytes + a.size > MAX_IMAGES_TOTAL_BYTES)) {
-          content.push({ type: "text", text: `[${a.id}] ${a.name}${member ? `${whose} It's` : " is"} too large to include here. The owner can open it in the app.` });
+        // A file whose contents aren't in this answer says so, and why. Otherwise the next
+        // file's contents, or something inside them shaped like this file, could pass for it.
+        const hidden = (why: string) => content.push({ type: "text", text: `[${a.id}] ${a.name} (${a.type}, ${kb(a.size)})${member ? whose : "."} Its contents are not shown here: ${why} Nothing else in this answer is this file's contents. The owner can open it in the app.` });
+        if (!image && !textual) { hidden("get_card shows images (PNG, JPEG, GIF, WebP) and text files (plain text, Markdown, CSV, JSON), and this is neither."); continue; }
+        if (image && (a.size > MAX_IMAGE_BYTES || imageBytes + a.size > MAX_IMAGES_TOTAL_BYTES)) { hidden("it's too large to include. Images are shown up to 4 MB each and 8 MB an answer."); continue; }
+        if (!image) {
+          if (a.size > MAX_TEXT_BYTES) { hidden("text files are shown up to 32 KB, and this one is bigger."); continue; }
+          const body = bodies.get(a.id);
+          if (!body || body.text.includes(fence)) { hidden("it couldn't be read."); continue; }
+          const f = fenceLines("file", a.id, `${body.bytes} bytes`, fence, member);
+          content.push({ type: "text", text: `[${a.id}] ${a.name}${member ? whose : ":"}\n${f.begin}\n${body.text}\n${f.end}` });
           continue;
         }
-        if (!image && a.size > MAX_TEXT_BYTES) continue;
-        // Keys start with the user id (attachments.ts), so this can only reach the token owner's files.
         const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
-        if (!obj || obj.customMetadata?.sealed === "1") {
-          content.push({ type: "text", text: `[${a.id}] ${a.name}${member ? `${whose} It` : ""} couldn't be read.` });
-          continue;
-        }
-        if (image) {
-          imageBytes += a.size;
-          content.push({ type: "text", text: `[${a.id}] ${a.name}${whose}${member ? " The image:" : ":"}` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
-        } else {
-          content.push({ type: "text", text: `[${a.id}] ${a.name}${whose}${member ? " What the file says:" : ":"}\n${await obj.text()}` });
-        }
+        if (!obj || obj.customMetadata?.sealed === "1") { hidden("it couldn't be read."); continue; }
+        imageBytes += a.size;
+        content.push({ type: "text", text: `[${a.id}] ${a.name}${whose}${member ? " The image:" : ":"}` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
       }
       return { content };
     });
@@ -223,7 +256,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const waiting: string[] = [];
         const ready: string[] = [];
         for (const id of ids) {
-          const card = await agent.cardDetail(id, user.email);
+          // A member's notes come back between marker lines, so they can't pass for the next card's block in this same answer.
+          const card = (await readCard(id))?.card ?? null;
           const state = card ? askState(card.text) : null;
           // A card the owner moved to the done lane is finished, question and all: its claim ended
           // there too (Presence.finish), and the rules never pick up a card in that lane.
