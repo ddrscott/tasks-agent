@@ -1456,7 +1456,9 @@ or, when lines were left for different reasons, a row per reason with the line i
 reasons." then `“bad line #gauntlet”: Only … can put #gauntlet on a card …` and the same for
 `#needs-ceo`; it used to give the first reason only),
 and doesn't empty the box until the server has answered, so nothing is dropped and nothing has
-to be pasted twice. One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
+to be pasted twice. The box grows to show every line that's left (up to eight, then it
+scrolls) and goes back to its first line, and while it still holds exactly the lines that were
+turned down the button reads "Try these 3 again", not "Add 3 cards". One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
 member's frame under 24 KB, so a longer paste goes up in pieces: each piece is one change, the
 first one that doesn't fully land stops it, and the rest stays in the box. The other things a
 writer does are one or two frames each (a drag, Save, a tick, the in-browser assistant's turn,

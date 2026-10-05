@@ -559,6 +559,9 @@ function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boo
   const [busy, setBusy] = useState(false);
   // What happened to the lines still in the box: "41 added, 19 left. …"
   const [note, setNote] = useState("");
+  // The box exactly as the server left it: the lines it just turned down. While it still reads
+  // that way the button says "Try again", not "Add 3 cards" for three lines that were refused.
+  const [refused, setRefused] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (open) ref.current?.focus(); }, [open]);
 
@@ -574,12 +577,17 @@ function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boo
     try { r = await add(lines); } catch (e) { r = { added: 0, left: lines, why: e instanceof Error ? e.message : null }; }
     setBusy(false);
     setText(r.left.join("\n"));
+    setRefused(r.left.length ? r.left.join("\n") : null);
     if (r.left.length) {
       const why = r.why ?? "That didn't go through. Try again.";
       setNote(lines.length === 1 ? `Not added. ${why}` : `${r.added} added, ${r.left.length} left. ${why}`);
     }
-    setTimeout(() => ref.current?.focus(), 0);
+    // Back to the top of what's left: with the caret at the end, the first lines scrolled out of the box.
+    setTimeout(() => { const el = ref.current; if (!el) return; el.focus(); el.setSelectionRange(0, 0); el.scrollTop = 0; }, 0);
   }
+
+  const count = quickAddLines(text).length;
+  const again = refused !== null && text === refused;
 
   if (!open) {
     return (
@@ -591,19 +599,19 @@ function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boo
   return (
     <div className="quick-add">
       <textarea
-        ref={ref} className="field" rows={2} placeholder={`What needs doing? End with ${tagHint} to tag it, or paste a list.`} value={text} aria-label={`New card in ${lane.name}`}
+        ref={ref} className="field" rows={Math.min(8, Math.max(2, text.split("\n").length))} placeholder={`What needs doing? End with ${tagHint} to tag it, or paste a list.`} value={text} aria-label={`New card in ${lane.name}`}
         readOnly={busy} aria-busy={busy} aria-describedby={note ? `quick-add-note-${lane.id}` : undefined}
         onChange={(e) => { setText(e.target.value); if (note) setNote(""); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-          if (e.key === "Escape") { setText(""); setNote(""); setOpen(false); }
+          if (e.key === "Escape") { setText(""); setNote(""); setRefused(null); setOpen(false); }
         }}
         onBlur={() => { if (!text.trim() && !busy) setOpen(false); }}
       />
       {note && <p className="quick-add-note" id={`quick-add-note-${lane.id}`} role="alert">{note}</p>}
       <div className="row">
-        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy}>{busy ? "Adding…" : quickAddLines(text).length > 1 ? `Add ${quickAddLines(text).length} cards` : "Add card"}</button>
-        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setOpen(false); }}>Cancel</button>
+        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy}>{busy ? "Adding…" : again ? (count > 1 ? `Try these ${count} again` : "Try again") : count > 1 ? `Add ${count} cards` : "Add card"}</button>
+        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setRefused(null); setOpen(false); }}>Cancel</button>
         <span className="hint"><kbd>↵</kbd> add · <kbd>esc</kbd> close</span>
       </div>
     </div>

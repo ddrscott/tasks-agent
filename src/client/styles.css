@@ -591,7 +591,7 @@ button.chip.tag:hover { border-color: var(--accent); }
 .quick-add { padding: 4px 10px 10px; }
 .quick-add .btn { width: 100%; justify-content: flex-start; color: var(--muted); }
 .quick-add .btn:hover { color: var(--ink); }
-.quick-add textarea { resize: none; display: block; min-height: 64px; }
+.quick-add textarea { resize: none; display: block; min-height: 64px; max-height: 240px; }
 .quick-add .row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
 .quick-add .row .btn { width: auto; flex: none; }
 .quick-add .row .btn.primary, .quick-add .row .btn.primary:hover { color: var(--accent-ink); }
