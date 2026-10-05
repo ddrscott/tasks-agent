@@ -86,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Add a card box grows to fit long lines that wrap, instead of cutting one off, and scrolls past a dozen lines. On a phone, the reasons under it no longer run under the floating Ask button
 - A file's name can't hold a control character that breaks it onto a second line where your agents read the file list
 - The tags suggested above the Tags field wrap onto more rows instead of running off the right edge
+- Turning encryption off on a board with files no longer blanks the page until you reload. The board was decrypted either way; now it shows right away
 
 ## [0.2.0] - 2026-10-04
 

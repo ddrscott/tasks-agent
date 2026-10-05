@@ -123,12 +123,16 @@ type DialogProps = {
 export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabling, onDisabled, onClose, onMembers, say }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useModal(ref);
+  // Set while this dialog is turning encryption off. The plain board lands a moment before the
+  // call answers and the dialog closes, and until then it says so, not "Encrypt my board".
+  const [turningOff, setTurningOff] = useState(false);
   return (
     <dialog ref={ref} {...MODAL} aria-label="End-to-end encryption" className="enc-dialog" onCancel={(e) => { e.preventDefault(); onClose(); }}>
       <div className="dialog-body">
         <h2 className="h">END_TO_END_ENCRYPTION</h2>
         {view.sealed && vault
-          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabling={onDisabling} onDisabled={onDisabled} say={say} onClose={onClose} />
+          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabling={(on) => { setTurningOff(on); onDisabling(on); }} onDisabled={onDisabled} say={say} onClose={onClose} />
+          : turningOff ? <p role="status">Your board is decrypted.</p>
           : <TurnOn view={view} userId={userId} email={email} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} onMembers={onMembers} />}
       </div>
       <div className="dialog-foot">
@@ -238,7 +242,11 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
 }
 
 function Manage({ view, raw, vault, userId, email, stub, onDisabling, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "email" | "stub" | "onDisabling" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
-  const seal = raw.sealed!;
+  // `raw` is the server's board the moment it arrives; `view` follows a beat later (a decrypt, or a
+  // view transition). Right after encryption is turned off there's a render where `raw` is already
+  // plain and `view` isn't yet, so the seal comes from `view` then. Reading `raw.sealed!` there
+  // threw, and with no error boundary the whole app went blank.
+  const seal = raw.sealed ?? view.sealed!;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
