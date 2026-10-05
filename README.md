@@ -1607,6 +1607,9 @@ tags that direct them are the owner's alone, and so are the cards that carry the
 
   The refusal says what it was read as: `[owner_tag] #ship_ok reads as #ship-ok. Only the
   board's owner can put #ship-ok on a card …`. A title's `#` words are read the same way, and
+  refused in the same words: `#ag3nt` in the middle of a quick-add line or a card's title gets
+  "#ag3nt reads as #agent." first, from the server (`ownerTagError` with what `ownerTagTyped`
+  found) and from the editor before anything is sent. Quick add used to leave that part out. And
   `\uff03agent` with a fullwidth # counts. So does anything else drawn like a `#` (the music sharp, the
   viewdata square, the equal-and-parallel sign, the Tifinagh yazh, the CJK well, a box-drawing
   cross: `HASH`), a `#` with one space after it (`# agent`, though not `C# agent notes`, where

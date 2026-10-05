@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
-import { isOwnerTag, ownerTagLike } from "../member-rules";
+import { isOwnerTag, ownerTagLike, ownerTagTyped } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, ChangedWhileOpen, changer, CLAIM_HOLD_MS, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, WhoContext, type Mode } from "./member";
 import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
@@ -275,11 +275,13 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
     if (mode !== "writer") return false;
     const who = owner ?? "the board's owner";
     const inTags = patch.tags ? ownerTagTouched(card.tags ?? [], patch.tags) : null;
-    const inTitle = patch.title !== undefined ? ownerTagTouched([], [], patch.title) : null;
+    // The same reading the server makes, with what was typed, so "#ag3nt reads as #agent." is said here too.
+    const titled = patch.title !== undefined ? ownerTagTyped(patch.title) : null;
+    const inTitle = titled?.tag ?? null;
     // What they typed, when it only reads as the owner's tag (`ship_ok`, a look-alike letter).
     const typed = inTags ? patch.tags!.find((t) => !(card.tags ?? []).includes(t) && ownerTagLike(t) === inTags) : undefined;
     if (inTags) setError(`${OWNER_TAG_NOTE(inTags, who, typed)} ${typed ? `Take ${typed} out of Tags` : `Put ${inTags} back in Tags`} to save.`);
-    else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who)} Take the # tag out of the title to save.`);
+    else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who, titled?.typed)} Take the # tag out of the title to save.`);
     return !!(inTags || inTitle);
   }
 

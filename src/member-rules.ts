@@ -467,8 +467,11 @@ export const AGENT_CARD = "[agent_card] That card is a work order for the owner'
 /** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. */
 function memberCardError(p: Card | undefined, c: Card): string | null {
   if (p && isAgentCard(p)) return AGENT_CARD;
-  const tag = ownerTagChanged(p, c) ?? (typeof c.title === "string" && p?.title !== c.title ? ownerTagInTitle(c.title) : null);
+  const tag = ownerTagChanged(p, c);
   if (tag) return ownerTagError(tag);
+  // A title that holds one, or something that reads as one, says what it was read as, the same as a tag does.
+  const inTitle = typeof c.title === "string" && p?.title !== c.title ? ownerTagTyped(c.title) : null;
+  if (inTitle) return ownerTagError(inTitle.tag, inTitle.typed);
   const like = lookalikeAdded(p, c);
   if (like) return ownerTagError(like[1], like[0]);
   return cardTooBig(p, c);
