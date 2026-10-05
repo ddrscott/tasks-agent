@@ -1608,8 +1608,8 @@ tags that direct them are the owner's alone, and so are the cards that carry the
 - **Then, in depth.** Every event on the feed says who made the change, and a member's change
   is never an event (`// AGENT_EVENTS`). Over MCP, `get_card` adds a line when the last
   change to a card wasn't the owner's (`Last changed by: dana@example.com, a member of this
-  board and not its owner. …`), and `get_board` says it on the card's line (`memberMark` in
-  `src/shared.ts`). The working rules `get_started` returns tell an agent that only the owner
+  board and not its owner. …`), and `get_board` and `search_cards` say it on the card's line
+  (`memberMark` and `memberLine` in `src/shared.ts`). The working rules `get_started` returns tell an agent that only the owner
   gives it work or answers, and to ask with `ask_ceo` before acting on a member's words. The
   in-app assistant's prompt marks those cards the same way.
 - **What a member puts on a card stays marked as theirs.** "Last changed by" is only the last

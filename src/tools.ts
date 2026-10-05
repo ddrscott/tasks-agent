@@ -124,6 +124,8 @@ export type SearchHit = {
   lane: string;
   due: string | null;
   match: "keyword" | "semantic" | "both";
+  /** What a member put on the card, as one line (memberNote in shared.ts). Left off a card that's all the owner's. */
+  member?: string;
 };
 export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
 
@@ -132,7 +134,7 @@ export function describeHits(r: SearchResult): string {
   const strip = (s: string) => s.replace(/[\u0001\u0002]/g, "");
   if (!r.hits.length) return "No matching cards.";
   return r.hits.map((h) =>
-    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}`,
+    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}${h.member ?? ""}`,
   ).join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : "");
 }
 

@@ -651,7 +651,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (this.state.sealed) throw new Error("This board is end-to-end encrypted, so only the app can search it, in your browser.");
     const asked = SEARCH_TOOL.inputSchema.safeParse(input);
     if (!asked.success) throw new Error(`[${ops.BAD_ARGS}] A search needs some words to look for. ${shapeError(asked.error)}`);
-    return this.index.search(this.state, asked.data);
+    // A hit on a card a member wrote on says so, the same as get_board does (memberLine in shared.ts).
+    return this.index.search(this.state, asked.data, this.ownerEmail());
   }
 
   validateStateChange(_next: Board, source: Connection | "server") {
@@ -1143,6 +1144,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   cardTitle(id: string): string | null {
     if (this.state.sealed) return null;
     return this.state.cards.find((c) => c.id === id)?.title ?? null;
+  }
+
+  /** What a member put on a card, as the line get_board gives it (ops.memberLine). Empty for the owner's own card, a card that isn't there, or an encrypted board. */
+  memberLine(id: string, owner?: string): string {
+    const card = this.state.sealed ? undefined : this.state.cards.find((c) => c.id === id);
+    return card ? ops.memberLine(card, owner ?? this.ownerEmail()) : "";
   }
 
   /** One card in full for the MCP get_card tool: its text, and its attachments so the caller can fetch the files. Null when there's no such card or the board is encrypted. */

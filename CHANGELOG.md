@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In the audit log, a run of deleted cards by one person (clearing a lane, say) shows as one line you can open, like "Deleted 733 cards", so invites and role changes aren't buried. The downloads still list every card
 - A card a member wrote on stays marked however you edit it. The mark used to come off when an edit looked like a rewrite, which a one-letter fix to the title could set off and a full rewrite of the notes could miss. Now only "These words are mine now" takes it off
 - Tags a member puts on your card, or takes off it, are marked as theirs too, on the card and everywhere your agents read it
+- `search_cards` and `claim_card` say when a member wrote on a card, tagged it, or attached a file to it, the same as `get_board`
 - Your audit log names an admin on a plan change only when that admin's own Pro switch caused it. A subscription that lapsed moments after an admin edited your account used to be put down to that admin
 - On a shared board a member can't use more tags that only look like yours: a digit for a letter (`ag3nt`, `ship-0k`), an odd Latin letter, or Cherokee or Lisu letters drawn like Latin ones. A member's title can't hold `#agent` anywhere in it, not only at the end
 

@@ -35,7 +35,7 @@ export const TOOL_DOCS = {
   search_cards: {
     description:
       "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
-      "lanes, due dates, and a snippet. Use it to find the card a user means when the board is large or the wording differs.",
+      "lanes, due dates, and a snippet, and on a shared board whether a member wrote on the card. Use it to find the card a user means when the board is large or the wording differs.",
     about: "Find cards by keyword or by meaning across titles and notes.",
   },
   add_cards: {

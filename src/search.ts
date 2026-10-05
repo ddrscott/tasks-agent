@@ -148,7 +148,8 @@ export class CardIndex {
       .map((r) => r.id);
   }
 
-  async search(board: Board, input: SearchInput): Promise<SearchResult> {
+  /** `owner` is the board owner's email: a hit on a card a member wrote on, tagged, or attached to says so (memberNote). */
+  async search(board: Board, input: SearchInput, owner?: string | null): Promise<SearchResult> {
     const mode = input.mode ?? "hybrid";
     const limit = input.limit ?? 10;
     const lane = input.lane ? ops.findLane(board, input.lane) : undefined;
@@ -189,6 +190,7 @@ export class CardIndex {
           lane: laneName.get(c.laneId) ?? c.laneId,
           due: c.due,
           match: k && semSet.has(id) ? "both" : k ? "keyword" : "semantic",
+          ...(ops.memberLine(c, owner) ? { member: ops.memberLine(c, owner) } : {}),
         };
       });
     return { hits, semantic };
