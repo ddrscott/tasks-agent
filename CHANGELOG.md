@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After a pasted list leaves lines behind, the button reads "Try these 3 again" instead of "Add 3 cards", and the box shows every line that's left, from the top
 - At the member cap or the daily invite cap, the email field and the role choice are off along with the Invite button, and the field says why. The passphrase fields in the Encryption dialog are off the same way on a shared board
 - Changing a member's role while your Pro plan is lapsed says they stay view only until it's back, instead of "It took effect right away"
+- "These words are mine now" goes by the words you read. If a member changes the card's title, notes, or tags before your click lands, even a moment before, nothing is marked as yours and the card says it changed. Press again once you've read what it says now
+- If someone changes a card while you have it open on your own board, the card says who, and shows what it says now. Fields you haven't typed in take the new words, and anything you were typing stays put
 
 ## [0.2.0] - 2026-10-04
 

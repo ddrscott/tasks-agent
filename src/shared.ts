@@ -168,14 +168,36 @@ export function stampBy(before: Board, after: Board, by: By | null, how: { membe
 }
 
 /**
+ * What the owner had in front of them when they pressed "These words are mine now": the card's
+ * title, notes, and tags as their screen showed them saved, and the mark it showed. The claim
+ * is for those words and no others.
+ */
+export type SeenWords = { title: string; notes: string; tags: string[]; member?: MemberMark };
+
+/** Starts with its code, so the app can tell "it changed under you" from any other refusal. */
+export const CARD_CHANGED = "[card_changed] This card changed after you read it, so nothing was marked as yours. Read what it says now, and press the button again if those words are yours.";
+
+/**
  * The owner taking a member's words as their own: the card's member mark comes off. This is
  * the only thing that takes it off, and the board only runs it for the owner, by hand, from
  * the app (TodoAgent.claimWords). The files a member attached keep saying so: a file can't be
  * made the owner's by reading it, only by taking it off the card.
+ *
+ * `seen` is what the owner read (SeenWords). The claim is refused unless the card's title,
+ * notes, tags, and mark are exactly that right now, letter for letter and to the millisecond
+ * of the mark. A member who rewrites the card a moment before the click (or a second before,
+ * on a screen that hasn't caught up) gets a refusal for the owner and keeps the mark: the
+ * owner never vouches for words they didn't see.
  */
-export function claimWords(b: Board, id: string): Board {
+export function claimWords(b: Board, id: string, seen: SeenWords): Board {
   const card = requireCard(b, id);
   if (!markOf(card)) throw new Error("That card isn't marked as a member's words.");
+  if (seen === null || typeof seen !== "object" || typeof seen.title !== "string" || typeof seen.notes !== "string" || !isTagList(seen.tags)) {
+    throw badArgs("Marking a card's words as yours takes the title, notes, and tags you read.");
+  }
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const sawMark = markOf({ member: seen.member } as Pick<Card, "member" | "memberText">);
+  if (seen.title !== card.title || seen.notes !== card.notes || !same(seen.tags, card.tags ?? []) || !same(sawMark, markOf(card))) throw new Error(CARD_CHANGED);
   const { member: _m, memberText: _t, ...rest } = card;
   return { ...b, cards: b.cards.map((c) => (c.id === id ? { ...rest, updatedAt: now() } : c)) };
 }

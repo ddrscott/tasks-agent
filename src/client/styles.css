@@ -1665,8 +1665,22 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .member-words-who > span:last-child { min-width: 0; display: flex; flex-direction: column; }
 .member-words-who b { font-weight: 600; }
 .member-words-mark { flex: none; color: var(--accent); font-weight: 700; }
-.member-words-act { display: flex; }
+.member-words-act { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .member-words-act .btn { height: 30px; font-size: 12px; }
+.member-words-hold { color: var(--ink); }
+.member-words .dialog-error { overflow-wrap: anywhere; line-height: 1.5; }
+/* The card's words changed while the owner had it open: who did it, and what it says now. Outlined all the way round in the accent, so it isn't missed. */
+.card-changed { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--ink); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--surface); }
+.card-changed p { margin: 0; overflow-wrap: anywhere; }
+.card-changed-who { display: flex; align-items: baseline; gap: 8px; }
+.card-changed-who b { font-weight: 600; }
+/* A card's saved words as plain text (SavedWords in member.tsx). */
+.saved-words { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: var(--border-w) dashed var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); }
+.saved-words .h { font-size: 11px; }
+.saved-words dl { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.saved-words dt { font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.saved-words dd { margin: 2px 0 0; font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.saved-words .saved-notes { max-height: 180px; overflow-y: auto; scrollbar-width: thin; }
 /* A file a member attached says so under its name. */
 .att-main { min-width: 0; display: flex; flex-direction: column; }
 .att-main .att-name { display: block; }

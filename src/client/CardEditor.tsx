@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { isOwnerTag, ownerTagLike } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
-import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
+import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, ChangedWhileOpen, changer, CLAIM_HOLD_MS, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, WhoContext, type Mode } from "./member";
 import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
 import { NoAgentLine } from "./AgentNudge";
 import { Attachments, NoFiles } from "./Attachments";
@@ -41,8 +41,12 @@ type Props = {
   board?: string;
   /** On a shared board: it's view only because its owner's Pro plan lapsed, not because of your role. */
   lapsed?: boolean;
-  /** The owner's "These words are mine now": take the member's mark off this card. Only the owner's own board passes it. */
-  onClaim?(): void;
+  /**
+   * The owner's "These words are mine now": take the member's mark off this card, as it's
+   * saved and on screen right now. Resolves to null when it's done, or to why it was refused
+   * (the card changed first). Only the owner's own board passes it.
+   */
+  onClaim?(): Promise<string | null>;
 };
 
 /**
@@ -172,6 +176,45 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const latest = useRef({ title, notes, due, tags, lane });
   latest.current = { title, notes, due, tags, lane };
 
+  // The owner's editor follows the card while it's open. The fields above were filled in when
+  // the dialog opened; if a member (or anyone else) rewrites the card after that, a field the
+  // owner hasn't touched takes the new words, a field they have typed in keeps their typing,
+  // and either way a notice says who changed it and shows what the card says now. Without it
+  // the owner would be looking at the old words while "These words are mine now" spoke for
+  // the new ones.
+  const ownerHere = !mode || mode === "owner";
+  const shown = useRef({ title: card.title, notes: card.notes, tags: ownText });
+  const me = useContext(WhoContext)?.me;
+  const [changed, setChanged] = useState<{ who: string; kept: boolean } | null>(null);
+  const [claimHold, setClaimHold] = useState(false);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState("");
+  useEffect(() => {
+    const was = shown.current;
+    if (!ownerHere || (was.title === card.title && was.notes === card.notes && was.tags === ownText)) return;
+    shown.current = { title: card.title, notes: card.notes, tags: ownText };
+    const mine = latest.current;
+    let kept = false;
+    if (card.title !== was.title) { if (mine.title === was.title) setTitle(card.title); else kept = true; }
+    if (card.notes !== was.notes) { if (mine.notes === was.notes) setNotes(card.notes); else kept = true; }
+    if (ownText !== was.tags) { if (mine.tags.trim() === was.tags.trim()) setTags(ownText); else kept = true; }
+    setChanged((c) => ({ who: changer(card.by, me), kept: kept || !!c?.kept }));
+    // A click that was already on its way mustn't land on words nobody has read yet.
+    setClaimHold(true);
+    const t = setTimeout(() => setClaimHold(false), CLAIM_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [ownerHere, card.title, card.notes, ownText]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Whether the fields hold words that aren't the card's saved ones: then the claim shows the saved ones next to its button. */
+  const typedOver = title.trim() !== card.title || notes !== card.notes || tags.trim() !== ownText.trim();
+  async function claim() {
+    if (!onClaim || claimBusy || claimHold) return;
+    setClaimBusy(true);
+    setClaimError("");
+    const no = await onClaim().catch(() => "That didn't go through. Try again.");
+    setClaimBusy(false);
+    if (no) setClaimError(no);
+  }
+
   // showModal() puts focus on the first control, which is the X ("Close without saving"). The
   // title is the better place to land: it says which card this is, and it's what gets edited
   // most. On a touch screen a focused text field pops the keyboard over a card someone may
@@ -298,7 +341,8 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
         <AskBlock card={card} before={save} />
         {held && <p className="held-note">{ASK_HOLDS(owner ?? "the board's owner")}</p>}
         {/* The owner's own board: what a member put on this card, what that means, and the one way it comes off. */}
-        {(!mode || mode === "owner") && <MemberWords card={card} onClaim={onClaim} />}
+        {ownerHere && changed && <ChangedWhileOpen card={card} who={changed.who} kept={changed.kept && typedOver} onDismiss={() => setChanged(null)} />}
+        {ownerHere && <MemberWords card={card} onClaim={onClaim ? () => void claim() : undefined} hold={claimHold} busy={claimBusy} error={claimError} saved={(typedOver || !!claimError) && !changed} />}
         <div className="notes-read">
           <div className="notes-head">
             <span id="notes-label">Notes</span>

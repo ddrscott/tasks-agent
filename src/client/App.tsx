@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, doneLaneId, memberTouch, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
+import { clean, doneLaneId, markOf, memberTouch, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -935,7 +935,16 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           }}
           // The owner gets the Undo for a writer's delete (in their toast, and in their undo history). The writer has none, so their toast says who does.
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(access ? `Deleted "${t}". Only ${access.ownerEmail} can bring it back, with Undo on their board.` : `Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS), refused); }}
-          onClaim={member ? undefined : () => void agent.stub.claimWords(editingCard.id).then(() => say("Marked as your words. Your agents will read this card as yours.", true), refused)}
+          // The claim carries the words it's for: this card as it's saved and on screen in this very render (never the
+          // newest board the socket may hold, which the owner hasn't been shown yet). The server refuses if the card says
+          // anything else by then. On an encrypted board what's saved is ciphertext, so that's what's compared.
+          onClaim={member ? undefined : () => {
+            const c = (board.sealed ? raw.cards.find((x) => x.id === editingCard.id) : null) ?? editingCard;
+            return agent.stub.claimWords(editingCard.id, { title: c.title, notes: c.notes, tags: c.tags ?? [], member: markOf(c) }).then(
+              () => { say("Marked as your words. Your agents will read this card as yours.", true); return null; },
+              (e: unknown) => e instanceof Error && e.message ? plainError(e.message) : "That didn't go through. Try again.",
+            );
+          }}
           isDone={editingCard.laneId === doneLane}
           onToggleDone={doneLane ? () => {
             const reopen = editingCard.laneId === doneLane;

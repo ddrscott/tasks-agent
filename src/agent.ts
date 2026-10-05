@@ -924,13 +924,30 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * it (it isn't in MEMBER_CALLS). The assistant can't: it isn't a board tool, and a call made
    * on anyone's behalf (`via`) is refused here. An outside agent can't: MCP has no such tool,
    * and a call that didn't come in on the owner's own socket has no caller and is refused too.
+   *
+   * `seen` is the words the owner read: the title, notes, tags, and mark their screen showed
+   * (ops.SeenWords). If the card says anything else by the time this runs, nothing changes and
+   * the answer says the card changed. The check and the change are one step with nothing
+   * awaited between them, so no edit can land in the middle. It's always a change of its own:
+   * its own call, its own undo step, never part of a turn or a batch, and it touches nothing
+   * but that one card's mark (checked below, after the fact, before anything is stored).
    */
   @callable()
-  claimWords(id: string) {
+  claimWords(id: string, seen: ops.SeenWords) {
     const c = callers.getStore();
     if (c?.kind !== "owner" || c.via) throw new Error("Only the board's owner can do that, by hand, from the card.");
     if (typeof id !== "string") throw new Error(`[${ops.BAD_ARGS}] A card is named by its id, like c1a2b.`);
-    this.mutate("Mark words as mine", (b) => ops.claimWords(b, id), undefined, "you", id);
+    this.mutate("Mark words as mine", (b) => {
+      const next = ops.claimWords(b, id, seen);
+      // Nothing rides along: every other card is the same object, and this one differs only in its mark and when it changed.
+      const bare = (card: Card | undefined) => { const { member: _m, memberText: _t, updatedAt: _u, ...rest } = card ?? ({} as Card); return JSON.stringify(rest); };
+      const { cards: _b, ...restBefore } = b;
+      const { cards: _n, ...restNext } = next;
+      const alone = JSON.stringify(restBefore) === JSON.stringify(restNext) && next.cards.length === b.cards.length
+        && next.cards.every((card, i) => (card.id === id ? b.cards[i].id === id && bare(card) === bare(b.cards[i]) : card === b.cards[i]));
+      if (!alone) throw new Error("Marking words as yours can't be combined with any other change.");
+      return next;
+    }, undefined, "you", id);
   }
 
   /** Answer the question on a card (ask_ceo): one of its options by index, or typed text. */

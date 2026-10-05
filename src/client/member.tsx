@@ -247,12 +247,67 @@ function WroteLine({ card }: { card: Card }) {
 }
 
 /**
+ * A card's saved words as plain text: the title, the notes character for character (not
+ * rendered, so nothing a link or a comment could tuck away is out of sight), and the tags.
+ * It's what "These words are mine now" vouches for, shown wherever the fields above might be
+ * showing something else: the owner's own unsaved typing, or the card as it was a moment ago.
+ */
+export function SavedWords({ card }: { card: Card }) {
+  return (
+    <div className="saved-words" role="group" aria-label="What this card says now, as saved">
+      <div className="h">SAVED_NOW</div>
+      <dl>
+        <div><dt>Title</dt><dd>{card.title}</dd></div>
+        <div><dt>Notes</dt><dd className={card.notes ? "saved-notes" : undefined} tabIndex={card.notes ? 0 : undefined}>{card.notes || "none"}</dd></div>
+        <div><dt>Tags</dt><dd>{card.tags?.length ? card.tags.map((t) => `#${t}`).join(" ") : "none"}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+/** Who changed the card under an open editor, as the start of a sentence. Read once, when the change lands: the card's `by` moves on with the next change. */
+export function changer(by: By | undefined, me: string | undefined): string {
+  if (!by) return "Someone";
+  if (by.email === me) return by.via === "agent" ? "Your agent" : by.via === "assistant" ? "The assistant" : "Another tab of yours";
+  return whoText(by, me ?? "");
+}
+
+/**
+ * In the owner's card editor, when the card's words changed while it was open: who did it,
+ * and what the card says now, before anything else can be pressed. The editor's own fields
+ * were filled in when it opened, so without this a member's rewrite would sit under the
+ * owner's eyes unseen. `kept` says some of what the owner had typed is still in the fields.
+ */
+export function ChangedWhileOpen({ card, who, kept, onDismiss }: { card: Card; who: string; kept: boolean; onDismiss(): void }) {
+  return (
+    <div className="card-changed" role="alert">
+      <p className="card-changed-who">
+        <span className="member-words-mark" aria-hidden="true">$</span>
+        <span><b>{who}</b> changed this card while you had it open. {kept
+          ? "What you typed is still in the fields and isn't saved. Save puts it over what's below."
+          : "The fields show it as it is now."}</span>
+      </p>
+      <SavedWords card={card} />
+      <div className="member-words-act"><button type="button" className="btn" onClick={onDismiss}>Got it</button></div>
+    </div>
+  );
+}
+
+/** How long "These words are mine now" stays off after the card's words change under the editor, so a click already on its way can't land on words nobody has read. */
+export const CLAIM_HOLD_MS = 1500;
+
+/**
  * In the owner's card editor: what a member wrote on this card, what that mark does, and the
  * button that takes it off. The mark never comes off because of an edit, however complete, so
  * this is where the owner says "I've read these and they're mine". Files are marked on their
  * own rows and stay marked while they're on the card.
+ *
+ * The button vouches for the card as it's saved, and sends exactly that along (App.tsx): the
+ * server refuses if the card says anything else by then. `saved` shows those words here, for
+ * when the fields hold something else (the owner's unsaved typing) or the last press was
+ * refused. `hold` keeps the button off for a moment after the words changed under the editor.
  */
-export function MemberWords({ card, onClaim }: { card: Card; onClaim?(): void }) {
+export function MemberWords({ card, onClaim, hold, busy, error, saved }: { card: Card; onClaim?(): void; hold?: boolean; busy?: boolean; error?: string; saved?: boolean }) {
   const who = useContext(WhoContext);
   const t = memberTouch(card);
   if (!t || (!t.text && !t.tags)) return null;
@@ -270,7 +325,15 @@ export function MemberWords({ card, onClaim }: { card: Card; onClaim?(): void })
         Your agents are told these aren't your words and to ask you before acting on them. Editing the card doesn't change that. This button does.
         {t.files ? " Files a member attached stay marked for as long as they're on the card." : ""}
       </p>
-      {onClaim && <div className="member-words-act"><button type="button" className="btn" onClick={onClaim}>These words are mine now</button></div>}
+      {onClaim && saved && <p className="member-words-why">The button goes by the card as it's saved, which is this, not by anything typed above and not saved yet:</p>}
+      {onClaim && saved && <SavedWords card={card} />}
+      {error && <p className="dialog-error" role="alert">{error}</p>}
+      {onClaim && (
+        <div className="member-words-act">
+          <button type="button" className="btn" onClick={onClaim} disabled={hold || busy} title={hold ? "The card just changed. Read what it says now first." : undefined}>These words are mine now</button>
+          {hold && <span className="member-words-hold" role="status">The card just changed. Read it first.</span>}
+        </div>
+      )}
     </div>
   );
 }
