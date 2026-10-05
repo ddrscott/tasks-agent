@@ -2109,7 +2109,14 @@ address or a guess, and nothing on screen offers a change the server would refus
 - **The assistant** for a writer is `src/client/MemberChat.tsx`: only the model in the tab
   (Needle), one plain step at a time, sent as `applyLocal` under the writer's own role. It
   says the cloud assistant is the owner's. The conversation lives in the tab and is saved
-  nowhere.
+  nowhere. That model can't set a tag (`src/needle-tools.ts` gives it no way to), so when the
+  message asked for one ("add a card called Robot work tagged agent", "#agent", "tag it
+  client"), the reply says the tag was left off and why (`tagsLeftOff` in
+  `src/client/member.tsx`): for one of the owner's tags, the same reason as everywhere else
+  ("#agent was left off. Only owner@example.com can put #agent on a card or take it off.
+  Their agents take orders from that tag."); for any other, that the assistant in the tab
+  can't set tags and where to add it. It used to add the card without the tag and say
+  nothing.
 - **Questions** show with their options as plain text and a line saying the owner answers.
   There are no buttons to tap, and no "need you" count on someone else's board.
 - **Theme.** A member keeps the theme their browser already had; the owner's choice for their

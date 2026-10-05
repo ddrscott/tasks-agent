@@ -125,6 +125,44 @@ export function ownerTagTouched(before: string[], after: string[], title?: strin
   return added ?? removed ?? (title !== undefined ? ownerTagInTitle(title) : null);
 }
 
+/**
+ * The tags a message asked for: "tagged agent", "tag it urgent", "with the tag client",
+ * "#agent". The model in a writer's tab (MemberChat.tsx) has no way to set a tag (src/needle-tools.ts gives it none), so
+ * whatever it did, these were left off, and the reply has to say so. It used to add the card
+ * without the tag and say nothing, which for "tagged agent" looked like a work order that
+ * had gone to the owner's agents.
+ */
+export function tagsAsked(text: string): string[] {
+  const found: string[] = [];
+  const WORD = String.raw`#?([\p{L}\p{N}][\p{L}\p{N}_-]{0,31})`;
+  const take = (re: RegExp, only?: (tag: string) => boolean) => {
+    for (const m of text.matchAll(re)) {
+      const tag = m[1].toLowerCase();
+      if (/^(it|this|that|them|as|with|the|a|an|for|to|in|on|by|of|and|or)$/.test(tag) || /^\d+$/.test(tag) || found.includes(tag) || (only && !only(tag))) continue;
+      found.push(tag);
+    }
+  };
+  // Said outright: "tagged agent", "tag it urgent", "with the tag client", "labeled urgent", "#agent".
+  take(new RegExp(String.raw`\b(?:tagged|labell?ed|tag (?:it|this|that|them)|(?:with|and) (?:the |a )?tags?)\s+(?:as\s+|with\s+)?${WORD}`, "giu"));
+  take(/(?:^|\s)#([\p{L}\p{N}][\p{L}\p{N}_-]{0,31})/gu);
+  // "tag agent" could be a title's own words ("review tags for the board"), so a bare one counts only when it's one of the owner's.
+  take(new RegExp(String.raw`\btags?\s+${WORD}`, "giu"), (tag) => !!ownerTagLike(tag));
+  return found;
+}
+
+/** What to tell a writer about tags their message asked for and the assistant couldn't set. The owner's tags get the same reason as everywhere else. */
+export function tagsLeftOff(text: string, owner: string): string | null {
+  const asked = tagsAsked(text);
+  if (!asked.length) return null;
+  const theirs = asked.map((t) => [t, ownerTagLike(t)] as const).filter((x): x is readonly [string, string] => !!x[1]);
+  const plain = asked.filter((t) => !ownerTagLike(t));
+  const said = [
+    ...theirs.map(([typed, tag]) => `#${typed} was left off. ${OWNER_TAG_NOTE(tag, owner, typed)}`),
+    ...(plain.length ? [`${plain.map((t) => `#${t}`).join(" and ")} ${plain.length === 1 ? "was" : "were"} left off: the assistant in this tab can't set tags. Open the card and add ${plain.length === 1 ? "it" : "them"} under Tags.`] : []),
+  ];
+  return said.join(" ");
+}
+
 // ── Who made the last change ────────────────────────────────────────────────────────────────
 
 /**

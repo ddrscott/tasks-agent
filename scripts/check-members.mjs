@@ -576,6 +576,19 @@ section("access rules (pure)");
     return [takeRoom(full, fresh("c")), rules.SLOW_DOWN, "The board's members are changing. Try again in a moment.", "", "That didn't go through. Try again."].every((why) => typeof why === "string" && !rules.needsEdit(why));
   })());
 
+  // The assistant in a writer's tab can't set a tag. When the message asked for one, its reply says it was left off, and why.
+  ok("\"add a card called Robot work tagged agent\": the reply says #agent was left off and whose it is", (() => {
+    const say = (t) => memberUi.tagsLeftOff(t, "owner@example.com");
+    return say("add a card called Robot work tagged agent") === "#agent was left off. Only owner@example.com can put #agent on a card or take it off. Their agents take orders from that tag."
+      && /^#ag3nt was left off\. #ag3nt reads as #agent\. Only owner@example\.com can put #agent/.test(say("add ship it tagged ag3nt"))
+      && /#gauntlet was left off\. Only owner@example\.com/.test(say("Add cut the release Friday with the tag gauntlet")) && /#agent was left off/.test(say("add Robot work #agent")) && /#agent was left off/.test(say("add Robot work, tag agent"));
+  })());
+  ok("any other tag it was asked for is named too, and a message that asked for none gets no such line", (() => {
+    const say = (t) => memberUi.tagsLeftOff(t, "owner@example.com");
+    return say("add call bob tag it client") === "#client was left off: the assistant in this tab can't set tags. Open the card and add it under Tags."
+      && [ "Add fix the flaky login test", "finished the login test", "add fix issue #123", "add review tags for the board", "add talk to the agent about C#" ].every((t) => say(t) === null);
+  })());
+
   // The token bucket every member frame is charged to.
   const { spendToken, MEMBER_RATE: R } = rules;
   let bucket; let passed0 = 0; let refused0 = 0; let flood0 = false;

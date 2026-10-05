@@ -6,6 +6,7 @@
 // the server writes nothing a member says into the owner's chat.
 
 import { plainError } from "../member-rules";
+import { tagsLeftOff } from "./member";
 import { useEffect, useRef, useState } from "react";
 import { IconClose, IconSend } from "./icons";
 import { useNeedle } from "./needle";
@@ -64,6 +65,9 @@ export function MemberChat({ agent, board, owner, open, onClose, inputRef }: Pro
       }
       const res = await (agent as { stub: Stub }).stub.applyLocal({ text: v, calls: r.calls, engine: "needle-rs", confidence: r.confidence, ms: r.ms });
       for (const o of res.outcomes) say({ kind: o.ok ? "ok" : "fail", text: o.summary });
+      // It can't set a tag, so one the message asked for isn't on the card. Say that, and why.
+      const off = res.outcomes.some((o) => o.ok) ? tagsLeftOff(v, owner) : null;
+      if (off) say({ kind: "notice", text: off });
     } catch (e) {
       // The server's refusal, in its own words: view only, or a change that's the owner's to make.
       say({ kind: "fail", text: plainError((e as Error).message ?? "") || "That didn't work." });
