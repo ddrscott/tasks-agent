@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board
+- The Add a card box grows to fit long lines that wrap, instead of cutting one off, and scrolls past a dozen lines. On a phone, the reasons under it no longer run under the floating Ask button
 
 ## [0.2.0] - 2026-10-04
 

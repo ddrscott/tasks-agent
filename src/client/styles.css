@@ -591,14 +591,24 @@ button.chip.tag:hover { border-color: var(--accent); }
 .quick-add { padding: 4px 10px 10px; }
 .quick-add .btn { width: 100%; justify-content: flex-start; color: var(--muted); }
 .quick-add .btn:hover { color: var(--ink); }
-.quick-add textarea { resize: none; display: block; min-height: 64px; max-height: 240px; }
-.quick-add .row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+/* The box grows to fit what's in it, wrapped lines included, so a line left behind is never cut
+   off mid-wrap; past the max it scrolls, with a scrollbar that's always drawn. QuickAdd sizes it
+   by hand where field-sizing is missing. */
+.quick-add textarea { resize: none; display: block; field-sizing: content; min-height: 64px; max-height: 270px; max-height: calc(12lh + 20px + 2 * var(--border-w)); overflow-y: auto; }
+/* Twelve whole lines on a wide screen, six on a phone: the box and the reasons under it both have to fit in the lane above the keyboard. */
+@media (max-width: 900px) { .quick-add textarea { max-height: 170px; max-height: calc(6lh + 20px + 2 * var(--border-w)); } }
+.quick-add textarea::-webkit-scrollbar, .quick-add-note::-webkit-scrollbar { width: 8px; }
+.quick-add textarea::-webkit-scrollbar-thumb, .quick-add-note::-webkit-scrollbar-thumb { background: var(--muted); }
+.quick-add textarea::-webkit-scrollbar-track, .quick-add-note::-webkit-scrollbar-track { background: var(--line); }
+.quick-add .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
 .quick-add .row .btn { width: auto; flex: none; }
 .quick-add .row .btn.primary, .quick-add .row .btn.primary:hover { color: var(--accent-ink); }
-.quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; }
+.quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; white-space: nowrap; }
 /* What happened to the lines still in the box: "41 added, 19 left. …" */
 /* pre-line: a list left for more than one reason gets a row per reason (leftReasons in member.tsx). */
-.quick-add-note { margin: 6px 0 0; padding: 6px 8px; font: 12px/1.5 var(--font-mono); color: var(--ink); border: 1px solid var(--danger); overflow-wrap: anywhere; white-space: pre-line; }
+/* A long list of reasons scrolls inside its own outline, so the button under it stays on screen. */
+.quick-add-note { margin: 6px 0 0; padding: 6px 8px; font: 12px/1.5 var(--font-mono); color: var(--ink); border: 1px solid var(--danger); overflow-wrap: anywhere; white-space: pre-line; max-height: min(28dvh, 252px); overflow-y: auto; }
+@media (max-width: 900px) { .quick-add-note { max-height: min(24dvh, 200px); } }
 
 .add-lane { flex: 0 0 auto; }
 .add-lane > .btn { border-style: dashed; background: transparent; color: var(--muted); }
@@ -1245,6 +1255,9 @@ a.att-name:hover { color: var(--accent-text); }
   /* An open quick add sits at the bottom of its lane, right where the toast lands, and Undo would
      cover Add card. While one is open the toast goes to the top of the screen instead. */
   .app:has(.quick-add textarea) .toast { bottom: auto; top: calc(8px + env(safe-area-inset-top)); }
+  /* The reasons a pasted list left lines behind sit at the bottom of the lane, where the floating
+     Ask button is. While they're up the button steps aside; the assistant is still in the account menu. */
+  .app:has(.quick-add-note) .chat-fab { display: none; }
 }
 
 @media (max-width: 560px) {

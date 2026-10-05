@@ -1478,8 +1478,12 @@ or, when lines were left for different reasons, a row per reason with the line i
 reasons." then `“bad line #gauntlet”: Only … can put #gauntlet on a card …` and the same for
 `#needs-ceo`; it used to give the first reason only),
 and doesn't empty the box until the server has answered, so nothing is dropped and nothing has
-to be pasted twice. The box grows to show every line that's left (up to eight, then it
-scrolls) and goes back to its first line, and while it still holds exactly the lines that were
+to be pasted twice. The box grows to fit what's in it, wrapped lines included (twelve lines
+on a wide screen, six on a phone, then it scrolls with a scrollbar that's always drawn), and
+goes back to its first line. It used to size itself by counting line breaks, so four long
+lines sat in a box too short for them, with one cut off mid-wrap. A long list of reasons
+scrolls inside its own outline, so the button under it stays in the lane, and on a phone the
+floating Ask button steps aside while the reasons are up. While the box still holds exactly the lines that were
 turned down the button reads "Try these 3 again", not "Add 3 cards". That's only for lines a
 second try can help: a board that was full, a member going too fast, a dropped connection. A
 line refused for what it says (one of the owner's tags or a look-alike, a title nobody can

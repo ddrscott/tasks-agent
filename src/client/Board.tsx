@@ -577,6 +577,15 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
   const [mustFix, setMustFix] = useState<string[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (open && !frozen) ref.current?.focus(); }, [open, frozen]);
+  // CSS `field-sizing: content` grows the box to fit its lines, wrapped ones included. Where it's
+  // missing (Firefox), size it by hand; min-height and max-height in the stylesheet still clamp it.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    // `CSS` in this file is dnd-kit's helper, so the browser's is asked for by its full name.
+    if (!el || window.CSS.supports("field-sizing", "content")) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [text, open, busy]);
   // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
   useDraft(`quick-add:${lane.id}`, text.trim() ? { where: `"Add a card" in ${lane.name}`, lines: text } : null);
 
