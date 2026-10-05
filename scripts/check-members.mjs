@@ -2071,6 +2071,9 @@ section("an encrypted board can't be shared");
   // And a card whose notes and tag only look encrypted. On a plain board that's ordinary text.
   const alike = "eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC";
   const planted = (await w.rpc("addCard", ["todo", "Looks sealed", false, { notes: alike, tags: ["eyJh..A.b.C"] }])).result;
+  // And one with a title long enough that its ciphertext runs past the 200 characters a plain title is cut to.
+  const longTitle = "A long but ordinary title, the kind a person pastes in from an email subject line without thinking, ".repeat(2).trim().slice(0, 190);
+  const longCard = (await s.rpc("addCard", ["todo", longTitle, false])).result;
   const mineUp = await send(encOwner, `card=${theirs}`, "mine.txt", "the owner's own file");
   await pace(encWriter);
   const theirUp = await send(encWriter, `card=${theirs}&board=${encOwner.id}`, "steps.txt", "a member's steps");
@@ -2101,6 +2104,10 @@ section("an encrypted board can't be shared");
     }
     sealedBoard.cards.push({ id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}), member: forged, memberText: forged.text });
   }
+  // The other way round: a board sent to be encrypted with one field left in plain text is refused.
+  const halfOn = await s.rpc("enableEncryption", [{ kid: boardKey.kid, envelope, board: { ...sealedBoard, lanes: sealedBoard.lanes.map((l, i) => (i === 0 ? { ...l, name: plain.lanes[0].name } : l)) }, proof }], 30_000);
+  await sleep(250);
+  ok("turning encryption on is refused while a lane name is still plain text", halfOn.success === false && /wasn't encrypted with its key/.test(halfOn.error ?? "") && !s.state().sealed && s.state().lanes[0].name === plain.lanes[0].name, halfOn);
   const on = await s.rpc("enableEncryption", [{ kid: boardKey.kid, envelope, board: sealedBoard, proof }], 30_000);
   ok("a board nobody is on can still be encrypted", on.success === true, on);
   const sealedCard = await cardNow();
@@ -2123,6 +2130,22 @@ section("an encrypted board can't be shared");
   const sealedTitle = s.state().cards.find((c) => c.id === planted)?.title;
   const half = await s.rpc("disableEncryption", [{ board: { ...back, cards: back.cards.map((c) => (c.id === planted ? { ...c, title: sealedTitle } : c)) }, proof }], 30_000);
   ok("turning encryption off is refused while a field is still the board's ciphertext", sealedLib.isSealed(sealedTitle) && half.success === false && /still encrypted/.test(half.error ?? "") && !!s.state().sealed, half);
+  // The same for the fields plain text gets cut down or rewritten in: a lane name (40 characters), a tag
+  // (lower case, letters and digits), and a title whose ciphertext is longer than 200. Checked after
+  // that cleaning, none of them matched the board's ciphertext any more, and each was let through.
+  const sealedState = s.state();
+  const sealedTag = sealedState.cards.find((c) => c.id === planted)?.tags?.[0];
+  const sealedLong = sealedState.cards.find((c) => c.id === longCard)?.title;
+  const withCard = (id, patch) => ({ ...back, cards: back.cards.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  for (const [what, board, text] of [
+    ["a lane name", { ...back, lanes: back.lanes.map((l, i) => (i === 0 ? { ...l, name: sealedState.lanes[0].name } : l)) }, sealedState.lanes[0].name],
+    ["a tag", withCard(planted, { tags: [sealedTag] }), sealedTag],
+    ["a long title", withCard(longCard, { title: sealedLong }), sealedLong],
+  ]) {
+    const r = await s.rpc("disableEncryption", [{ board, proof }], 30_000);
+    await sleep(250);
+    ok(`turning encryption off is refused while ${what} is still the board's ciphertext, and the board stays as it was`, sealedLib.isSealed(text) && (what !== "a long title" || text.length > 200) && r.success === false && /still encrypted/.test(r.error ?? "") && JSON.stringify(s.state()) === JSON.stringify(sealedState), [r, s.state().lanes[0].name.slice(0, 60)]);
+  }
   const off = await s.rpc("disableEncryption", [{ board: back, proof }], 30_000);
   await sleep(250);
   const plantedBack = s.state().cards.find((c) => c.id === planted);

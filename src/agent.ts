@@ -1338,8 +1338,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // was. That's what is refused. Going by shape instead ("looks like a JWE") refused plain text
     // too: a note reading eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC, left by a member before the board
     // was encrypted, kept its owner from turning encryption off until they edited that card.
+    // The text is checked as it was sent, before adopt() cleaned it as plain text, and after. Only
+    // after wasn't enough: a lane name cut to 40 characters, a tag reduced to lower-case letters, or
+    // a title over 200 no longer matched its ciphertext, so the board was accepted half decrypted
+    // and the cleaned-up ciphertext stored in place of the text.
     const sealedNow = new Set(ops.boardTexts(this.state));
-    if (ops.boardTexts(next).some((t) => sealedNow.has(t))) throw new Error("Some of the board is still encrypted.");
+    const sent = [
+      ...input.board.lanes.map((l) => l.name),
+      ...input.board.cards.flatMap((c) => [c.title, c.notes, c.due, ...(Array.isArray(c.tags) ? c.tags : []), ...(c.attachments ?? []).flatMap((a) => [a.name, a.type])]),
+    ].map(String);
+    if ([...sent, ...ops.boardTexts(next)].some((t) => sealedNow.has(t))) throw new Error("Some of the board is still encrypted.");
     await this.swapBoard(next);
     this.sql`DELETE FROM seal_meta`;
     this.index.clear();
