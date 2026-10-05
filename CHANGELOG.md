@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_card` hands your agents each file's text between a begin line and an end line that carry a code made for that one answer, so a member's file can't pose as one of yours or as the board. Notes a member wrote are fenced the same way
 - `get_card` says so when a file it lists isn't shown (a PDF, a text file over 32 KB, an image that's too big), instead of skipping it without a word
 - After a pasted list leaves lines behind, "Try these 3 again" is only offered when trying again could work. Lines turned down for what they say (one of the owner's tags, a title nobody can read) get "Fix these 3 to add them" instead, and the button comes back once they're edited or taken out
+- On a shared board every attached file says who attached it, yours included: "attached by you", or the owner's or member's email
 
 ### Fixed
 - Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board

@@ -25,7 +25,7 @@ import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
-import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote } from "./Members";
+import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote, useBoardMembers } from "./Members";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
@@ -785,7 +785,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   return (
     <AskContext.Provider value={answerAsk}>
     <AskOwnerContext.Provider value={access?.ownerEmail ?? null}>
-    <Who me={me.email} on={showWho}>
+    <Who me={me.email} on={showWho} own={sharedBoard ? undefined : me.id}>
     <DraftsContext.Provider value={drafts}>
     <NoAgentProvider board={board} onConnect={onConnect} off={member}>
     <div className="app">
@@ -994,8 +994,21 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   );
 }
 
-/** Turns names on cards on or off for everything inside, and keeps "3m ago" moving (member.tsx). */
-function Who({ me, on, children }: { me: string; on: boolean; children: React.ReactNode }) {
+/**
+ * Turns names on cards on or off for everything inside, and keeps "3m ago" moving (member.tsx).
+ * `own` is your id on your own board: there, names also come on as soon as anyone is invited,
+ * so a file you attach says "attached by you" before a member has touched a thing.
+ */
+function Who({ me, on, own, children }: { me: string; on: boolean; own?: string; children: React.ReactNode }) {
+  return own ? <OwnWho me={me} on={on} own={own}>{children}</OwnWho> : <WhoOn me={me} on={on}>{children}</WhoOn>;
+}
+
+function OwnWho({ me, on, own, children }: { me: string; on: boolean; own: string; children: React.ReactNode }) {
+  const { members } = useBoardMembers(own);
+  return <WhoOn me={me} on={on || members.length > 0}>{children}</WhoOn>;
+}
+
+function WhoOn({ me, on, children }: { me: string; on: boolean; children: React.ReactNode }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!on) return;

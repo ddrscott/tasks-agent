@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { fileMember, type Attachment } from "../shared";
+import { AskOwnerContext } from "./Ask";
 import { api } from "./base";
 import { IconClip, IconClose } from "./icons";
 import { WhoContext } from "./member";
@@ -80,8 +81,20 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget, 
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  // A file a member attached says so on its row (`by` on the attachment, written by the board).
+  // On a shared board every file says who attached it, under its name (`by` on the attachment,
+  // written by the board): a member's as a member's, and the owner's as the owner's, so a row
+  // with no line never has to be read as "probably the owner's". A file from before uploaders
+  // were kept has no `by` and reads as the owner's, which is what agents are told too.
   const who = useContext(WhoContext);
+  // Set on a board someone shared with you: its owner's email. On your own board the owner is you.
+  const ownerEmail = useContext(AskOwnerContext);
+  const attachedBy = (a: Attachment): string | null => {
+    if (!who) return null;
+    const member = fileMember(a);
+    if (member) return `attached by ${member === who.me ? "you" : member}, a member`;
+    const by = a.by?.email ?? ownerEmail ?? who.me;
+    return `attached by ${by === who.me ? "you" : by}${ownerEmail ? ", the board's owner" : ""}`;
+  };
 
   // One at a time, so each upload's quota check sees the ones before it.
   const add = useCallback(async (files: File[]) => {
@@ -153,7 +166,7 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget, 
               </a>
               <span className="att-main">
                 <a className="att-name" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer">{a.name}</a>
-                {fileMember(a) && <span className="att-by" title={new Date(a.addedAt).toLocaleString()}>attached by {fileMember(a) === who?.me ? "you" : fileMember(a)}, a member</span>}
+                {attachedBy(a) && <span className="att-by" title={new Date(a.addedAt).toLocaleString()}>{attachedBy(a)}</span>}
               </span>
               <span className="att-size">{formatBytes(a.size)}</span>
               <a className="btn ghost" href={fileUrl(a, true, board)} download={a.name} title="Download" aria-label={`Download ${a.name}`}>↓</a>

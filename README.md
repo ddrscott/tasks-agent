@@ -1735,8 +1735,13 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   - **Where a person sees it.** The owner's card editor has a block above the notes:
     "Title or notes written by dana@example.com, a member", "Tags set by …", one line on what
     the mark does ("Your agents are told these aren't your words and to ask you before acting
-    on them. Editing the card doesn't change that. This button does."), and the button. A
-    member's file says "attached by dana@example.com, a member" under its name, for everyone.
+    on them. Editing the card doesn't change that. This button does."), and the button. Every
+    file on a shared board says who attached it under its name, for the owner, writers, and
+    viewers alike: "attached by dana@example.com, a member", "attached by you", or, to a
+    member, "attached by owner@example.com, the board's owner" (`attachedBy` in
+    `src/client/Attachments.tsx`). A file from before uploaders were kept reads as the
+    owner's. A row with nothing under it used to mean "the owner's, probably". On your own
+    board the names come on as soon as anyone is invited (`OwnWho` in `src/client/App.tsx`).
     The card's face says "words and tags by dana@example.com" or "file by …" whenever the
     last change wasn't that member's own. A member sees the same lines without the button.
   - **Cards marked before this** carry the old shape, `memberText: { email, at }`. It's read as
