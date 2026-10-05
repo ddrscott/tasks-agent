@@ -19,7 +19,7 @@ export type Attachment = {
   size: number; // bytes
   type: string; // MIME type as uploaded
   addedAt: string;
-  /** Who uploaded it (FileBy below). Missing on files from before this was kept, which read as the owner's. Never on an encrypted board. */
+  /** Who uploaded it (FileBy below). Missing on files from before this was kept, which read as the owner's. An encrypted board keeps it for files that had it before (TodoAgent.adopt) and stamps no new ones. */
   by?: FileBy;
 };
 
@@ -215,7 +215,7 @@ export type Card = {
   ask?: Ask; // an open question; never on an encrypted board
   answer?: Answer;
   by?: By; // who made the last change; `updatedAt` says when. Never on an encrypted board.
-  member?: MemberMark; // what a member wrote on this card (title or notes, tags). Only the owner's "These words are mine now" takes it off.
+  member?: MemberMark; // what a member wrote on this card (title or notes, tags). Only the owner's "These words are mine now" takes it off. Encrypting the board and decrypting it keep it (TodoAgent.adopt).
   /** The mark as cards stored before `member` existed carry it. Read (markOf), never written. */
   memberText?: Who;
 };

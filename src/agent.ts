@@ -1381,6 +1381,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /**
    * Rebuild a board the client sent from known fields only, and check it against the live one.
    * Timestamps come from the live board; attachment sizes come from R2.
+   *
+   * What a member put on a card comes from the live board too, never from what the client
+   * sent: a card keeps its member mark (`member`), and a file keeps who uploaded it (`by`),
+   * through encrypting and through decrypting. Files are uploaded again in each direction and
+   * get new ids, so a file takes the uploader of the file in the same place on the same card
+   * (sameShape has checked each card has as many files as before). On the encrypted board
+   * the mark and the uploader stay as they are, an email and a time, unencrypted: they're the
+   * board's own record, not the board's text, and the owner's agents can't read an encrypted
+   * board at all. Without this, encrypting and decrypting took every mark off with no
+   * "These words are mine now".
    */
   private async adopt(raw: Board | undefined, seal: SealInfo | undefined): Promise<Board> {
     const cur = this.state;
@@ -1392,19 +1402,22 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     for (const c of raw.cards) {
       const was = live.get(c.id)!;
       const attachments: Attachment[] = [];
-      for (const a of c.attachments ?? []) {
+      for (const [i, a] of (c.attachments ?? []).entries()) {
         if (!/^a[0-9a-f]{16}$/.test(a.id)) throw new Error("Bad attachment id.");
         const obj = await this.env.ATTACHMENTS.head(`${this.name}/${a.id}`);
         if (!obj) throw new Error("An attachment didn't finish uploading. Try again.");
         if ((obj.customMetadata?.sealed === "1") !== wantSealed) throw new Error("An attachment is in the wrong form. Try again.");
-        attachments.push({ id: a.id, name: String(a.name), type: String(a.type), size: obj.size, addedAt: String(a.addedAt ?? was.createdAt) });
+        const by = was.attachments?.[i]?.by;
+        attachments.push({ id: a.id, name: String(a.name), type: String(a.type), size: obj.size, addedAt: String(a.addedAt ?? was.createdAt), ...(by ? { by: { email: by.email, role: by.role } } : {}) });
       }
+      const mark = ops.markOf(was);
       const tags = Array.isArray(c.tags) ? c.tags.map(String) : [];
       if (tags.length > ops.MAX_TAGS_PER_CARD) throw new Error(`A card can have ${ops.MAX_TAGS_PER_CARD} tags`);
       cards.push({
         id: c.id, laneId: c.laneId, title: String(c.title), notes: String(c.notes ?? ""), due: c.due == null ? null : String(c.due),
         createdAt: was.createdAt, updatedAt: was.updatedAt, ...(attachments.length || was.attachments ? { attachments } : {}),
         ...(tags.length ? { tags } : {}),
+        ...(mark ? { member: mark } : {}),
       });
     }
     // A lane's sort is a plain setting, not content, so it rides along unencrypted either way.
