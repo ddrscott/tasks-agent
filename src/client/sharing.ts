@@ -44,7 +44,7 @@ export function sharingFacts(members: number | null): Fact[] {
     },
     {
       q: "Who can see what happened?",
-      a: "Only the owner reads the audit log: every invite, role change, removal, and exit, and who deleted which card.",
+      a: "Only the owner reads the audit log: every invite, role change, removal, and exit, and who deleted which card. When a site admin gives or takes back the owner's Pro plan and that pauses or restores sharing, the log names that admin by email.",
     },
   ];
 }
