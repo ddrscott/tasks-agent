@@ -1405,7 +1405,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * sent: a card keeps its member mark (`member`), and a file keeps who uploaded it (`by`),
    * through encrypting and through decrypting. Files are uploaded again in each direction and
    * get new ids, so a file takes the uploader of the file in the same place on the same card
-   * (sameShape has checked each card has as many files as before). On the encrypted board
+   * (sameShape has checked each card has as many files as before, and refuses the board if not).
+   *
+   * How far that can be trusted: the mark follows the card's id, and the uploader follows the
+   * file's position on the card, as the owner's own browser sent them. The server can't read
+   * ciphertext, so it can't check that the text under a card id is still that card's text, or
+   * that the files came back in the same order. A forged payload from the owner's own session
+   * (two cards' sealed titles and notes swapped, a card's files reversed) moves the marks. A
+   * member can't send one: only the owner's socket reaches these calls, and an encrypted board
+   * has no members. So through an encrypt and decrypt round trip the marks are as trustworthy
+   * as the owner's session, the same as "These words are mine now", and no more. On the encrypted board
    * the mark and the uploader stay as they are, an email and a time, unencrypted: they're the
    * board's own record, not the board's text, and the owner's agents can't read an encrypted
    * board at all. Without this, encrypting and decrypting took every mark off with no

