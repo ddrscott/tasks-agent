@@ -11,7 +11,7 @@ import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events";
 import { endedCards, settledAsks } from "./presence-shared";
 import { CardIndex } from "./search";
-import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
+import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
   frameCost, memberMoveError, memberTidy, memberTidyCard, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
@@ -1288,17 +1288,53 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   // old form: undo and redo history, the chat transcript, the search index, and the old
   // attachment files in R2.
 
+  /**
+   * True from the moment `enableEncryption` starts until it has stored the encrypted board or
+   * given up. It's what keeps a board from ending up both encrypted and shared (`inviteGate`).
+   */
+  private encrypting = false;
+
+  /**
+   * Whether this board can take an invite right now: "sealed" once it's encrypted, "encrypting"
+   * from the moment `enableEncryption` begins, "open" otherwise. The Worker asks before it
+   * sends an invite, and again after the invite's row is in D1 (members.ts): a row this
+   * doesn't call "open" for is taken back out. One answer per turn of this object, so it can't
+   * be torn by anything else going on.
+   *
+   * Why that's enough. Encrypting and inviting both used to check the other once and then go
+   * on to their own awaits, so an invite sent a few milliseconds before `enableEncryption`
+   * got both through. Now `enableEncryption` raises `encrypting` before its first await and
+   * reads D1 for members and invites again as its last step before the board is stored. An
+   * invite whose row was confirmed "open" was confirmed before the flag went up, so its row
+   * was in D1 before that last read, and the read refuses the encryption. An invite confirmed
+   * any later is told "encrypting" or "sealed" and takes its row back out. Either the invite
+   * stands or the encryption does, never both. Now and then neither does, and both say why.
+   */
+  inviteGate(): "open" | "encrypting" | "sealed" {
+    return this.state.sealed ? "sealed" : this.encrypting ? "encrypting" : "open";
+  }
+
   @callable()
   async enableEncryption(input: { kid: string; envelope: string; board: Board; proof: string }) {
     if (this.state.sealed) throw new Error("This board is already encrypted.");
-    // An encrypted board is closed to everyone but its owner, so it can't be one that's shared.
-    if (await boardShared(this.env, this.name)) throw new Error(SHARED_NOTICE);
-    const seal = checkEnvelope(input?.kid, input?.envelope);
-    const check = await proofHash(checkProof(input?.proof));
-    const next = await this.adopt(input?.board, seal);
-    ops.assertSealedBoard(next);
-    await this.swapBoard(next);
-    this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+    if (this.encrypting) throw new Error("This board is already being encrypted. Give it a moment.");
+    // Raised before anything is awaited, and kept up until the board is stored or this gives up.
+    this.encrypting = true;
+    try {
+      // An encrypted board is closed to everyone but its owner, so it can't be one that's shared.
+      if (await boardShared(this.env, this.name)) throw new Error(SHARED_NOTICE);
+      const seal = checkEnvelope(input?.kid, input?.envelope);
+      const check = await proofHash(checkProof(input?.proof));
+      const next = await this.adopt(input?.board, seal);
+      ops.assertSealedBoard(next);
+      // Asked again, last, before anything is erased or stored: an invite can have landed while
+      // the lines above were waiting. From here to the stored board no invite is confirmed (inviteGate).
+      if (await boardShared(this.env, this.name)) throw new Error(SHARED_NOTICE);
+      await this.swapBoard(next);
+      this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+    } finally {
+      this.encrypting = false;
+    }
     // An encrypted board keeps no session presence or claims (presence.ts): erase what's there.
     await this.env.Presence.get(this.env.Presence.idFromName(this.name)).wipe()
       .catch((e: Error) => console.warn("presence wipe failed", e.message));
@@ -1348,8 +1384,23 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       ...input.board.cards.flatMap((c) => [c.title, c.notes, c.due, ...(Array.isArray(c.tags) ? c.tags : []), ...(c.attachments ?? []).flatMap((a) => [a.name, a.type])]),
     ].map(String);
     if ([...sent, ...ops.boardTexts(next)].some((t) => sealedNow.has(t))) throw new Error("Some of the board is still encrypted.");
+    // The safety net for a board that's encrypted and has someone on it or invited to it anyway
+    // (rows from before the two were kept apart, or a race nobody thought of). They had no way
+    // in while it was encrypted. Decrypting must not hand them one: every such row is taken
+    // off, with an audit entry that says why, before the board is readable again. No invite
+    // can land in between, because the board is still encrypted until the swap below. If the
+    // rows can't be cleared, the board stays encrypted, and trying again is all it takes.
+    const cleared = await clearSealedSharing(this.env, this.name).catch((e: Error) => {
+      console.error("clearing members before decrypting failed", e.message);
+      throw new Error("Couldn't check who's on this board just now, so it's still encrypted. Try again in a minute.");
+    });
     await this.swapBoard(next);
     this.sql`DELETE FROM seal_meta`;
+    if (cleared) {
+      // Nothing a socket remembers about its access counts from here, and the owner's Members list reads again.
+      this.epoch += 1;
+      this.tellOwner();
+    }
     this.index.clear();
     this.index.sync(null, next);
     this.index.refreshVectors(next).catch((e) => console.warn("embedding refresh failed", (e as Error).message));

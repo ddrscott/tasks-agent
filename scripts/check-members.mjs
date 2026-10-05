@@ -2212,6 +2212,147 @@ section("an encrypted board can't be shared");
   s.close();
 }
 
+// ---------- an invite sent while the board is being encrypted ----------
+
+section("an invite and encryption can't both win");
+{
+  // Encrypting and inviting each checked the other once, then went on to their own awaits. An
+  // invite sent a few milliseconds before enableEncryption got both through: an encrypted board
+  // with a pending invite, whose invitee walked in as a writer the day the owner decrypted. Run
+  // the two against each other many times, both orders, 0 to 30 ms apart, on a board with files.
+  const racee = await account("racee");
+  const s = await open(encOwner);
+  await s.wait((f) => f.type === "cf_agent_state");
+  const enc = new TextEncoder();
+  const send = (query, name, body, more = {}) => {
+    const bytes = body instanceof Uint8Array ? body : enc.encode(body);
+    return call(encOwner, "POST", `/api/attachments?${query}`, bytes, { "Content-Type": "text/plain", "X-Filename": encodeURIComponent(name), "Content-Length": String(bytes.length), ...more });
+  };
+  const listed = async () => (await call(encOwner, "GET", "/api/board/members")).data;
+  const clear = async () => { for (const m of (await listed()).members) await call(encOwner, "POST", m.status === "accepted" ? "/api/board/members/remove" : "/api/board/invites/revoke", { email: m.email }); };
+  await clear();
+  const plain = s.state();
+  const { boardKey, envelope } = await sealedLib.createBoardKey("correct horse battery staple race");
+  const seal = (t) => sealedLib.sealText(boardKey, t);
+  const proof = await sealedLib.keyProof(boardKey);
+  // The text is encrypted once and sent every round. The files are uploaded again each time: a swap erases the ones it doesn't keep.
+  const lanesSealed = [];
+  for (const l of plain.lanes) lanesSealed.push({ ...l, name: await seal(l.name) });
+  const cardsSealed = [];
+  for (const c of plain.cards) {
+    const files = [];
+    for (const a of c.attachments ?? []) files.push({ name: await seal(a.name), type: await seal(a.type), addedAt: a.addedAt });
+    cardsSealed.push({ card: { id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}) }, files, had: !!c.attachments });
+  }
+  const blob = enc.encode(await sealedLib.sealBytes(boardKey, enc.encode("bytes")));
+  const sealedPayload = async () => {
+    const cards = [];
+    for (const { card, files, had } of cardsSealed) {
+      const attachments = [];
+      for (const f of files) attachments.push({ ...(await send("stage=1", "x", blob, { "Content-Type": "application/jose", "X-Sealed-Name": f.name, "X-Sealed-Type": f.type })).data.attachment, addedAt: f.addedAt });
+      cards.push({ ...card, ...(had ? { attachments } : {}) });
+    }
+    return { kid: boardKey.kid, envelope, board: { ...plain, lanes: lanesSealed, cards }, proof };
+  };
+  const turnOff = async () => {
+    await s.rpc("beginDisable", [{ proof }]);
+    const cards = [];
+    for (const c of plain.cards) {
+      const attachments = [];
+      for (const a of c.attachments ?? []) attachments.push({ ...(await send("stage=1", a.name, "bytes")).data.attachment, addedAt: a.addedAt });
+      cards.push({ id: c.id, laneId: c.laneId, title: c.title, notes: c.notes, due: c.due, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: c.tags } : {}) });
+    }
+    return s.rpc("disableEncryption", [{ board: { ...plain, cards }, proof }], 30_000);
+  };
+  ok("the board for this is plain, has files on it, and nobody is on it", !plain.sealed && plain.cards.some((c) => c.attachments?.length) && (await listed()).members.length === 0, plain.cards.length);
+
+  const rows = [];
+  const round = async (off) => {
+    // The day's invite emails are a cap of their own. This isn't about that one.
+    if (rows.length % 15 === 0) d1(`DELETE FROM invite_sends WHERE owner_id = ${q(encOwner.id)}`);
+    const payload = await sealedPayload();
+    const email = `tb-race${rows.length}-${run}@example.com`;
+    const encrypt = () => s.rpc("enableEncryption", [payload], 30_000);
+    let pI, pE;
+    if (off >= 0) { pI = invite(encOwner, email, "writer"); if (off) await sleep(off); pE = encrypt(); }
+    else { pE = encrypt(); await sleep(-off); pI = invite(encOwner, email, "writer"); }
+    const [i, e] = await Promise.all([pI, pE]);
+    await sleep(120);
+    const ml = await listed();
+    const row = { off, email, invite: i.status, code: i.data?.code ?? null, encrypted: e.success === true, error: (e.error ?? "").slice(0, 60), sealed: ml.board.sharing === "encrypted", members: ml.members.length };
+    rows.push(row);
+    // Back to a plain board nobody is on, whatever happened.
+    await clear();
+    if (row.sealed) { const back = await turnOff(); if (!back.success) throw new Error(`couldn't decrypt after round ${rows.length}: ${back.error}`); await sleep(120); }
+    return row;
+  };
+  // Both orders, spread over 0 to 30 ms. Positive: the invite goes first by that many ms. Negative: encryption does.
+  for (const off of [0, 30, -30, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12, 15, -15, 20, -20, 25, -25, -1, -3, 1]) await round(off);
+  // Then the rest where it's close. The two used to cross in a window a millisecond or two wide,
+  // and where that is depends on the machine: it's between the widest gap encryption still won
+  // at and the narrowest the invite won at. Aim there, and keep re-aiming as rounds come in.
+  for (let i = 0; i < 40; i++) {
+    const first = rows.filter((r) => r.off >= 0);
+    const lo = Math.max(0, ...first.filter((r) => r.encrypted).map((r) => r.off));
+    const hi = Math.min(30, ...first.filter((r) => r.invite === 201 && !r.encrypted).map((r) => r.off));
+    await round(Math.max(0, Math.min(30, Math.round((lo + hi) / 2) + (i % 7) - 3)));
+  }
+  const both = rows.filter((r) => r.invite === 201 && r.encrypted);
+  const stuck = rows.filter((r) => r.sealed && r.members > 0);
+  console.log(`     … ${rows.length} rounds: the invite won ${rows.filter((r) => r.invite === 201 && !r.encrypted).length}, encryption won ${rows.filter((r) => r.encrypted && r.invite !== 201).length}, neither ${rows.filter((r) => r.invite !== 201 && !r.encrypted).length}, both ${both.length}${both.length ? ` (invite first by ${both.map((r) => r.off).join(", ")} ms)` : ""}`);
+  ok(`an invite and enableEncryption raced ${rows.length} times, both orders, 0 to 30 ms apart`, rows.length >= 40 && rows.some((r) => r.off > 0) && rows.some((r) => r.off < 0) && rows.every((r) => Math.abs(r.off) <= 30));
+  ok("the two never both succeed", both.length === 0, both);
+  ok("and the board is never left encrypted with someone on it or invited to it", stuck.length === 0, stuck);
+  ok("each side won some, so both ways through were tried", rows.some((r) => r.invite === 201 && !r.encrypted) && rows.some((r) => r.encrypted && r.invite !== 201), rows.map((r) => [r.off, r.invite, r.encrypted]));
+  ok("whichever lost was told why: board_encrypted for the invite, board_shared for encrypting", rows.every((r) => (r.invite === 201 || (r.invite === 409 && r.code === "board_encrypted")) && (r.encrypted || /^\[board_shared\]/.test(r.error))), rows.filter((r) => !((r.invite === 201 || (r.invite === 409 && r.code === "board_encrypted")) && (r.encrypted || /^\[board_shared\]/.test(r.error)))));
+  const lost = new Set(rows.filter((r) => r.invite !== 201).map((r) => r.email));
+  const log = await audit(encOwner);
+  ok("an invite that lost left nothing behind: no row, and no entry in the audit log", (await listed()).members.length === 0 && !log.some((e) => lost.has(e.target)) && lost.size > 0, log.filter((e) => lost.has(e.target)));
+
+  // The safety net. Say a board is encrypted and has people on it anyway: rows from before the
+  // two were kept apart, written here the way they'd be found. Nobody gets in while it's
+  // encrypted, an invite to it can't be accepted, the owner can see the rows and take them
+  // off, and turning encryption off removes whoever is left instead of letting them in.
+  d1(`DELETE FROM invite_sends WHERE owner_id = ${q(encOwner.id)}`);
+  const on = await s.rpc("enableEncryption", [await sealedPayload()], 30_000);
+  const leftToken = randomBytes(32).toString("base64url");
+  const ghost = `tb-ghost-${run}@example.com`;
+  const ghost2 = `tb-ghost2-${run}@example.com`;
+  const at = Date.now();
+  const pendingRow = (email, id, token) => `(${q(encOwner.id)}, ${q(encOwner.email)}, ${q(email)}, ${q(id)}, 'writer', 'pending', ${q(sha256(`invite:${token}`))}, ${at + 86_400_000}, ${at}, ${at})`;
+  d1(`INSERT INTO board_members (owner_id, owner_email, member_email, member_id, role, status, token_hash, expires_at, invited_at, updated_at) VALUES
+    ${pendingRow(racee.email, racee.id, leftToken)}, ${pendingRow(ghost, sha256(ghost).slice(0, 32), randomBytes(32).toString("base64url"))}, ${pendingRow(ghost2, sha256(ghost2).slice(0, 32), randomBytes(32).toString("base64url"))}`);
+  const seen = await listed();
+  ok("an encrypted board that has invites on it anyway shows them to its owner", on.success === true && seen.board.sharing === "encrypted" && seen.members.length === 3 && seen.members.every((m) => m.status === "pending"), [on, seen]);
+  const tried = await call(racee, "POST", "/api/invites/accept", { token: leftToken });
+  ok("an invite to an encrypted board can't be accepted, and says why", tried.status === 409 && tried.data?.code === "board_encrypted" && (await listed()).members.find((m) => m.email === racee.email)?.status === "pending", [tried.status, tried.data]);
+  ok("the owner can revoke one while the board is encrypted", (await call(encOwner, "POST", "/api/board/invites/revoke", { email: ghost2 })).status === 200 && (await listed()).members.length === 2);
+  // And an accepted member, as a row from before would be.
+  d1(`UPDATE board_members SET status = 'accepted', used_token_hash = token_hash, token_hash = NULL, expires_at = NULL, accepted_at = ${at} WHERE owner_id = ${q(encOwner.id)} AND member_email = ${q(racee.email)}`);
+  const shut = await open(racee, { board: encOwner.id });
+  ok("a member of an encrypted board has no way in", refused(shut, 404) && (await call(racee, "GET", `/api/board/access?board=${encOwner.id}`)).status === 404, how(shut));
+  shut.close();
+  const before = (await audit(encOwner)).length;
+  const off = await turnOff();
+  await sleep(300);
+  const after = await listed();
+  ok("turning encryption off works, and takes everyone who was left off the board", off.success === true && after.board.sharing === "on" && after.members.length === 0, [off, after]);
+  // Newest first, so the new entries lead.
+  const logNow = await audit(encOwner);
+  const entries = logNow.slice(0, logNow.length - before);
+  ok("the audit log says who was removed and why: the board was encrypted", entries.length === 2
+    && entries.some((e) => e.action === "member_removed" && e.target === racee.email && e.actor === "system" && e.why === "encrypted" && e.from === "writer")
+    && entries.some((e) => e.action === "invite_revoked" && e.target === ghost && e.actor === "system" && e.why === "encrypted"), entries);
+  const csv = (await call(encOwner, "GET", "/api/board/audit.csv")).text;
+  ok("and the export says it too", csv.split("\r\n").some((l) => l.includes(`,system,member_removed,${racee.email},writer,`) && l.endsWith(",board encrypted")), csv.split("\r\n").slice(-4));
+  const walkIn = await open(racee, { board: encOwner.id });
+  ok("so decrypting lets nobody in: the member it removed has no way in afterwards either", refused(walkIn, 404) && (await call(racee, "GET", `/api/board/access?board=${encOwner.id}`)).status === 404 && !JSON.stringify((await call(racee, "GET", "/api/boards")).data).includes(encOwner.id), how(walkIn));
+  walkIn.close();
+  ok("and the invite it revoked is dead", (await call(racee, "POST", "/api/invites/accept", { token: leftToken })).status === 404);
+  ok("the board can be shared again the ordinary way", (await invite(encOwner, ghost, "viewer")).status === 201 && (await call(encOwner, "POST", "/api/board/invites/revoke", { email: ghost })).status === 200);
+  s.close();
+}
+
 // ---------- changes take hold on open sockets ----------
 
 section("open sockets follow membership");

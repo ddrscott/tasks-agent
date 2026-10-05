@@ -107,16 +107,20 @@ export function SharedButton({ userId, onOpen }: { userId: string; onOpen(): voi
   const on = accepted(members).length;
   const waiting = members.length - on;
   const lapsed = board.sharing === "suspended";
-  const summary = lapsed
+  // An encrypted board that has people listed anyway (STILL_LISTED in the dialog): nobody can see it, so don't say they can.
+  const shut = board.sharing === "encrypted";
+  const summary = shut
+    ? `${members.length === 1 ? "1 address is" : `${members.length} addresses are`} still on the members list. Nobody can open this board while it's encrypted`
+    : lapsed
     ? `Sharing is paused: your Pro plan isn't active. ${on ? `${people(on)} can still see this board, view only` : "Nobody has joined yet"}${waiting ? `, and ${invites(waiting)}` : ""}`
     : on
       ? `${people(on)} can see this board${waiting ? `, and ${invites(waiting)}` : ""}`
       : `Nobody has joined yet. ${invites(waiting)}`;
   return (
     <button className={`btn shared-btn${lapsed ? " paused" : ""}`} aria-haspopup="dialog" onClick={onOpen} title={`${summary}. Open Members.`} aria-label={`${summary}. Open Members`}>
-      <IconPeople /><span className="hide-sm label">{lapsed ? "Sharing paused" : on ? "Shared with" : "Invited"}</span>
+      <IconPeople /><span className="hide-sm label">{shut ? "Still listed" : lapsed ? "Sharing paused" : on ? "Shared with" : "Invited"}</span>
       {/* Paused, the count alone would read as business as usual on a phone, where the label doesn't fit. */}
-      <span className="shared-count">{lapsed && <span className="shared-paused" aria-hidden="true">paused · </span>}{on || waiting}</span>
+      <span className="shared-count">{lapsed && <span className="shared-paused" aria-hidden="true">paused · </span>}{shut ? members.length : on || waiting}</span>
     </button>
   );
 }
@@ -155,6 +159,7 @@ export function SharedNote({ userId }: { userId: string }) {
   if (members.length === 0) return null;
   const on = accepted(members).length;
   if (board?.sharing === "suspended") return <span className="menu-note">sharing paused</span>;
+  if (board?.sharing === "encrypted") return <span className="menu-note">{members.length} still listed</span>;
   return <span className="menu-note">{on ? `shared with ${on}` : `${members.length} invited`}</span>;
 }
 
@@ -644,6 +649,33 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
           </section>
         </>
       )}
+      {/* An encrypted board isn't supposed to have anyone on it. If one does (rows from before
+          the two were kept apart), the owner gets to see who and take them off, not a blank list. */}
+      {board.sharing === "encrypted" && members.length > 0 && (
+        <section className="mem-section" aria-labelledby={`${ids}-listed`}>
+          <h3 className="h" id={`${ids}-listed`}>STILL_LISTED</h3>
+          <p className="mem-foot">
+            {members.length === 1 ? "This address was" : "These addresses were"} still on the list when the board was encrypted.
+            {" "}Nobody here can open the board, and an invite to it can't be accepted. Turning encryption off takes
+            {members.length === 1 ? " it" : " them"} off the list for good, and the audit log says so. You can take
+            {members.length === 1 ? " it" : " them"} off now.
+          </p>
+          <ul className="mem-list">
+            {members.map((m) => (
+              <li className="mem-row" key={m.email}>
+                <div className="mem-who">
+                  <span className="mem-email">{m.email}</span>
+                  <span className="mem-meta">
+                    {m.status === "pending" ? "invite sent" : "member since"} <When at={m.acceptedAt ?? m.invitedAt} text={stamp(m.acceptedAt ?? m.invitedAt)} />
+                    {" · "}{m.role} · <span className="mem-chip">no access</span>
+                  </span>
+                </div>
+                <div className="mem-ctl">{dropButton(m)}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {/* What a manager asks before approving this, answered where they'd look. */}
       <section className="mem-section" aria-labelledby={`${ids}-how`}>
         <h3 className="h" id={`${ids}-how`}>HOW_SHARING_WORKS</h3>
@@ -777,8 +809,8 @@ function AuditLog({ me }: { me: Props["me"] }) {
         <span className="audit-utc">{iso(e.at)}</span>
         <span className="audit-utc">entry {e.seq}</span>
       </td>
-      <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? "system (billing or plan change)" : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
-      <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}</span><span className="audit-code">{e.action}</span></td>
+      <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? (e.why === "encrypted" ? "system (encryption was turned off)" : "system (billing or plan change)") : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
+      <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}{e.why === "encrypted" ? ": the board was encrypted" : ""}</span><span className="audit-code">{e.action}</span></td>
       {e.detail ? (
         <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
       ) : (

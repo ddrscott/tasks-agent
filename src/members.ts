@@ -131,6 +131,39 @@ export async function boardShared(env: Env, ownerId: string): Promise<boolean> {
   return !!row;
 }
 
+/** What the `detail` column holds for a row the board took off because it was encrypted. */
+const ENCRYPTED_DETAIL = JSON.stringify({ why: "encrypted" });
+const whyOf = (raw: string | null): "encrypted" | undefined => {
+  if (!raw) return undefined;
+  try { return (JSON.parse(raw) as { why?: unknown }).why === "encrypted" ? "encrypted" : undefined; } catch { return undefined; }
+};
+
+/**
+ * The safety net for a board that is encrypted and still has members or pending invites on it.
+ * That isn't supposed to happen (`TodoAgent.inviteGate`), and while it lasts nobody but the
+ * owner gets in: access is refused on an encrypted board, and an invite to one can't be
+ * accepted. This is what keeps turning encryption off from letting them in after all. The
+ * board's Durable Object calls it from `disableEncryption`, before the board is readable
+ * again: every row comes off, each with an audit entry, `invite_revoked` or `member_removed`
+ * by `system`, marked `why: "encrypted"` ("removed: the board was encrypted"). The entries and
+ * the delete are one D1 transaction, so nothing is removed without being written down.
+ * Returns how many rows it took off.
+ *
+ * Removing was picked over refusing to decrypt until the owner clears the list: an owner can
+ * always decrypt this way, and anyone who should be on the board can be invited again.
+ */
+export async function clearSealedSharing(env: Env, ownerId: string): Promise<number> {
+  const [, gone] = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail)
+       SELECT owner_id, ?2, 'system', CASE status WHEN 'pending' THEN 'invite_revoked' ELSE 'member_removed' END, member_email, role, NULL, ?3
+       FROM board_members WHERE owner_id = ?1 ORDER BY invited_at`,
+    ).bind(ownerId, Date.now(), ENCRYPTED_DETAIL),
+    env.DB.prepare("DELETE FROM board_members WHERE owner_id = ?").bind(ownerId),
+  ]);
+  return gone.meta.changes ?? 0;
+}
+
 // ---------- audit log ----------
 
 export type AuditAction =
@@ -156,6 +189,8 @@ export type AuditEntry = {
    * back Pro on the admin page, which pauses or restores sharing. Left off every other entry.
    */
   actorRole?: "admin";
+  /** Set on an invite or a member the board itself took off because it was encrypted (`clearSealedSharing`). */
+  why?: "encrypted";
 };
 
 function auditRow(env: Env, ownerId: string, actor: string, action: AuditAction, target: string | null, from: MemberRole | null = null, to: MemberRole | null = null) {
@@ -187,6 +222,7 @@ function cardDetail(raw: string | null): AuditCard | null {
 const toEntry = (r: AuditDbRow): AuditEntry => ({
   id: r.id, seq: r.seq, at: r.at, time: new Date(r.at).toISOString(), actor: r.actor, action: r.action, target: r.target, from: r.from_role, to: r.to_role, detail: cardDetail(r.detail),
   ...(byAdmin(r.detail) ? { actorRole: "admin" as const } : {}),
+  ...(whyOf(r.detail) ? { why: whyOf(r.detail) } : {}),
 });
 
 /**
@@ -407,13 +443,22 @@ async function listMembers(env: Env, owner: User): Promise<Response> {
   });
 }
 
-/** What every new invite and resend needs first: Pro, and a board that isn't encrypted. */
+/**
+ * Ask the board whether it can take an invite right now (`TodoAgent.inviteGate`), and turn
+ * anything but "open" into the refusal. Null when it can.
+ */
+async function gateRefusal(env: Env, ownerId: string): Promise<Response | null> {
+  const gate = await (await getAgentByName(env.TodoAgent, ownerId)).inviteGate();
+  if (gate === "open") return null;
+  return fail(409, "board_encrypted", gate === "sealed"
+    ? "An end-to-end encrypted board can't be shared. Turn encryption off first."
+    : "This board is being encrypted right now, and an encrypted board can't be shared. Try again in a moment.");
+}
+
+/** What every new invite and resend needs first: Pro, and a board that isn't encrypted or being encrypted. */
 async function mayInvite(env: Env, owner: User): Promise<Response | null> {
   if ((await planFor(env, owner.id)) !== "pro") return fail(402, "pro_required", "Sharing a board is part of Pro. Upgrade to invite people.");
-  if (await (await getAgentByName(env.TodoAgent, owner.id)).isSealed()) {
-    return fail(409, "board_encrypted", "An end-to-end encrypted board can't be shared. Turn encryption off first.");
-  }
-  return null;
+  return gateRefusal(env, owner.id);
 }
 
 async function setRole(env: Env, owner: User, row: MemberRow, role: MemberRole): Promise<Response> {
@@ -488,6 +533,21 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
      ON CONFLICT(owner_id, member_email) DO NOTHING`,
   ).bind(owner.id, owner.email, email, await userIdFor(email), role, await tokenHash(token), expiresAt, now, max).run();
   if (added.meta.changes !== 1) return fail(409, "member_limit", `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`);
+  // The row is in. Now the board is asked again, and its answer is the one that counts
+  // (TodoAgent.inviteGate): `mayInvite` asked before the awaits above, and the board can have
+  // started encrypting since. Anything but "open", or no answer at all, and the row comes back
+  // out before anyone hears of it: no audit entry, no email, and the day's count is handed back.
+  const refusedNow = await gateRefusal(env, owner.id).catch((e: Error) => {
+    console.error("confirming an invite with the board failed", e.message);
+    return fail(503, "try_again", "Couldn't reach the board to confirm the invite, so it wasn't sent. Try again in a moment.");
+  });
+  if (refusedNow) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM board_members WHERE owner_id = ? AND member_email = ? AND status = 'pending' AND token_hash = ?").bind(owner.id, email, await tokenHash(token)),
+      env.DB.prepare("UPDATE invite_sends SET sent = sent - 1 WHERE owner_id = ? AND day = ? AND sent > 0").bind(owner.id, new Date(now).toISOString().slice(0, 10)),
+    ]);
+    return refusedNow;
+  }
   await env.DB.batch([
     auditRow(env, owner.id, owner.email, "invite_sent", email, null, role),
     env.DB.prepare("INSERT OR IGNORE INTO board_sharing (owner_id, suspended, updated_at) VALUES (?, 0, ?)").bind(owner.id, now),
@@ -580,7 +640,7 @@ async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promi
   const lines = ["seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
   for (const r of results) {
     const d = cardDetail(r.detail);
-    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? (byAdmin(r.detail) ? "admin" : null)].map(csvCell).join(","));
+    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? (byAdmin(r.detail) ? "admin" : whyOf(r.detail) ? "board encrypted" : null)].map(csvCell).join(","));
   }
   // The byte-order mark is what tells Excel on Windows the file is UTF-8 when it's opened with
   // a double-click; without it, a card title that isn't plain ASCII comes out garbled.
@@ -643,6 +703,16 @@ async function accept(req: Request, env: Env, user: User, body: Record<string, u
   if (!(await withinLookups(req, env, user))) return tooMany();
   const row = await liveInvite(env, user, body.token);
   if (!row) return inviteInvalid();
+  // An invite to a board that's encrypted now can't be accepted. There shouldn't be one
+  // (TodoAgent.inviteGate); if there is, it stays pending until the owner revokes it or turns
+  // encryption off, which takes it away (clearSealedSharing). Only the invited account, with
+  // the link, gets this far, so saying why tells nobody anything about a board they weren't asked to.
+  const gate = await (await getAgentByName(env.TodoAgent, row.owner_id)).inviteGate();
+  if (gate !== "open") {
+    return fail(409, "board_encrypted", gate === "sealed"
+      ? "This board is end-to-end encrypted now, so nobody can join it. Ask its owner to turn encryption off and invite you again."
+      : "This board is being encrypted right now, so nobody can join it. Try again in a moment.");
+  }
   const now = Date.now();
   // Single use: the token's hash is cleared in the same statement that accepts, so of two
   // requests racing with one link, one changes a row and the other finds nothing.

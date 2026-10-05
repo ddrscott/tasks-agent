@@ -1335,6 +1335,36 @@ each card.
 - **An encrypted board can't be shared, and a shared board can't be encrypted.** Inviting on
   an encrypted board is refused (`board_encrypted`). `enableEncryption` on a board with any
   member or pending invite throws an error whose message starts with `[board_shared]`.
+  - **The two can't both win a race.** Each used to check the other once and then go on to its
+    own awaits, so an invite sent a few milliseconds before `enableEncryption` got both
+    through: an encrypted board with a pending invite, whose invitee walked in as a writer
+    the day the owner turned encryption off. Now the board's Durable Object, which runs one
+    thing at a time, is the referee (`TodoAgent.inviteGate`): it answers `open`, `encrypting`
+    (from the moment `enableEncryption` starts, before its first await), or `sealed`.
+    `enableEncryption` reads D1 for members and invites a second time as its last step
+    before anything is erased or stored. An invite asks the gate before it starts and again
+    after its row is in D1, and a row the gate doesn't call `open` for is deleted on the
+    spot: no audit entry, no email, and the day's invite count handed back. An invite
+    confirmed `open` was in D1 before the flag went up, so the second read sees it and the
+    encryption is refused. An invite confirmed any later takes its row back out. So one of
+    them stands and the other is told why; now and then neither does. `check:members` runs
+    64 rounds of the two against each other, both orders, 0 to 30 ms apart, with most of them
+    aimed at the gap where they used to cross.
+  - **The safety net,** for a board that's encrypted and has someone on it anyway (rows from
+    before this, or a race nobody thought of). While it's encrypted they have no way in
+    (`access` answers `none`), and an invite to it can't be accepted (`409 board_encrypted`,
+    with the reason). Members shows the rows under `// STILL_LISTED`, each marked "no access",
+    with Remove or Revoke, and the top bar says "Still listed" and not "Shared with".
+    Turning encryption off takes every such row off before the board is readable again
+    (`clearSealedSharing` in `src/members.ts`, called by `disableEncryption`), each with an
+    audit entry: `member_removed` or `invite_revoked` by `system`, marked
+    `why: "encrypted"`, which the audit tab reads as "Member removed: the board was
+    encrypted". The entries and the delete are one D1 transaction. Removing was picked over
+    refusing to decrypt until the owner clears the list, because it can't strand the owner:
+    decrypting always works, and anyone who should be there can be invited again. If D1
+    can't be reached the board stays encrypted and says to try again. One thing it doesn't
+    fix: `GET /api/boards` doesn't wake each board to ask, so such a member's switcher would
+    still list the board while it's encrypted. Opening it gets "no such board".
 - **Limits.** `MAX_BOARD_MEMBERS` (10) people per board, pending invites included, expired
   ones too until they're revoked. `MAX_DAILY_INVITE_EMAILS` (20) invite emails per owner per
   UTC day, resends included. An invite link works once, for 7 days. What a member can send and
@@ -2004,7 +2034,7 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | Call | Body | Answer |
 |---|---|---|
 | `GET /api/board/members` | | `{ board: { id, ownerEmail, plan: "free"\|"pro", sharing: "on"\|"pro_required"\|"suspended"\|"encrypted", maxMembers, used, maxInvitesPerDay, invitesToday, manage: boolean }, members: Member[] }` |
-| `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted`, `409 member_limit` (with `also: ["invite_limit"]` when the day's emails are spent too), `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
+| `POST /api/board/invites` | `{ email, role }` | `201 { member, devLink? }` for a new invite. For someone pending: a new link and email, `200 { member, devLink? }`. For a member: `200 { member, changed }`, a role change or nothing, no email. Errors: `400 bad_email`, `400 bad_role`, `400 self`, `402 pro_required`, `409 board_encrypted` (encrypted, or being encrypted right now), `409 member_limit` (with `also: ["invite_limit"]` when the day's emails are spent too), `429 invite_limit`, `502 email_failed` (the invite exists; Resend it) |
 | `POST /api/board/invites/resend` | `{ email }` | `200 { member, devLink? }`. The old link is dead. `404 not_found`, `402`, `409`, `429`, `502` as above, plus `409 already_member` when they accepted in the meantime (inviting a pending address again can answer this too) |
 | `POST /api/board/invites/revoke` | `{ email }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/board/members/role` | `{ email, role }` | `200 { member, changed }` (works on a pending invite too), `400 bad_role`, `404 not_found` |
@@ -2015,10 +2045,13 @@ signed-in user's own board, so a member who calls it gets their own, empty, list
 | `GET /api/board/access?board=<id>` | | `{ access: { board, ownerEmail, role, effective, reason, plan } }` (your own board without `board`), `404 not_found`, `429 slow_down` with `Retry-After` for someone else's board asked about too fast |
 | `POST /api/boards/leave` | `{ board }` | `200 { ok: true }`, `404 not_found` |
 | `POST /api/invites/lookup` | `{ token }` | `200 { invite: { board, ownerEmail, email, role, expiresAt } }` for a live invite to this account. `200 { member: { board, ownerEmail, role } }` when this account already used this very link and is still on the board. `404 invite_invalid` for everything else, `429 too_many` |
-| `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `429 too_many` |
+| `POST /api/invites/accept` | `{ token }` | `200 { ok: true, board: { id, ownerEmail, role } }`, `404 invite_invalid`, `409 board_encrypted` for a live invite to a board that's encrypted or being encrypted, `429 too_many` |
 | `POST /api/invites/decline` | `{ token }` | `200 { ok: true }`, `404 invite_invalid`, `429 too_many` |
 
-`AuditEntry` is `{ id, seq, at, time, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null, actorRole?: "admin" }`.
+`AuditEntry` is `{ id, seq, at, time, actor, action, target: string|null, from: role|null, to: role|null, detail: { card, title, lane, via? }|null, actorRole?: "admin", why?: "encrypted" }`.
+`why: "encrypted"` is on a `member_removed` or `invite_revoked` entry the board wrote itself
+when encryption was turned off with that row still there (`actor` is `system`; stored in
+`detail` as `{"why":"encrypted"}`; `board encrypted` under `via` in the CSV).
 `id` is the row's id in the whole table and is only for paging (`before`). `seq` is the entry's
 number on this board, `at` is epoch milliseconds, and `time` is the same instant as ISO-8601 UTC.
 `actor` is the signed-in email that did it, or `system` for a plan change that came from
@@ -2060,12 +2093,12 @@ when the file is opened with a double-click), CRLF line ends, and one header row
 |---|---|
 | `seq` | The entry's number on this board: 1 for its first entry, then 2, 3, with no gaps. The log is append-only, so an entry keeps its number in every later export. (The table's own row id isn't exported: it counts every board's entries, so one board's would show gaps that look like missing rows.) |
 | `time` | When, ISO-8601 in UTC with milliseconds: `2026-10-04T20:51:31.853Z` |
-| `actor` | The signed-in email that did it, or `system` for a plan change from billing. A site admin who gave or took back Pro is named here, with `admin` under `via` |
+| `actor` | The signed-in email that did it, or `system` for a plan change from billing and for a row taken off because the board was encrypted. A site admin who gave or took back Pro is named here, with `admin` under `via` |
 | `action` | One of the action codes above |
 | `target` | The email it was done to. Empty for plan and card entries |
 | `from_role`, `to_role` | `viewer`, `writer`, or empty: the role before and after |
 | `card_id`, `card_title`, `lane` | On `card_deleted` and `card_restored`: the card's id, its title, and the lane it was in. Empty otherwise |
-| `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo`. On a plan entry a site admin caused: `admin` |
+| `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo`. On a plan entry a site admin caused: `admin`. On a member or invite taken off because the board was encrypted: `board encrypted` |
 
 A cell that starts with `=`, `+`, `-`, `@`, a tab, or a return gets a `'` in front, so a
 spreadsheet shows it as text instead of running it. The JSON is
