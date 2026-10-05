@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After a pasted list leaves lines behind, "Try these 3 again" is only offered when trying again could work. Lines turned down for what they say (one of the owner's tags, a title nobody can read) get "Fix these 3 to add them" instead, and the button comes back once they're edited or taken out
 - On a shared board every attached file says who attached it, yours included: "attached by you", or the owner's or member's email
 - On a shared board, when you ask the assistant for a card with a tag, it says the tag was left off and why. It used to add the card without the tag and say nothing
+- Your agents are told a member wrote a card's title everywhere the title is repeated to them: the list of claimed cards in `get_board`, a refused claim, `ask_ceo`, and what `move_cards`, `update_card`, and `delete_cards` answer
 
 ### Fixed
 - Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board

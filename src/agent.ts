@@ -962,7 +962,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const board = callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" },
         () => this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent"));
       const card = board.cards.find((c) => c.id === input.id)!;
-      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG, email ?? this.ownerEmail()) };
+      // The title it repeats may be a member's words: say so right there, the same as get_board would.
+      const theirs = ops.memberNote(card, email ?? this.ownerEmail());
+      return { ok: true, summary: `Asked on "${card.title}" [${card.id}]${theirs ? ` (${theirs.replace(/^ — /, "")})` : ""}: ${card.ask!.question}`, board: ops.describeBoard(board, NEEDS_CEO_TAG, email ?? this.ownerEmail()) };
     } catch (e) {
       return { ok: false, summary: (e as Error).message };
     }
@@ -1131,13 +1133,25 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       if (name === "move_cards") this.memberMayMove((args as { ids: string[] }).ids);
       let summary = "";
       let ids: string[] | undefined;
+      // The summary names the cards by title ("Moved "…" → Doing"), and a title can be a member's
+      // words. For an outside agent, each such card gets a line saying whose (ops.memberLine),
+      // read from the board before the change: a deleted card has no "after".
+      const before = this.state;
       const board = this.mutate(t.label, (b) => {
         const r = (t.apply as (b: Board, i: typeof args) => { board: Board; summary: string; ids?: string[] })(b, args);
         summary = r.summary;
         ids = r.ids;
         return r.board;
       }, group, actor);
-      return { ok: true, summary, board: ops.describeBoard(board, undefined, this.ownerEmail()), ids };
+      const owner = callers.getStore()?.email ?? this.ownerEmail();
+      const a = args as { id?: string; ids?: string[] };
+      const named = actor === "agent" && !before.sealed ? [...new Set([...(typeof a.id === "string" ? [a.id] : []), ...(Array.isArray(a.ids) ? a.ids : [])])] : [];
+      const member = named.flatMap((id) => {
+        const card = before.cards.find((c) => c.id === id);
+        const line = card ? ops.memberLine(card, owner) : "";
+        return line ? [`  - [${id}]${line}`] : [];
+      }).join("\n");
+      return { ok: true, summary, board: ops.describeBoard(board, undefined, this.ownerEmail()), ids, ...(member ? { member } : {}) };
     } catch (e) {
       return { ok: false, summary: plainError(plainFailure(e)) };
     }

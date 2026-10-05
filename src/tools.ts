@@ -139,7 +139,12 @@ export function describeHits(r: SearchResult): string {
 }
 
 /** What every tool call returns: a summary plus the fresh board, so the caller never works from a stale picture. */
-export type ToolOutcome = { ok: true; summary: string; board: string; ids?: string[] } | { ok: false; summary: string };
+/**
+ * `member` is for an outside agent (mcp.ts): the summary repeats the titles of the cards it
+ * touched, and when a member wrote one of those, this says so, a line per card. The in-app
+ * assistant's summaries are shown to the person who asked and carry none.
+ */
+export type ToolOutcome = { ok: true; summary: string; board: string; ids?: string[]; member?: string } | { ok: false; summary: string };
 
 function titlesOf(b: Board, ids: string[]): string[] {
   return ids.map((id) => b.cards.find((c) => c.id === id)?.title ?? id);

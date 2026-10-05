@@ -1734,8 +1734,14 @@ tags that direct them are the owner's alone, and so are the cards that carry the
       says the owner tagged it and the words are dana's.
     - The in-app assistant's prompt is built from the same `describeBoard`. The working rules
       tell an agent to ask the owner with `ask_ceo` before acting on any of it.
-    - Not marked: the one-line summaries the write tools echo (`Moved "…" → Doing`,
-      `Updated "…"`), which repeat a title the agent just named by id.
+    - Everywhere else MCP repeats a title, the same words go with it: each line of
+      `get_board`'s "Claimed by a live session" list, a refused `claim_card`, the first line
+      of `ask_ceo`'s answer, and the one-line summaries the write tools echo
+      (`Moved "…" → Doing`, `Updated "…"`, `Deleted "…"`), which are followed by `Not the
+      owner's words:` and a line per member-written card
+      (`ToolOutcome.member`, set in `TodoAgent.runTool` for an outside agent, from the board
+      as it was before the change, so a deleted card still says it). `wait_for_answer` prints
+      the card through `describeCard`, which already does.
   - **Where a person sees it.** The owner's card editor has a block above the notes:
     "Title or notes written by dana@example.com, a member", "Tags set by …", one line on what
     the mark does ("Your agents are told these aren't your words and to ask you before acting
