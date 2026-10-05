@@ -449,7 +449,19 @@ plaintext off an encrypted board from any path: MCP, the cloud model, a stale ta
   JWE under the board's `kid`, checked before anything is stored. Staged files that never make it
   onto the board are collected with the other orphans. The agent checks that it's the same board by id
   (`sameShape`), swaps it in, and erases the undo and redo history, the chat, the search index,
-  and every R2 object the new board doesn't use.
+  and every R2 object the new board doesn't use. What the board itself recorded stays, taken
+  from the live board and never from the copy the browser sent (`TodoAgent.adopt`): each
+  card's created and updated times, who changed it last, what a member wrote on it and who
+  uploaded each file (`// TEAM_BOARDS`), and each lane's role. Lane roles used to be dropped,
+  so an encrypted board went back to "the last lane is done".
+- **A board with an open question can't be encrypted.** A question from `ask_ceo` is plain
+  text, and an encrypted board holds none, so encrypting used to drop it without saying so and
+  leave the agent that asked waiting. Now `enableEncryption` refuses while any card has one
+  ("A card has a question waiting on your answer…"), the Encryption dialog says so up front
+  with its fields off, and `ask_ceo` is refused while a board is being encrypted. Answer the
+  question, or take `#needs-ceo` off the card to drop it, then encrypt. The last answer on a
+  card isn't carried as a record either; it's already the `ANSWER:` line in the card's notes,
+  which is encrypted with them.
 - **Changing the passphrase** only rewraps the key (`changePassphrase`). Fields aren't
   re-encrypted. Undo never brings an old envelope back.
 - **Forgotten passphrase:** the unlock screen can throw the board away (`resetEncryptedBoard`),
@@ -474,9 +486,12 @@ plaintext off an encrypted board from any path: MCP, the cloud model, a stale ta
 - Lane name clashes are checked in the tab, since the server can't compare names.
 
 **What it doesn't hide.** Your email, the number of lanes, cards, and files, file sizes,
-timestamps, card order, your theme, and usage and billing records. On a board that was shared
-before it was encrypted, also which former member wrote on a card or attached a file: their
-email and when (`// TEAM_BOARDS`), kept so the marks are still there if the board is decrypted.
+timestamps, card order, your theme, which lane is the to do, doing, and done lane, and usage and
+billing records. Who changed each card last: an email (yours, on anything changed since the
+board was encrypted) and whether the assistant did it. On a board that was shared
+before it was encrypted, also which former member wrote on a card, attached a file, or changed
+a card last: their email and when (`// TEAM_BOARDS`), kept so the marks are still there if the
+board is decrypted.
 Also: Durable Objects allow
 neither `PRAGMA secure_delete` nor `VACUUM` (both were tried), so rows erased when encryption
 goes on can linger in free pages of the database file, and Cloudflare keeps 30 days of
@@ -1838,6 +1853,15 @@ tags that direct them are the owner's alone, and so are the cards that carry the
     are, an email and a time, not encrypted (`// END_TO_END_ENCRYPTION`, "What it doesn't
     hide"). `check:members` shares a board, encrypts it, decrypts it, and reads the card
     back over MCP.
+  - **Who changed a card last goes through the same way.** `adopt` used to drop `by`, so one
+    encrypt and decrypt took the name off every card's face and "Edited by …" out of the
+    editor, and "words by …" with them, since the face only draws that line on a card that
+    has a `by`. Now it's carried by card id from the live board, in both directions, and a
+    `by` in the copy the browser sends is ignored. On the encrypted board `stampBy` keeps it
+    true: a card changed there is marked as changed by whoever changed it, which can only be
+    the owner, so decrypting never brings back a member's name on a card the owner has
+    rewritten since. That's the one thing `stampBy` does on an encrypted board. Member marks
+    and file uploaders are left exactly as they were there, and no new ones are written.
   - **What it doesn't cover.** The mark is a warning, not a lock: an owner who
     tags a member's card `#agent` has made it a work order, and an agent that ignores its
     rules can still read the notes as instructions. Read a member's card before tagging it.

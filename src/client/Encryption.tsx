@@ -152,7 +152,9 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
   const waiting = shared.members.length - on;
   const isShared = shared.members.length > 0;
   // Until the members list has answered, nobody knows whether this board is shared, so the fields wait for it.
-  const off = isShared || shared.state === "loading";
+  // A question an agent is waiting on can't go onto an encrypted board, so it has to be settled first (the server refuses too).
+  const asking = view.cards.filter((c) => c.ask).length;
+  const off = isShared || asking > 0 || shared.state === "loading";
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [remember, setRemember] = useState(true);
@@ -202,6 +204,15 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
           <div className="enc-actions"><button type="button" className="btn primary" onClick={onMembers}>Open Members</button></div>
         </div>
       )}
+      {asking > 0 && (
+        <div className="enc-shared" role="note">
+          <p>
+            <b>{asking === 1 ? "A card has a question" : `${asking} cards have questions`} waiting on your answer, so this board can't be encrypted yet.</b>{" "}
+            An encrypted board can't hold a question: it would sit there unencrypted, and the agent that asked couldn't read your answer anyway.
+          </p>
+          <p>Answer {asking === 1 ? "it" : "them"} first, or take #needs-ceo off the card to drop the question. Nothing below works until then.</p>
+        </div>
+      )}
       <p>
         With a passphrase, your board is encrypted in this browser before it's sent. The server stores only
         ciphertext: lane names, cards, notes, due dates, files and their names, and assistant messages. Any device
@@ -218,6 +229,7 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
       <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void go(); }}>
       <AccountField email={email} />
       {isShared && <p className="enc-off">The fields below are off while the board is shared.</p>}
+      {!isShared && asking > 0 && <p className="enc-off">The fields below are off while a question is open.</p>}
       <fieldset className="enc-fields" disabled={off}>
       <label>
         Passphrase ({MIN_PASSPHRASE}+ characters; a few random words works well)

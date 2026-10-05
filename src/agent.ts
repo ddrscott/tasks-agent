@@ -958,6 +958,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
 
   /** An outside agent putting a question on a card, over MCP (mcp.ts). Not callable from the browser. */
   askCeo(input: { id: string; question: string; options: string[]; recommended?: number }, email?: string): ToolOutcome {
+    // A question asked while the board is being encrypted would be dropped by the swap (enableEncryption).
+    if (this.encrypting) return { ok: false, summary: "This board is being encrypted right now, and an encrypted board can't hold questions. Nothing was asked." };
     try {
       const board = callers.run({ kind: "owner", email: email ?? this.ownerEmail(), effective: "owner", reason: null, via: "agent" },
         () => this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent"));
@@ -1318,6 +1320,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   async enableEncryption(input: { kid: string; envelope: string; board: Board; proof: string }) {
     if (this.state.sealed) throw new Error("This board is already encrypted.");
     if (this.encrypting) throw new Error("This board is already being encrypted. Give it a moment.");
+    // An encrypted board can't hold a question (assertSealedBoard): it would be stored as plain
+    // text. Encrypting used to drop an open one without a word, and the agent that asked was
+    // left waiting on a question nobody could see. It's refused now, and says what to do.
+    if (this.state.cards.some((c) => c.ask)) throw new Error(OPEN_QUESTION_NOTICE);
     // Raised before anything is awaited, and kept up until the board is stored or this gives up.
     this.encrypting = true;
     try {
@@ -1330,6 +1336,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       // Asked again, last, before anything is erased or stored: an invite can have landed while
       // the lines above were waiting. From here to the stored board no invite is confirmed (inviteGate).
       if (await boardShared(this.env, this.name)) throw new Error(SHARED_NOTICE);
+      // And no question was asked in the meantime (askCeo refuses from here on, while `encrypting` is up).
+      if (this.state.cards.some((c) => c.ask)) throw new Error(OPEN_QUESTION_NOTICE);
       await this.swapBoard(next);
       this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
     } finally {
@@ -1462,7 +1470,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    *
    * What a member put on a card comes from the live board too, never from what the client
    * sent: a card keeps its member mark (`member`), and a file keeps who uploaded it (`by`),
-   * through encrypting and through decrypting. Files are uploaded again in each direction and
+   * through encrypting and through decrypting. So does who changed a card last (`by` on the
+   * card, by card id): it used to be dropped, and one round trip took the name off every
+   * card's face and "Edited by" out of the editor. On the encrypted board it's kept true by
+   * `stampBy`, so what comes back is the last change, not the last one before encrypting. A
+   * lane keeps its role (to do, doing, done) the same way, by lane id, from the live board:
+   * that was dropped too, and the lanes fell back to going by position.
+   *
+   * A question (`ask`) and the last answer (`answer`) are not carried: both are plain text,
+   * and an encrypted board holds none. `enableEncryption` refuses while a question is open.
+   * The last answer is in the card's notes as its `ANSWER:` line, which is encrypted with them. Files are uploaded again in each direction and
    * get new ids, so a file takes the uploader of the file in the same place on the same card
    * (sameShape has checked each card has as many files as before, and refuses the board if not).
    *
@@ -1484,6 +1501,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!raw || !Array.isArray(raw.lanes) || !Array.isArray(raw.cards)) throw new Error("That isn't a board.");
     if (!ops.sameShape(cur, raw)) throw new Error("The board changed while this was running. Try again.");
     const live = new Map(cur.cards.map((c) => [c.id, c]));
+    const liveLanes = new Map(cur.lanes.map((l) => [l.id, l]));
     const wantSealed = !!seal;
     const cards: Card[] = [];
     for (const c of raw.cards) {
@@ -1505,10 +1523,15 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         createdAt: was.createdAt, updatedAt: was.updatedAt, ...(attachments.length || was.attachments ? { attachments } : {}),
         ...(tags.length ? { tags } : {}),
         ...(mark ? { member: mark } : {}),
+        ...(was.by && typeof was.by.email === "string" ? { by: { email: was.by.email, ...(was.by.via === "assistant" || was.by.via === "agent" ? { via: was.by.via } : {}) } } : {}),
       });
     }
     // A lane's sort is a plain setting, not content, so it rides along unencrypted either way.
-    const lanes: ops.Lane[] = raw.lanes.map((l) => ({ id: l.id, name: String(l.name), ...(ops.SORTS.some((o) => o.by === l.sort) ? { sort: l.sort } : {}) }));
+    // Its role is the live lane's, like the marks above: the board's own record, not the browser's copy of it.
+    const lanes: ops.Lane[] = raw.lanes.map((l) => {
+      const role = liveLanes.get(l.id)?.role;
+      return { id: l.id, name: String(l.name), ...(ops.SORTS.some((o) => o.by === l.sort) ? { sort: l.sort } : {}), ...(role ? { role } : {}) };
+    });
     if (!wantSealed) {
       // Plain text follows the same limits as any other edit.
       for (const l of lanes) l.name = ops.clean(l.name, 40);
@@ -1618,6 +1641,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     return result.toUIMessageStreamResponse();
   }
 }
+
+const OPEN_QUESTION_NOTICE = "A card has a question waiting on your answer, and an encrypted board can't hold questions. Answer it, or take #needs-ceo off the card to drop it, then encrypt.";
 
 /** Starts with its code, `[board_shared]`, so the app can tell it from any other failure. */
 const SHARED_NOTICE = "[board_shared] A shared board can't be encrypted. Remove its members and revoke its pending invites first.";

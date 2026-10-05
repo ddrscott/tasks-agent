@@ -93,6 +93,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Notes with line breaks in them can't pass for another card in what your agents and the assistant get back from a search. Each result is one line now, and it says so on that line when a member wrote the card. The same goes for every other list your agents read: one card, one line
 - A board can't end up both encrypted and shared. An invite sent at the same moment as turning encryption on used to be able to slip through, and that person got in when you later turned encryption off. Now one of the two is refused and says why
 - If an encrypted board does have someone on its members list, Members shows them, marked "no access", so you can take them off. An invite to an encrypted board can't be accepted, and turning encryption off removes whoever is left and writes it in the audit log
+- Turning encryption on and back off no longer wipes who changed each card last. Card faces keep the name and "words by", and the card editor keeps "Edited by". A card you change while the board is encrypted comes back as changed by you
+- Turning encryption on no longer forgets which lane is To do, Doing, and Done when they aren't in that order
+- A board with a question waiting on your answer can't be encrypted until you answer it. Encrypting used to drop the question without saying so, and the agent that asked kept waiting
 
 ## [0.2.0] - 2026-10-04
 

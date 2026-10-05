@@ -127,8 +127,14 @@ function filesAfter(p: Card | undefined, c: Card, by: By | null, member: boolean
  * Mark every card that `after` added or changed as last changed by `by`, keep each card's
  * member mark true (`MemberMark` above), and stamp each new file with who uploaded it. A card
  * that only shifted position because another card moved isn't marked. With no `by` (nobody to
- * name), a changed card loses its old `by` instead of keeping one that's now wrong. An
- * encrypted board is one person's, and is left alone.
+ * name), a changed card loses its old `by` instead of keeping one that's now wrong.
+ *
+ * An encrypted board is one person's. There, only `by` is kept up: a card that changes is
+ * marked as changed by whoever changed it, which can only be the owner. Its member mark and
+ * its files' uploaders are left exactly as they are, and nothing new is stamped on them. `by`
+ * has to move there because it's carried through encrypting and decrypting (TodoAgent.adopt):
+ * left alone, a card a member changed last and the owner then rewrote on the encrypted board
+ * would come back from decrypting still naming the member.
  *
  * `member` says the change is a member's, which the board knows from the connection.
  * `restore` is undo and redo: the cards come from a board the server stored earlier, so each
@@ -136,7 +142,8 @@ function filesAfter(p: Card | undefined, c: Card, by: By | null, member: boolean
  * the owner is taking off by hand (TodoAgent.claimWords); it's ignored on a member's change.
  */
 export function stampBy(before: Board, after: Board, by: By | null, how: { member?: boolean; restore?: boolean; claim?: string } = {}): Board {
-  if (after.sealed || before === after) return after;
+  if (before === after) return after;
+  const sealed = !!after.sealed;
   const was = new Map(before.cards.map((c) => [c.id, c]));
   const bare = (c: Card) => { const { by: _, member: _m, memberText: _t, ...rest } = c; return JSON.stringify(rest); };
   const eq = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -149,7 +156,9 @@ export function stampBy(before: Board, after: Board, by: By | null, how: { membe
     const next: Card = { ...c }; // built in place, so a card's fields stay in the order they were stored in
     const put = <K extends "by" | "member" | "memberText" | "attachments">(k: K, v: Card[K] | undefined) => { if (v === undefined) delete next[k]; else next[k] = v; };
     put("by", unchanged ? p!.by : by ?? undefined);
-    if (unchanged || how.restore) {
+    if (sealed) {
+      // Marks and uploaders stay as they came. There's no member on an encrypted board to mark.
+    } else if (unchanged || how.restore) {
       // Unchanged: it keeps exactly the marks it had, in the shape it had them, whatever the op
       // carried along. Restored: it comes back with the marks the stored board held.
       const from = how.restore ? c : p!;
@@ -214,7 +223,7 @@ export type Card = {
   tags?: string[]; // missing on cards made before tags existed, and on cards with none
   ask?: Ask; // an open question; never on an encrypted board
   answer?: Answer;
-  by?: By; // who made the last change; `updatedAt` says when. Never on an encrypted board.
+  by?: By; // who made the last change; `updatedAt` says when. Encrypting the board and decrypting it keep it (TodoAgent.adopt), and on an encrypted board it's still kept up (stampBy).
   member?: MemberMark; // what a member wrote on this card (title or notes, tags). Only the owner's "These words are mine now" takes it off. Encrypting the board and decrypting it keep it (TodoAgent.adopt).
   /** The mark as cards stored before `member` existed carry it. Read (markOf), never written. */
   memberText?: Who;
