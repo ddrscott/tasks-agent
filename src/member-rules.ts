@@ -163,6 +163,99 @@ const BAD_TEXT = "[bad_text] Card text can't hold control characters, only lette
  */
 export const plainText = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
 
+// ---------- text nobody can see ----------
+//
+// A member's text is read by the owner on screen and by the owner's agents as characters, and
+// those have to be the same thing. So what can't be seen comes out of everything a member
+// writes (title, notes, tags, a file's name) before it's stored:
+//
+// - direction overrides, embeddings, isolates, and marks (U+202A to U+202E, U+2066 to U+2069,
+//   U+200E, U+200F, U+061C), which make a line read differently on screen than in memory;
+// - the Unicode tag block (U+E0000 to U+E007F), a full invisible copy of ASCII that a model
+//   reads as words;
+// - zero-width spaces, the word joiner, the byte-order mark, the soft hyphen, blank filler
+//   letters, invisible math operators, and the deprecated format characters;
+// - half of a surrogate pair with no other half.
+//
+// Two kinds of zero-width character do something a person sees, and are kept where they do:
+// a joiner (U+200D) between two emoji, which is how a family or a flag is one picture, a
+// joiner or non-joiner (U+200C) between two letters of a script that shapes with them
+// (Arabic, Syriac, N'Ko, Mongolian, and the Indic scripts), and a variation selector right
+// after a visible character (the heart that's red, not black). Anywhere else they go too.
+
+const ALWAYS_HIDDEN = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b\u200e\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufeff\uffa0\ufff9-\ufffb\u{1d173}-\u{1d17a}\u{e0000}-\u{e007f}]/gu;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const PICTURE = String.raw`[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f\u20e3]`;
+const SHAPED = String.raw`[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Nko}\p{Script=Mongolian}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]`;
+/** A joiner that isn't joining anything a person would see joined. */
+const STRAY_JOINER = new RegExp(String.raw`(?<!${PICTURE}|${SHAPED})[\u200c\u200d]+|[\u200c\u200d]+(?!${PICTURE}|${SHAPED})|(?<=${PICTURE})\u200c+`, "gu");
+/** A variation selector with no visible character in front of it to vary. */
+const STRAY_SELECTOR = /(?<![^\s\ufe00-\ufe0f\u{e0100}-\u{e01ef}])[\ufe00-\ufe0f\u{e0100}-\u{e01ef}]+|(?<=[\ufe00-\ufe0f\u{e0100}-\u{e01ef}])[\ufe00-\ufe0f\u{e0100}-\u{e01ef}]+/gu;
+const ANY_ZERO_WIDTH = /[\u200c\u200d\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu;
+
+/**
+ * `s` without the characters nobody can see (above). `strict` takes every joiner and variation
+ * selector too: that's for tags and file names, which are names, not prose.
+ */
+export function visibleText(s: string, strict = false): string {
+  let out = s.replace(LONE_SURROGATE, "").replace(ALWAYS_HIDDEN, "");
+  if (strict) return out.replace(ANY_ZERO_WIDTH, "");
+  // Taking one out can leave another with nothing beside it, so go round until it settles.
+  for (let i = 0; i < 4; i++) {
+    const next = out.replace(STRAY_JOINER, "").replace(STRAY_SELECTOR, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+/** Whether a title has anything to read in it: something that isn't a space, a joiner, or a selector. */
+const hasInk = (s: string) => visibleText(s, true).trim().length > 0;
+const BLANK_TITLE = "[bad_text] A card needs a title someone can read. That one was only spaces or invisible characters.";
+const HIDDEN_TEXT = "[bad_text] Card text can't hold invisible characters (zero-width spaces, direction overrides, hidden tag characters). Take them out and try again.";
+
+/**
+ * A member's card with what can't be seen taken out of the fields this change wrote: the
+ * title, the notes, the tags. `p` is the card before, or undefined for a new one. A field the
+ * change left alone is left alone here too, so the owner's own text is never rewritten by a
+ * member moving or tagging the card. A title that comes out empty stays empty, and the write
+ * guard refuses it in words (BLANK_TITLE).
+ */
+export function memberTidyCard(p: Card | undefined, c: Card): Card {
+  if (typeof c.title !== "string" || typeof c.notes !== "string") return c;
+  let next = c;
+  if (p?.title !== c.title) {
+    const title = visibleText(c.title).replace(/\s+/g, " ").trim();
+    if (title !== c.title) next = { ...next, title };
+  }
+  if (p?.notes !== c.notes) {
+    const notes = visibleText(c.notes);
+    if (notes !== c.notes) next = { ...next, notes };
+  }
+  if (Array.isArray(c.tags) && !same(p?.tags, c.tags) && c.tags.every((t) => typeof t === "string")) {
+    const tags = [...new Set(c.tags.map((t) => (p?.tags?.includes(t) ? t : visibleText(t, true))).filter(Boolean))];
+    if (!same(tags, c.tags)) {
+      const { tags: _, ...rest } = next;
+      next = tags.length ? { ...rest, tags } : rest;
+    }
+  }
+  return next;
+}
+
+/** Every card a member's change added or rewrote, tidied (memberTidyCard). The board runs this on a member's change before the write guard sees it. */
+export function memberTidy(before: Board, after: Board): Board {
+  if (before.cards === after.cards || after.sealed) return after;
+  const was = new Map(before.cards.map((c) => [c.id, c]));
+  let touched = false;
+  const cards = after.cards.map((c) => {
+    const p = was.get(c.id);
+    if (p === c) return c;
+    const next = memberTidyCard(p, c);
+    if (next !== c) touched = true;
+    return next;
+  });
+  return touched ? { ...after, cards } : after;
+}
+
 // ---------- the tags that direct the owner's agents ----------
 
 /**
@@ -379,6 +472,7 @@ export function takeRoom(room: Room, c: Card): string | null {
  */
 function cardTooBig(p: Card | undefined, c: Card): string | null {
   const L = MEMBER_LIMITS;
+  if (typeof c.title === "string" && p?.title !== c.title && !hasInk(c.title)) return BLANK_TITLE;
   if (typeof c.title !== "string" || !c.title || c.title.length > L.title) return `[too_big] A card's title can be up to ${L.title} characters.`;
   if (typeof c.notes !== "string" || c.notes.length > L.notes) return `[too_big] A card's notes can be up to ${L.notes.toLocaleString("en-US")} characters.`;
   if (c.due !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.due))) return "[too_big] Due dates must look like 2026-09-30.";
@@ -386,6 +480,8 @@ function cardTooBig(p: Card | undefined, c: Card): string | null {
   if (!Array.isArray(tags) || tags.length > L.tags || tags.some((t) => typeof t !== "string" || !t || t.length > L.tag)) return `[too_big] A card can have ${L.tags} tags of up to ${L.tag} characters each.`;
   const wrote = { title: p?.title !== c.title, notes: p?.notes !== c.notes, tags: !same(p?.tags, c.tags) };
   if ((wrote.title && CONTROL.test(c.title)) || (wrote.notes && CONTROL_IN_NOTES.test(c.notes)) || (wrote.tags && tags.some((t) => CONTROL.test(t)))) return BAD_TEXT;
+  // The board takes these out of a member's text before it gets here (memberTidy). This is for a path that didn't.
+  if ((wrote.title && visibleText(c.title) !== c.title) || (wrote.notes && visibleText(c.notes) !== c.notes) || (wrote.tags && tags.some((t) => !p?.tags?.includes(t) && visibleText(t, true) !== t))) return HIDDEN_TEXT;
   if (wrote.title && jsonBytes(c.title) > L.titleBytes) return `[too_big] That title takes more room than a title gets (${L.titleBytes} bytes as stored). Shorten it.`;
   if (wrote.notes && jsonBytes(c.notes) > L.notesBytes) return `[too_big] Those notes take more room than a card's notes get (${L.notesBytes / 1024} KB as stored). Shorten them.`;
   const size = jsonBytes(c);

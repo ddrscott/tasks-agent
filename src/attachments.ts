@@ -23,7 +23,7 @@ import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
 import { kidOf } from "./sealed";
 import { access, spendBoardCall, tooFast } from "./members";
-import { BOARD_ID, errorCode, plainError, SLOW_DOWN } from "./member-rules";
+import { BOARD_ID, errorCode, plainError, SLOW_DOWN, visibleText } from "./member-rules";
 import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
@@ -35,11 +35,17 @@ const INLINE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "i
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const limit = (v: string | undefined, fallback: number) => (Number(v) > 0 ? Number(v) : fallback) * MB;
 
-function cleanName(raw: string | null): string {
+/**
+ * `member`: the upload is a member's. Their file's name is words on the owner's board like any
+ * others, so what can't be seen comes out of it (visibleText in member-rules.ts): direction
+ * overrides that make `exe.txt` read as `txt.exe`, zero-width characters, hidden tag characters.
+ */
+function cleanName(raw: string | null, member = false): string {
   let name = "file";
   try { name = decodeURIComponent(raw ?? "") || name; } catch { /* keep default */ }
-  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f"]/g, "").trim();
-  return (name || "file").slice(0, 200);
+  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f"]/g, "");
+  if (member) name = visibleText(name, true).replace(/\s+/g, " ");
+  return (name.trim() || "file").slice(0, 200);
 }
 
 function cleanType(raw: string | null): string {
@@ -124,7 +130,7 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
 
   const att: Attachment = {
     id: `a${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    name: sealed ? sealedName! : cleanName(req.headers.get("X-Filename")),
+    name: sealed ? sealedName! : cleanName(req.headers.get("X-Filename"), !!where.member),
     size,
     type: sealed ? sealedType! : cleanType(req.headers.get("Content-Type")),
     addedAt: new Date().toISOString(),

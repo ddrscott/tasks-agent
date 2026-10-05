@@ -14,7 +14,7 @@ import { CardIndex } from "./search";
 import { access, boardShared, logCards, syncSharing, type AuditCard } from "./members";
 import {
   ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  frameCost, memberMoveError, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  frameCost, memberMoveError, memberTidy, memberTidyCard, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -666,7 +666,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you", claim?: string): Board {
     const before = this.state;
     const member = callers.getStore()?.kind === "member";
-    const changed = fn(before);
+    // A member's text is stored without the characters nobody can see (memberTidy in member-rules.ts).
+    const changed = member ? memberTidy(before, fn(before)) : fn(before);
     // Before anything is written: a member's change has to be one a writer may make. It's
     // judged twice, as made and as it will be stored (with who made it marked on each card).
     this.guard(before, changed);
@@ -899,7 +900,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         // Each line is checked as it comes: a title that isn't text, or tags that aren't a list, is that line's reason.
         ops.checkCardFields(item);
         const r = ops.addCard(next, { title: item.title, laneId, tags: item.tags });
-        const why = room ? takeRoom(room, r.card) : null;
+        // A member's line is judged as it will be stored: without what can't be seen.
+        const why = room ? takeRoom(room, memberTidyCard(undefined, r.card)) : null;
         if (why) { left.push({ index, error: why }); return; }
         next = r.board;
         ids.push(r.card.id);

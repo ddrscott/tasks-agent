@@ -62,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `search_cards` and `claim_card` say when a member wrote on a card, tagged it, or attached a file to it, the same as `get_board`
 - Your audit log names an admin on a plan change only when that admin's own Pro switch caused it. A subscription that lapsed moments after an admin edited your account used to be put down to that admin
 - On a shared board a member can't use more tags that only look like yours: a digit for a letter (`ag3nt`, `ship-0k`), an odd Latin letter, or Cherokee or Lisu letters drawn like Latin ones. A member's title can't hold `#agent` anywhere in it, not only at the end
+- Text nobody can see is taken out of what a member writes on your board: zero-width characters, direction overrides, and hidden tag characters, in titles, notes, tags, and file names. A title of nothing else is refused instead of making a blank card
 
 ## [0.2.0] - 2026-10-04
 

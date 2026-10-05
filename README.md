@@ -1476,6 +1476,7 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 | Member sockets on one board | 48 | the upgrade answers 503 until some close |
 | A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
 | The same text as it's stored (JSON, UTF-8 bytes) | title 600 bytes, notes 12 KB, the whole card 32 KB | `[too_big] …`. 4,000 characters of any script fit, and so do 4,000 quotes or line breaks. What doesn't is text that's short in characters and long in bytes |
+| Characters nobody can see in a member's title, notes, tags, or a file's name | taken out before it's stored | Zero-width spaces, direction overrides, the hidden Unicode tag block, blank filler letters, half a surrogate pair (**Text nobody can see**, below). A title that's nothing else is `[bad_text] A card needs a title someone can read. …` |
 | Control characters in a member's title, notes, or tags | none, except a newline and a tab in notes | `[bad_text] …`. One is six bytes as stored (`\u0001`). The app takes them out of what's typed or pasted before it sends (`plainText`), so a person never sees this |
 | Cards on the board | 1,000 | `[board_full] …` for a member's add. They can still edit, move, and delete |
 | The board as stored (JSON, UTF-8 bytes) | 768 KB | `[board_full] …` for a member's change that grows it. One that shrinks it is fine. The board's Durable Object keeps it in one 2 MB row, so the owner always has more than half of it to themselves |
@@ -1680,6 +1681,27 @@ tags that direct them are the owner's alone, and so are the cards that carry the
     it takes removing every member first. And the mark is a warning, not a lock: an owner who
     tags a member's card `#agent` has made it a work order, and an agent that ignores its
     rules can still read the notes as instructions. Read a member's card before tagging it.
+
+**Text nobody can see.** A member's text is read by the owner on screen and by the owner's
+agents as characters, and those have to be the same thing. So the board takes what can't be
+seen out of everything a member writes before it's stored (`memberTidy` in
+`src/member-rules.ts`, run in `TodoAgent.mutate` on a member's change and nobody else's):
+direction overrides, embeddings, isolates, and marks, which make a line read one way on screen
+and another in memory; the Unicode tag block (U+E0000 to U+E007F), an invisible copy of ASCII
+that a model reads as words; zero-width spaces, the word joiner, the byte-order mark, the soft
+hyphen, blank filler letters, invisible math operators; and half of a surrogate pair. A title
+that's empty after that is refused in words, alone or as a line of a pasted list, so there's
+no blank card. A member's file name gets the same, strictly (`cleanName` in
+`src/attachments.ts`), so `invoice` + a right-to-left override + `txt.exe` is stored as
+`invoicetxt.exe`. Two kinds of zero-width character do something a person sees and are kept
+where they do: a joiner between two emoji (a family, a flag) or between two letters of a script
+that shapes with them (Arabic, Syriac, N'Ko, Mongolian, the Indic scripts), and a variation
+selector right after a visible character (the heart that's red). Anywhere else, and always in
+a tag or a file name, they go too. Only a field the member's change wrote is touched, so the
+owner's own text is never rewritten by a member moving or tagging the card. The write guard
+refuses a member's text that still holds any of it (`[bad_text]`), for a path that ever
+skipped the tidy. The owner's text is stored as sent; this is about what a member can put in
+front of someone else's agents.
 
 **Live effect.** A removal or a downgrade holds from the member's very next frame.
 
