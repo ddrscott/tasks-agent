@@ -1633,11 +1633,28 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .dialog-body .held-note { flex: none; margin: 0; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
 
 /* Who made the last change: on the card face when it wasn't you, and in the open card. */
-/* Typing that couldn't be saved because the card went read only under the person. A full outline, no rail. */
-.dialog-body .unsaved { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); }
-.dialog-body .unsaved p { margin: 0; font-size: 13px; line-height: 1.5; }
-.dialog-body .unsaved label { display: flex; flex-direction: column; gap: 4px; font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.dialog-body .unsaved .field { font: 13px/1.5 var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--ink); resize: vertical; }
+/* Typing that couldn't be saved because the board went read only under the person: in the open card,
+   the New card dialog, a lane's "Add a card" box, and the notice on their own board. A full outline, no rail. */
+.unsaved { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); }
+.unsaved p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.unsaved label { display: flex; flex-direction: column; gap: 4px; font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.unsaved .field { font: 13px/1.5 var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--ink); resize: vertical; }
+/* Each box is as tall as what's in it, so nothing typed is hidden behind a scroll. */
+.unsaved textarea.field { field-sizing: content; min-height: 0; max-height: 240px; }
+.quick-add.frozen .unsaved { background: var(--surface); }
+.quick-add.frozen .unsaved .field { min-height: 0; }
+/* On your own board, after a shared one closed under you: why, and what you'd been typing there. */
+.kept-note {
+  flex: none; margin: 12px 24px 0; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); background: var(--surface);
+  max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain;
+}
+.kept-note > p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.kept-head { display: flex; align-items: center; gap: 12px; }
+.kept-head .h { flex: 1; margin: 0; }
+.kept-note .unsaved { border-color: var(--line); background: var(--bg); }
+.kept-note + .board, .kept-note + .first-run { margin-top: 12px; }
 /* The owner's editor, on a card a member wrote on: whose words, what the mark does, and the button that takes it off. */
 .member-words { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .member-words p { margin: 0; overflow-wrap: anywhere; }
@@ -1688,11 +1705,12 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .invite-wait::before { content: "$ "; color: var(--accent); font-weight: 700; }
 
 @media (max-width: 900px) {
-  .member-line { margin: 10px 16px 0; }
+  .member-line, .kept-note { margin: 10px 16px 0; }
   .board-switch-btn { padding: 0 8px; gap: 4px; }
 }
 @media (max-width: 560px) {
   .member-line { margin: 8px 12px 0; padding: 6px 10px; gap: 8px; flex-wrap: wrap; }
+  .kept-note { margin: 8px 12px 0; padding: 10px; }
   .member-line-text { flex-basis: 100%; }
   .card-facts { grid-template-columns: 1fr 1fr; }
   .login-card.invite-card { padding: 22px 18px; }

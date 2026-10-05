@@ -10,6 +10,7 @@ import { OWNER_TAG_NOTE } from "./member";
 import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
+import { Unsaved, useDraft } from "./Unsaved";
 import { MODAL, useModal } from "./modal";
 import { NotesFullButton } from "./NotesFull";
 import { IconClip, IconClose, IconPlus } from "./icons";
@@ -34,9 +35,15 @@ type Props = {
   /** Adds the card and resolves to its id. */
   onAdd(input: NewCardInput): Promise<string>;
   onClose(): void;
+  /**
+   * Set when the board turned view only under this dialog (made a viewer, or the owner's plan
+   * lapsed): why, in a sentence. Nothing can be added any more, so the dialog shows what was
+   * typed, read only, to copy out.
+   */
+  frozen?: string | null;
 };
 
-export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onAdd, onClose, frozen }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -88,6 +95,12 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
   }, [filesNote]);
 
   const dirty = !!(title.trim() || notes.trim() || due || tags.trim() || files.length);
+  const typed = { ...(title.trim() ? { title } : {}), ...(notes.trim() ? { notes } : {}), ...(tags.trim() ? { tags: tags.trim() } : {}) };
+  // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
+  useDraft("new-card", addedId ? null : { ...typed, where: "The New card dialog" });
+  // Nothing typed, or the card already exists: there's nothing to keep, so a board that turned view only just closes this.
+  const nothingToKeep = !Object.keys(typed).length || !!addedId;
+  useEffect(() => { if (frozen && nothingToKeep) onClose(); }, [frozen, nothingToKeep]); // eslint-disable-line react-hooks/exhaustive-deps
   // The X and Esc ask before throwing away what was typed or queued. Once the card is added
   // there's nothing left to lose but a retry, so they just close.
   const guard = useDiscardGuard(() => dirty && !addedId, onClose);
@@ -148,6 +161,31 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onA
   }
 
   const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void add(); } };
+
+  if (frozen) {
+    if (nothingToKeep) return null;
+    return (
+      <dialog
+        ref={ref} className="card-dialog card-view" {...MODAL} aria-label="New card, not saved" tabIndex={-1}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
+        onCancel={(e) => { e.preventDefault(); onClose(); }}
+      >
+        <div className="dialog-body">
+          <div className="dialog-top">
+            <h2 className="h">NEW_CARD</h2>
+            <span className="role-chip" data-role="viewer">view only</span>
+            <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={onClose}><IconClose /></button>
+          </div>
+          <Unsaved draft={typed} why={`${frozen} This card wasn't added.`} after={`Closing this throws it away.${files.length ? ` The ${files.length === 1 ? "file you picked wasn't" : `${files.length} files you picked weren't`} uploaded.` : ""}`} />
+        </div>
+        <div className="dialog-foot">
+          <span className="view-note">View only: nothing can be added to this board right now.</span>
+          <span className="spacer" />
+          <button className="btn primary" onClick={onClose}>Close</button>
+        </div>
+      </dialog>
+    );
+  }
 
   return (
     <dialog

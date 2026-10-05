@@ -2046,9 +2046,19 @@ address or a guess, and nothing on screen offers a change the server would refus
   anything in it was typed and not saved, the view opens with a `Not saved.` block that says
   why and holds the title, notes, and tags as typed, read only, to copy out, and they're back
   in the fields if the editor returns; before this the typing vanished without a word. An
-  open New card dialog or quick add closes), made a writer, the owner's plan lapsed or came
+  open New card dialog and a lane's "Add a card" box do the same when they hold typing: the
+  dialog turns into a `Not saved.` block with the title, notes, and tags and one button,
+  Close, and the lane's box turns into one with the lines and Dismiss. With nothing typed
+  they just close), made a writer, the owner's plan lapsed or came
   back. A frame with `closed` (removed, left in another tab, or the board was encrypted)
-  closes the socket from the client, drops back to your own board, and says why. If the
+  closes the socket from the client, drops back to your own board, and says why. If anything
+  was being typed when that happened (in the card editor, the New card dialog, or a lane's
+  box), your own board opens with a `// NOT_SAVED` notice under the top bar that says why the
+  board closed and holds each piece of text, read only, to copy, until you press Dismiss.
+  It's one mechanism (`src/client/Unsaved.tsx`): every place that takes typing reports what
+  it holds to the board's `Workspace` (`useDraft`), each shows its own text when it turns
+  read only, and when the board closes the `Workspace` hands the list to the one that opens
+  next. It's kept in memory only, so a reload drops it. If the
   socket drops for any other reason, the app asks `GET /api/board/access` before it lets the
   reconnect go on, and gives the board up on a 404, so a member removed while offline doesn't
   retry forever.

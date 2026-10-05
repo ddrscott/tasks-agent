@@ -11,6 +11,7 @@ import { AskBlock, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
 import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
+import { Unsaved, useDraft } from "./Unsaved";
 
 /** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
 export type AddResult = { added: number; left: string[]; why: string | null };
@@ -54,6 +55,12 @@ type Props = {
    * on it that changes anything: cards don't lift, and there's no add, no check, no menu.
    */
   mode?: Mode;
+  /**
+   * Set when the board turned view only while someone could have been typing (made a viewer,
+   * the owner's plan lapsed): why, in a sentence. A lane's "Add a card" box that has text in
+   * it shows that text read only under it, to copy out, instead of vanishing.
+   */
+  frozen?: string | null;
 };
 
 const LANE_PREFIX = "lane:";
@@ -444,7 +451,8 @@ function LaneView(props: Props & {
         </div>
       </SortableContext>
 
-      {canCards && <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(lines) => actions.addCards(lane.id, lines)} tagHint={owns ? "#agent" : "a #tag"} />}
+      {/* Always mounted, so what's typed in it outlives the board turning view only. With nothing typed, a viewer's lane shows nothing here. */}
+      <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(lines) => actions.addCards(lane.id, lines)} tagHint={owns ? "#agent" : "a #tag"} frozen={canCards ? null : props.frozen ?? "This board is view only for you now."} />
     </section>
   );
 }
@@ -554,7 +562,7 @@ function DueChip({ due, done }: { due: string; done: boolean }) {
 export const quickAddLines = (text: string) =>
   text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "").trim()).filter(Boolean);
 
-function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(lines: string[]): Promise<AddResult>; tagHint: string }) {
+function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(lines: string[]): Promise<AddResult>; tagHint: string; frozen?: string | null }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   // What happened to the lines still in the box: "41 added, 19 left. …"
@@ -563,7 +571,9 @@ function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boo
   // that way the button says "Try again", not "Add 3 cards" for three lines that were refused.
   const [refused, setRefused] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (open) ref.current?.focus(); }, [open]);
+  useEffect(() => { if (open && !frozen) ref.current?.focus(); }, [open, frozen]);
+  // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
+  useDraft(`quick-add:${lane.id}`, text.trim() ? { where: `"Add a card" in ${lane.name}`, lines: text } : null);
 
   async function submit() {
     // Pasting a list adds one card per line, all in one change.
@@ -584,6 +594,17 @@ function QuickAdd({ lane, open, setOpen, add, tagHint }: { lane: Lane; open: boo
     }
     // Back to the top of what's left: with the caret at the end, the first lines scrolled out of the box.
     setTimeout(() => { const el = ref.current; if (!el) return; el.focus(); el.setSelectionRange(0, 0); el.scrollTop = 0; }, 0);
+  }
+
+  // The board turned view only. Typed text stays, read only, until it's dismissed; with none there's nothing to show.
+  if (frozen) {
+    if (!text.trim()) return null;
+    return (
+      <div className="quick-add frozen">
+        <Unsaved draft={{ lines: text }} why={`${frozen} ${quickAddLines(text).length === 1 ? "This card wasn't" : "These cards weren't"} added.`} after="Dismiss throws it away." />
+        <div className="row"><button className="btn" onClick={() => { setText(""); setNote(""); setRefused(null); setOpen(false); }}>Dismiss</button></div>
+      </div>
+    );
   }
 
   const count = quickAddLines(text).length;

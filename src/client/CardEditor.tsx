@@ -3,6 +3,7 @@ import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { isOwnerTag, ownerTagLike } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
+import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
 import { NoAgentLine } from "./AgentNudge";
 import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
@@ -55,25 +56,16 @@ export function CardEditor(props: Props) {
   // tagging the card for an agent), their text is still on screen to copy, and it's back in
   // the fields if the editor returns.
   const draft = useRef<Draft | null>(null);
+  // The board keeps the same text (DraftsContext), so it isn't lost if the whole board closes
+  // under this dialog: a member who's removed finds it on their own board. CardEdit reports it;
+  // it's dropped here, when the card is closed, so it outlives the swap to the read-only view.
+  const drafts = useContext(DraftsContext);
+  const key = `card:${props.card.id}`;
+  useEffect(() => () => drafts?.report(key, null), [drafts, key]);
   // An agent's work order is read only to a writer too (OWNER_TAGS in member-rules.ts).
   return props.mode === "viewer" || agentHeld(props.mode, props.card)
     ? <CardView {...props} unsaved={draft.current} />
     : <CardEdit {...props} draft={draft} />;
-}
-
-/** The fields someone has changed and not saved: only the ones that differ from the card. */
-type Draft = { title?: string; notes?: string; tags?: string };
-
-/** Text that was typed and couldn't be saved, read only and selectable, so it can be copied out. */
-function Unsaved({ draft, why }: { draft: Draft; why: string }) {
-  return (
-    <div className="unsaved" role="alert">
-      <p><b>Not saved.</b> {why} What you typed is below, so you can copy it. Closing this card throws it away.</p>
-      {draft.title !== undefined && <label>Title you typed<textarea className="field" readOnly rows={1} value={draft.title} onFocus={(e) => e.target.select()} /></label>}
-      {draft.notes !== undefined && <label>Notes you typed<textarea className="field" readOnly rows={Math.min(8, draft.notes.split("\n").length + 1)} value={draft.notes} /></label>}
-      {draft.tags !== undefined && <label>Tags you typed<input className="field" readOnly value={draft.tags} /></label>}
-    </div>
-  );
 }
 
 /** A card to read: the notes rendered with their checkboxes fixed, the files to open or download, and one button, Close. */
@@ -102,7 +94,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
         </div>
         <h3 className="card-view-title">{card.title}</h3>
         {held && <p className="held-note">{AGENT_HOLDS(owner ?? "the board's owner")}</p>}
-        {unsaved && Object.keys(unsaved).length > 0 && (
+        {hasDraft(unsaved) && (
           <Unsaved draft={unsaved} why={held
             ? `${owner ?? "The board's owner"} made this card a work order for their agents while you were editing it.`
             : lapsed ? `${owner ?? "The board's owner"}'s Pro plan lapsed while you were editing this card, so the board is view only.`
@@ -143,6 +135,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
  */
 function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft, onClaim }: Props & { draft: React.MutableRefObject<Draft | null> }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const drafts = useContext(DraftsContext);
   // A writer can't finish or delete a card while its question is open: that would end the
   // agent's wait, which is the owner's call. Those controls aren't offered, and a line says why.
   const owner = useContext(AskOwnerContext);
@@ -169,6 +162,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
       ...(notes !== card.notes ? { notes } : {}),
       ...(tags.trim() !== ownText.trim() ? { tags: tags.trim() } : {}),
     };
+    drafts?.report(`card:${card.id}`, hasDraft(draft.current) ? { ...draft.current, where: `The card "${card.title}"` } : null);
   });
   // Notes read as markdown and edit as plain text. A card with no notes opens ready to type.
   const [editing, setEditing] = useState(!card.notes.trim() || draft.current?.notes !== undefined);

@@ -9,6 +9,7 @@ import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
 import { NewCard, type NewCardInput } from "./NewCard";
+import { DraftsContext, KeptNotice, type Kept } from "./Unsaved";
 import { Chat } from "./Chat";
 import { Admin } from "./Admin";
 import { Connect } from "./Connect";
@@ -109,6 +110,8 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
   const [access, setAccess] = useState<MemberAccess | null>(null);
   const [boards, setBoards] = useState<Boards | null>(null);
   const [notice, setNotice] = useState<string | null>(takeFlash);
+  /** What was being typed on a shared board when it closed under this account, and why it closed. Shown on the board that opens next. */
+  const [kept, setKept] = useState<{ why: string; kept: Kept[] } | null>(null);
 
   const loadBoards = useCallback(() => {
     fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
@@ -116,9 +119,11 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
   useEffect(() => { loadBoards(); }, [loadBoards, boardId]);
 
   // Back to your own board, with the reason. The address drops the board it can't open.
-  const fallBack = useCallback((why: string) => {
+  const fallBack = useCallback((why: string, unsaved?: Kept[]) => {
     history.replaceState(null, "", `${BASE}/`);
-    setNotice(why);
+    // With text to hand back, the reason goes on the same notice as the text and stays until dismissed.
+    if (unsaved?.length) setKept({ why, kept: unsaved });
+    setNotice(unsaved?.length ? null : why);
     setAccess(null);
     setBoardId(null);
   }, []);
@@ -168,6 +173,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
       me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin}
       shared={boardId ? access : null} boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
       notice={notice} onNoticeShown={() => setNotice(null)}
+      kept={boardId ? null : kept} onKeptDone={() => setKept(null)}
     />
   );
 }
@@ -180,16 +186,19 @@ type WorkspaceProps = {
   shared: MemberAccess | null;
   boards: Boards | null;
   onSwitch(board: string | null): void;
-  /** The shared board is gone for this account (removed, left, encrypted): go back to your own, and say why. */
-  onLost(why: string): void;
+  /** The shared board is gone for this account (removed, left, encrypted): go back to your own, and say why. `unsaved` is whatever was being typed there. */
+  onLost(why: string, unsaved?: Kept[]): void;
   /** Read the list of boards again. */
   onBoards(): void;
   /** Something to say once the board is up, like why you're back on your own. */
   notice: string | null;
   onNoticeShown(): void;
+  /** On your own board: text you were typing on a shared board when it closed under you, with why. */
+  kept: { why: string; kept: Kept[] } | null;
+  onKeptDone(): void;
 };
 
-function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown }: WorkspaceProps) {
+function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown, kept, onKeptDone }: WorkspaceProps) {
   useTitle("Board");
   // Everything below asks `mode`, never the URL or a guess: "owner" on your own board, and on a
   // shared one whatever the server last said (the preflight, then `tasks_access` on the socket).
@@ -368,11 +377,15 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const lost = useRef(false);
   /** Set while this tab's own Leave is on its way, so the board closing reads as leaving, not as being removed. */
   const leaving = useRef(false);
+  // What's typed and not saved, in every editor that's open (Unsaved.tsx). If this board
+  // closes under them, that text goes with the reason to the board that opens next.
+  const unsaved = useRef(new Map<string, Kept>());
+  const drafts = useMemo(() => ({ report(key: string, k: Kept | null) { if (k) unsaved.current.set(key, k); else unsaved.current.delete(key); } }), []);
   const lose = useCallback((why: string) => {
     if (lost.current) return;
     lost.current = true;
     try { agentRef.current?.close(); } catch { /* already closed */ }
-    onLost(why);
+    onLost(why, [...unsaved.current.values()]);
   }, [onLost]);
 
   // The server says what this account may do on someone else's board, on connect and again the
@@ -551,12 +564,16 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
 
   // A writer made a viewer, or the owner's plan lapsing, while something was half done: close
   // what can no longer be finished, so nothing on screen offers a change the server will refuse.
+  // The New card dialog and a lane's "Add a card" box stay if they hold typing: each turns
+  // read only and shows it under "Not saved." (`frozen` below), and closes itself if it's empty.
   useEffect(() => {
     if (canWrite) return;
-    setNewCardLane(null);
-    setQuickAddLane(null);
     setChatOpen(false);
   }, [canWrite]);
+  /** Why nothing can be typed here any more, for an editor that was open when it happened. Null while this account can write. */
+  const frozen = !access || canWrite ? null
+    : access.reason === "plan_lapsed" ? `${access.ownerEmail}'s Pro plan lapsed, so this board is view only for now.`
+    : "Your role on this board is viewer now.";
 
   useEffect(() => {
     if (!toast) return;
@@ -764,6 +781,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
     <AskContext.Provider value={answerAsk}>
     <AskOwnerContext.Provider value={access?.ownerEmail ?? null}>
     <Who me={me.email} on={showWho}>
+    <DraftsContext.Provider value={drafts}>
     <NoAgentProvider board={board} onConnect={onConnect} off={member}>
     <div className="app">
       <div className="main">
@@ -860,6 +878,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           </div>
         </header>
 
+        {/* Back on your own board after a shared one closed under you: what you'd been typing there, first thing on the page. */}
+        {kept && !member && <KeptNotice why={kept.why} kept={kept.kept} onDismiss={onKeptDone} />}
         {/* // START_HERE decides for itself when to show (quickStartOpen in FirstRun.tsx). */}
         {!member && !board.sealed && <FirstRun board={board} onConnect={onConnect} add={addFullCard} say={say} />}
         {/* Whose board this is and what you can do on it, for as long as it's on screen. */}
@@ -875,7 +895,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           board={board} actions={actions} flash={flash} mode={mode}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
-          onNew={setNewCardLane}
+          onNew={setNewCardLane} frozen={frozen}
           onOpen={(c: Card) => setEditing(c.id)}
           onOptimistic={(b) => setBoard(b)}
           onDragging={(d) => {
@@ -899,7 +919,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       {!chatOpen && canWrite && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {newCardLane && (
-        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} />
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} frozen={frozen} />
       )}
       {editingCard && (
         // The editor shows the session that claimed the card, so it reads the same list the board does.
@@ -952,6 +972,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       )}
     </div>
     </NoAgentProvider>
+    </DraftsContext.Provider>
     </Who>
     </AskOwnerContext.Provider>
     </AskContext.Provider>
