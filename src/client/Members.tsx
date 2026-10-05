@@ -520,12 +520,13 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
               Email address
               <input
                 ref={emailRef} className="field" type="email" name="invite-email" inputMode="email" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                placeholder="name@company.com" maxLength={254} value={email} disabled={!canInvite}
+                placeholder={blocked ? (full ? "The board is full" : "No invite emails left today") : "name@company.com"} maxLength={254} value={email} disabled={!canInvite || !!blocked}
                 onChange={(e) => { setEmail(e.target.value); setFormError(null); }}
-                aria-describedby={formError ? `${ids}-invite-error` : undefined} aria-invalid={!!formError}
+                // At either cap there's nobody to invite, so the field is off too. It says why where the address would go, and the full reason is below.
+                aria-describedby={formError ? `${ids}-invite-error` : blocked ? `${ids}-invite-cap` : undefined} aria-invalid={!!formError}
               />
             </label>
-            <fieldset className="mem-roles" disabled={!canInvite}>
+            <fieldset className="mem-roles" disabled={!canInvite || !!blocked}>
               <legend>Role</legend>
               {ROLES.map((r) => (
                 <label key={r.role} className="mem-role-opt">
@@ -559,8 +560,8 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
                 </p>
               </div>
             )}
-            {canInvite && full && <p className="mem-error" role="status">This board is full: {board.maxMembers} of {board.maxMembers} people, pending invites included. Remove someone or revoke an invite to make room.</p>}
-            {canInvite && spent && <p className="mem-error" role="status">{full ? "And you've" : "You've"} sent today's {board.maxInvitesPerDay} invite emails, resends included{full ? ", so making room won't be enough today" : ""}. The count starts over at midnight UTC.</p>}
+            {canInvite && full && <p className="mem-error" role="status" id={`${ids}-invite-cap`}>This board is full: {board.maxMembers} of {board.maxMembers} people, pending invites included. Remove someone or revoke an invite to make room.</p>}
+            {canInvite && spent && <p className="mem-error" role="status" id={full ? undefined : `${ids}-invite-cap`}>{full ? "And you've" : "You've"} sent today's {board.maxInvitesPerDay} invite emails, resends included{full ? ", so making room won't be enough today" : ""}. The count starts over at midnight UTC.</p>}
           </form>
         </section>
       )}

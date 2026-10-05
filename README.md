@@ -1212,7 +1212,9 @@ each card.
   button used to be there and answered "No subscription to manage yet." An encrypted
   board (`encrypted`) shows only that sharing is off and why, with a button to the
   Encryption dialog. A full board and a spent day of invite emails disable Invite (and
-  Resend) and say the number. They're two caps and can both be hit: then the form shows both
+  Resend), the email field, and the role choice. The field says why where the address would
+  go ("The board is full", "No invite emails left today"), and the full reason with the
+  number is below. The field used to stay typeable above a dead button. They're two caps and can both be hit: then the form shows both
   lines, the full board first, since that's the one to fix now, and the second line says
   making room won't be enough today. The API does the same: `409 member_limit` with
   `also: ["invite_limit"]` and both sentences in `error`.
@@ -1275,7 +1277,9 @@ each card.
   with a short answer and a link to the terms.
 - **Encryption dialog.** On a board with members or pending invites it opens with a notice
   that a shared board can't be encrypted, how many people and invites that is, and an Open
-  Members button; the passphrase form under it is disabled. If someone's invited after the
+  Members button; the passphrase fields under it are disabled and greyed, under a line that says "The fields
+  below are off while the board is shared." They also wait, disabled, until the members list
+  has answered. If someone's invited after the
   dialog opened, the server's `[board_shared]` refusal is shown in the same words.
 
 **The model.**

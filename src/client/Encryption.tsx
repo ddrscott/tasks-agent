@@ -147,6 +147,8 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
   const on = shared.members.filter((m) => m.status === "accepted").length;
   const waiting = shared.members.length - on;
   const isShared = shared.members.length > 0;
+  // Until the members list has answered, nobody knows whether this board is shared, so the fields wait for it.
+  const off = isShared || shared.state === "loading";
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [remember, setRemember] = useState(true);
@@ -155,7 +157,7 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
   const [error, setError] = useState<string | null>(null);
   const short = pass.length > 0 && pass.length < MIN_PASSPHRASE;
   const mismatch = again.length > 0 && again !== pass;
-  const ready = pass.length >= MIN_PASSPHRASE && again === pass && understood && !busy && !isShared;
+  const ready = pass.length >= MIN_PASSPHRASE && again === pass && understood && !busy && !off;
 
   async function go() {
     if (!ready) return;
@@ -211,15 +213,16 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers 
       </ul>
       <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void go(); }}>
       <AccountField email={email} />
-      <fieldset className="enc-fields" disabled={isShared}>
+      {isShared && <p className="enc-off">The fields below are off while the board is shared.</p>}
+      <fieldset className="enc-fields" disabled={off}>
       <label>
         Passphrase ({MIN_PASSPHRASE}+ characters; a few random words works well)
-        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={pass} onChange={(e) => setPass(e.target.value)} />
+        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={pass} disabled={off} onChange={(e) => setPass(e.target.value)} />
       </label>
       {short && <div className="login-error">At least {MIN_PASSPHRASE} characters.</div>}
       <label>
         Same passphrase again
-        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={again} onChange={(e) => setAgain(e.target.value)} />
+        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={again} disabled={off} onChange={(e) => setAgain(e.target.value)} />
       </label>
       {mismatch && <div className="login-error">Those don't match.</div>}
       <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this device</label>

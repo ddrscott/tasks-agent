@@ -1502,6 +1502,9 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .mem-roles { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .mem-roles legend { padding: 0; margin-bottom: 6px; font: 12px var(--font-mono); color: var(--muted); }
 .mem-roles:disabled, .mem-invite .field:disabled { opacity: .55; }
+/* A field that can't be typed in looks it: greyed, with no text cursor. */
+.mem-invite .field:disabled, .enc-fields .field:disabled { background: var(--surface-2); cursor: not-allowed; }
+.enc-off { margin: 0; font: 12px/1.5 var(--font-mono); color: var(--ink); }
 .dialog-body label.mem-role-opt { flex-direction: row; align-items: baseline; gap: 8px; font: 13px/1.5 var(--font-ui); color: var(--muted); cursor: pointer; }
 .mem-role-opt input { flex: none; margin: 0; accent-color: var(--accent); transform: translateY(2px); }
 .mem-role-opt b { color: var(--ink); font-weight: 600; margin-right: 4px; }
