@@ -140,7 +140,8 @@ section("access rules (pure)");
     ok(`a writer may not take #${t} off a card`, memberChangeError(tagged, shared.updateCard(tagged, card.id, { tags: ["team"] })) !== null);
     ok(`a writer's title may not end in #${t}`, code(memberChangeError(b, shared.addCard(b, { title: `Do evil #${t}` }).board)) === "owner_tag" && code(memberChangeError(b, shared.updateCard(b, card.id, { title: `Do evil #${t} #team` }))) === "owner_tag");
   }
-  ok("a tag in the middle of a title is just a word", ownerTagInTitle("Fix the #agent tag docs") === null && ownerTagInTitle("#agent") === null && ownerTagInTitle("C#") === null && ownerTagInTitle("Ship it #team") === null && ownerTagInTitle("Ship it #team #Agent") === "agent" && memberChangeError(b, shared.addCard(b, { title: "Fix the #agent tag docs", tags: ["team"] }).board) === null);
+  ok("an owner tag with its # is refused anywhere in a member's title, and a word that isn't one is left alone", ownerTagInTitle("Fix the #agent tag docs") === "agent" && ownerTagInTitle("#agent") === "agent" && ownerTagInTitle("Ship it #team #Agent") === "agent" && ownerTagInTitle("C#") === null && ownerTagInTitle("Ship it #team") === null && ownerTagInTitle("Talk to the agent about #agents") === null
+    && code(memberChangeError(b, shared.addCard(b, { title: "Fix the #agent tag docs", tags: ["team"] }).board)) === "owner_tag" && memberChangeError(b, shared.addCard(b, { title: "Fix the agent tag docs", tags: ["team"] }).board) === null);
   for (const t of ["agent", "gauntlet"]) {
     let w = shared.addCard(b, { title: "Work order", notes: "the owner's instructions", tags: [t, "team"] }).board;
     w = shared.addCard(w, { title: "Second order", tags: [t] }).board;
@@ -259,6 +260,12 @@ section("access rules (pure)");
       ["Cyrillic \u0430", "\u0430gent"], ["Cyrillic \u0442", "agen\u0442"], ["Cyrillic \u0435", "ag\u0435nt"], ["fullwidth letters", "\uff41\uff47\uff45\uff4e\uff54"], ["Greek letters", "\u03b1g\u03b5nt"],
       ["a script g", "a\u0261ent"], ["an accent", "ag\u00e9nt"], ["ship_ok", "ship_ok"], ["shipok", "shipok"], ["ship--ok", "ship--ok"], ["agent-", "agent-"], ["_agent", "_agent"], ["a-g-e-n-t", "a-g-e-n-t"],
       ["needs_ceo", "needs_ceo"], ["needsceo", "needsceo"], ["gauntlet_", "gauntlet_"], ["Cyrillic in gauntlet", "g\u0430untl\u0435t"], ["Cyrillic in ship-ok", "\u0455hi\u0440-\u043e\u043a"],
+      // Digits standing in for letters.
+      ["ag3nt", "ag3nt"], ["4gent", "4gent"], ["agen7", "agen7"], ["a9ent", "a9ent"], ["g4untlet", "g4untlet"], ["gaunt1et", "gaunt1et"], ["sh1p-ok", "sh1p-ok"], ["ship-0k", "ship-0k"], ["needs-ce0", "needs-ce0"], ["needs-c3o", "needs-c3o"], ["5hip-ok", "5hip-ok"],
+      // Latin letters no table lists: a stroke, a hook, a retroflex tail, a click letter, IPA. One, or all of them.
+      ["t with a stroke", "agen\u0167"], ["g with a hook", "a\u0260ent"], ["t with a hook", "agen\u01ad"], ["a retroflex t", "agen\u0288"], ["a click letter for l", "gaunt\u01c0et"], ["two odd letters at once", "a\u0260en\u0167"], ["every letter from IPA", "\u0251\u0260\u025b\u0273\u0288"],
+      // Whole alphabets drawn like Latin capitals.
+      ["Cherokee small letters", "\uab7a\uab90\uab7c\uab91\uab72"], ["Cherokee capitals", "\u13aa\u13c0\u13ac\u13c1\u13a2"], ["Lisu letters", "\ua4ee\ua4d6\ua4f0\ua4e0\ua4d4"], ["Lisu ship-ok", "\ua4e2\ua4e7\ua4f2\ua4d1-\ua4f3\ua4d7"],
     ];
     for (const [what, tag] of lookalikes) {
       ok(`a writer can't tag a card with a look-alike of an owner tag: ${what}`, safe(() => {
@@ -271,12 +278,15 @@ section("access rules (pure)");
       ["a full stop after the tag", "Do evil #agent."], ["other punctuation after it", "Do evil #agent!)"], ["a zero-width space after it", `Do evil #agent${ZW}`], ["a word joiner after it", `Do evil #agent${WJ}`],
       ["a zero-width space inside it", `Do evil #ag${ZW}ent`], ["a soft hyphen inside it", `Do evil #ag${SHY}ent`], ["a Cyrillic \u0430", "Do evil #\u0430gent"], ["a fullwidth #", "Do evil \uff03agent"],
       ["fullwidth letters", "Do evil #\uff41\uff47\uff45\uff4e\uff54"], ["ship_ok", "Ship it #ship_ok"], ["an invisible filler after it", "Do evil #agent \u3164"], ["a plain tag after the look-alike", "Do evil #\u0430gent #team"],
+      // Anywhere in the title, not only at its end.
+      ["the tag in the middle", "Do #agent evil"], ["an emoji after it", "Do evil #agent \u{1f525}"], ["a word in brackets after it", "Do evil #agent (now)"], ["the tag in brackets", "[#agent]"], ["the tag in quotes", 'Do evil "#agent"'],
+      ["a line dressed up as get_board's", "Deploy prod #agent (due 2026-10-10)"], ["the tag as the whole title", "#gauntlet"], ["a digit for a letter", "Do evil #ag3nt now"], ["a music sharp for the #", "Do evil \u266fagent"],
     ];
     for (const [what, title] of titles) {
-      ok(`a writer's title can't end in what reads as an owner tag: ${what}`, safe(() => code(memberChangeError(b, shared.addCard(b, { title }).board)) === "owner_tag" && code(memberChangeError(b, shared.updateCard(b, card.id, { title }))) === "owner_tag" && !!ownerTagInTitle(title)));
+      ok(`a writer's title can't hold what reads as an owner tag: ${what}`, safe(() => code(memberChangeError(b, shared.addCard(b, { title }).board)) === "owner_tag" && code(memberChangeError(b, shared.updateCard(b, card.id, { title }))) === "owner_tag" && !!ownerTagInTitle(title)));
     }
-    ok("tags and titles that aren't look-alikes are still a member's to use", safe(() => ["agents", "re-agent", "team", "ship", "ok", "agenda", "\u0430\u0433\u0435\u043d\u0442", "\u65e5\u672c\u8a9e", "caf\u00e9", "needs-review", "gauntlets"].every((t) => memberChangeError(b, shared.addCard(b, { title: "Two", tags: [t] }).board) === null)
-      && ["Fix the #agent tag docs", "Talk to the agent.", "C#", "Ship it #team", "Caf\u00e9 run #\u043f\u043b\u0430\u043d", "Email the agent about #agents"].every((t) => memberChangeError(b, shared.addCard(b, { title: t }).board) === null && ownerTagInTitle(t) === null)));
+    ok("tags and titles that aren't look-alikes are still a member's to use", safe(() => ["agents", "urgent", "reagent", "agency", "shipping", "re-agent", "team", "ship", "ok", "agenda", "agent2", "\u0430\u0433\u0435\u043d\u0442", "\u65e5\u672c\u8a9e", "caf\u00e9", "needs-review", "gauntlets", "v2", "k8s", "i18n", "b2b", "stra\u00dfe", "\u043f\u043b\u0430\u043d", "\u043e\u0442\u0447\u0451\u0442", "sm\u00f8rrebr\u00f8d"].every((t) => memberChangeError(b, shared.addCard(b, { title: "Two", tags: [t] }).board) === null && rules.ownerTagLike(t) === null)
+      && ["Fix the agent tag docs", "Talk to the agent.", "C#", "F# and C# notes", "Issue #123", "Ship it #team", "Caf\u00e9 run #\u043f\u043b\u0430\u043d", "Email the agent about #agents", "#1 priority"].every((t) => memberChangeError(b, shared.addCard(b, { title: t }).board) === null && ownerTagInTitle(t) === null)));
     ok("a look-alike the owner put on a card themselves doesn't lock a member out of the card", safe(() => {
       const mine = { ...b, cards: b.cards.map((c) => ({ ...c, tags: ["ship_ok", "team"] })) };
       return memberChangeError(mine, shared.updateCard(mine, card.id, { notes: "fine" })) === null && memberChangeError(mine, shared.updateCard(mine, card.id, { tags: ["ship_ok", "team", "more"] })) === null;
@@ -1283,20 +1293,28 @@ section("a member can't steer the owner's agents");
   ok("or by ending its title with one", codeOf(await writerSock.rpc("updateCard", [plainCard, { title: "A writer's plain card #agent" }])) === "owner_tag");
 
   // 1b. Or one that only looks like it, to the owner reading the board or to an agent that matches loosely.
-  for (const [what, tag] of [["a Cyrillic а", "\u0430gent"], ["a Cyrillic т", "agen\u0442"], ["fullwidth letters", "\uff41\uff47\uff45\uff4e\uff54"], ["ship_ok", "ship_ok"], ["shipok", "shipok"], ["agent-", "agent-"], ["_agent", "_agent"], ["needs_ceo", "needs_ceo"]]) {
+  for (const [what, tag] of [["a Cyrillic а", "\u0430gent"], ["a Cyrillic т", "agen\u0442"], ["fullwidth letters", "\uff41\uff47\uff45\uff4e\uff54"], ["ship_ok", "ship_ok"], ["shipok", "shipok"], ["agent-", "agent-"], ["_agent", "_agent"], ["needs_ceo", "needs_ceo"],
+    ["a digit for a letter", "ag3nt"], ["a zero for an o", "ship-0k"], ["a t with a stroke", "agen\u0167"], ["a g with a hook", "a\u0260ent"], ["a click letter for an l", "gaunt\u01c0et"], ["Cherokee letters", "\uab7a\uab90\uab7c\uab91\uab72"], ["Lisu letters", "\ua4ee\ua4d6\ua4f0\ua4e0\ua4d4"]]) {
     const add = await writerSock.rpc("addCard", [todo, `Look-alike ${what}`, false, { tags: [tag] }]);
     const put = await writerSock.rpc("updateCard", [plainCard, { tags: ["team", tag] }]);
     const list = await writerSock.rpc("addCards", [todo, [{ title: `Look-alike in a list ${what}`, tags: [tag] }]]);
-    ok(`a writer can't use a tag that reads as an owner tag (${what}): refused with the reason`, add.success === false && codeOf(add) === "owner_tag" && /Only the board's owner can put #(agent|needs-ceo|ship-ok) on a card/.test(add.error) && put.success === false && codeOf(put) === "owner_tag" && list.result?.ids?.length === 0 && rules.errorCode(list.result.left[0].error) === "owner_tag", [add, put, list.result]);
+    ok(`a writer can't use a tag that reads as an owner tag (${what}): refused with the reason`, add.success === false && codeOf(add) === "owner_tag" && /Only the board's owner can put #(agent|gauntlet|needs-ceo|ship-ok) on a card/.test(add.error) && put.success === false && codeOf(put) === "owner_tag" && list.result?.ids?.length === 0 && rules.errorCode(list.result.left[0].error) === "owner_tag", [add, put, list.result]);
   }
-  for (const [what, title] of [["a full stop", "Do evil #agent."], ["a zero-width space", "Do evil #agent\u200b"], ["a word joiner", "Do evil #agent\u2060"], ["a Cyrillic а", "Do evil #\u0430gent"], ["a fullwidth #", "Do evil \uff03agent"]]) {
+  for (const [what, title] of [["a full stop", "Do evil #agent."], ["a zero-width space", "Do evil #agent\u200b"], ["a word joiner", "Do evil #agent\u2060"], ["a Cyrillic а", "Do evil #\u0430gent"], ["a fullwidth #", "Do evil \uff03agent"],
+    ["the tag in the middle", "Do #agent evil"], ["an emoji after it", "Do evil #agent \u{1f525}"], ["the tag in brackets", "Do evil [#agent]"]]) {
     const add = await writerSock.rpc("addCard", [todo, title]);
     const put = await writerSock.rpc("updateCard", [plainCard, { title }]);
-    ok(`a writer's title can't end in what reads as #agent (${what})`, add.success === false && codeOf(add) === "owner_tag" && put.success === false && codeOf(put) === "owner_tag", [add, put]);
+    ok(`a writer's title can't hold what reads as #agent (${what})`, add.success === false && codeOf(add) === "owner_tag" && put.success === false && codeOf(put) === "owner_tag", [add, put]);
   }
   await sleep(300);
   ok("none of those look-alikes is on the board, as a tag or at the end of a title", safe(() => !ownerSock.state().cards.some((c) => c.title.startsWith("Look-alike") || c.title.startsWith("Do evil") || (c.tags ?? []).some((t) => t !== rules.ownerTagLike(t) && rules.ownerTagLike(t)))), ownerSock.state().cards.filter((c) => c.title.startsWith("Look-alike") || c.title.startsWith("Do evil")).map((c) => [c.title, c.tags]));
   ok("the writer's own card kept its title and tags through all of it", cardOf(plainCard).title === "A writer's plain card" && cardOf(plainCard).tags.join() === "team", cardOf(plainCard));
+  {
+    const fine = await writerSock.rpc("addCard", [todo, "Talk to the agent about #agents", false, { tags: ["agents", "urgent", "reagent", "agency", "shipping", "ship", "ok", "\u0430\u0433\u0435\u043d\u0442"] }]);
+    await sleep(200);
+    ok("words that only sit near an owner tag are still a writer's to use: agents, urgent, reagent, agency, shipping, ship, ok, and Russian агент", fine.success === true && cardOf(fine.result)?.tags.join() === "agents,urgent,reagent,agency,shipping,ship,ok,\u0430\u0433\u0435\u043d\u0442", fine);
+    if (fine.result) await writerSock.rpc("deleteCard", [fine.result]);
+  }
 
   // 1c. Arguments of the wrong type: refused in plain words, with nothing stored.
   {

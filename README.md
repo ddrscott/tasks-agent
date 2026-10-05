@@ -1547,23 +1547,38 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   `addCards`, `updateCard`, the assistant's tools, a tag typed with a `#`, in capitals, or
   with spaces around it (tags are cleaned before they're compared). The refusal is
   `[owner_tag] Only the board's owner can put #agent on a card or take it off. …`. A title
-  that ends in one (`Do evil #agent`, the way quick add reads a tag) is refused the same way,
-  so a card can't land looking like the tag took. `#agent` in the middle of a title is a word.
+  that holds one with its `#`, anywhere (`Do evil #agent`, `Do #agent evil`, `[#agent]`,
+  `Do evil #agent` with an emoji after it), is refused the same way, so a card can't land
+  looking like the tag took (`ownerTagInTitle`). It used to check only the end of the title.
+  "Talk to the agent" and `#agents` are words.
 - **Or one that only reads as one.** A member's tag is compared by how it reads, not by its
-  code points (`ownerTagLike` in `src/member-rules.ts`): compatibility forms are unfolded
-  (NFKD, so fullwidth `\uff41\uff47\uff45\uff4e\uff54` is `agent`), accents and invisible characters come
-  out (zero-width spaces and joiners, the soft hyphen, direction marks, blank filler letters),
-  Cyrillic, Greek, Armenian, and odd Latin letters that are drawn like a plain Latin one are
-  read as that one (`LOOKS_LIKE`, the common ones, not every such letter Unicode has), and
-  everything that isn't a letter or a digit is left out. So `\u0430gent` with a Cyrillic \u0430,
-  `agen\u0442`, `ship_ok`, `shipok`, `agent-`, `_agent`, and `needs_ceo` are all refused, with
-  the same reason and what it was read as: `[owner_tag] #ship_ok reads as #ship-ok. Only the
-  board's owner can put #ship-ok on a card …`. A title is read the same way before its last
-  words are checked, so `Do evil #agent.`, `#agent` followed by a zero-width space, and
-  `\uff03agent` with a fullwidth # are refused too. Only what a member adds is judged: the
-  owner's own tags are stored exactly as typed, a look-alike the owner put on a card doesn't
-  lock members out of it, and a member's tag that reads like nothing of the owner's
-  (`agents`, `re-agent`, a word in Russian or Japanese) is theirs to use.
+  code points (`ownerTagLike` in `src/member-rules.ts`). The reading is rules first and a table
+  second, because no table of look-alike letters is ever complete:
+  1. Compatibility forms are unfolded (NFKD, so fullwidth `\uff41\uff47\uff45\uff4e\uff54` is `agent`), accents and
+     invisible characters come out, and everything that isn't a letter or a digit is dropped:
+     `ship_ok`, `shipok`, `agent-`, `_agent`, `needs_ceo`.
+  2. A digit reads as itself or as the letter it's used for (0 o, 1 l or i, 3 e, 4 a, 5 s,
+     6 g, 7 t, 8 b, 9 g): `ag3nt`, `ship-0k`, `needs-ce0`.
+  3. A letter of another alphabet that's drawn like a Latin one reads as that one
+     (`LOOKS_LIKE`: Cyrillic, Greek, Armenian, Cherokee, Lisu, some odd Latin): `\u0430gent` with
+     a Cyrillic \u0430, `agen\u0442`.
+  4. Any other Latin-script letter outside a to z reads as whatever letter is needed, since
+     each is some Latin letter with something done to it: `agen\u0167`, `a\u0260ent`, both at once, or
+     every letter from IPA. So does an unknown letter of any script mixed in with plain a to z.
+  5. A tag with any letter outside a to z is also refused when it's one letter away from an
+     owner tag (swapped, added, or missing), which covers a look-alike nothing above knows.
+
+  The refusal says what it was read as: `[owner_tag] #ship_ok reads as #ship-ok. Only the
+  board's owner can put #ship-ok on a card …`. A title's `#` words are read the same way, and
+  `\uff03agent` with a fullwidth # counts. Plain a-to-z words are only ever judged by 1 and 2,
+  so `agents`, `urgent`, `reagent`, `agency`, `shipping`, `ship`, `ok`, and `agent2` are a
+  member's to use, and so is a word in another alphabet that isn't a letter away from an
+  owner tag (Russian `\u0430\u0433\u0435\u043d\u0442` reads `areht`). **What it costs:** a real word in another
+  alphabet that happens to be one letter from an owner tag after rule 3 is refused too
+  (Russian `\u0430\u0434\u0435\u043f\u0442`). **What it doesn't catch:** plain a-to-z near-misses that only
+  look close in some fonts (`aqent`, `agemt`); refusing those would refuse `agents` and
+  `urgent` by the same rule. Only what a member adds is judged: the owner's own tags are stored
+  exactly as typed, and a look-alike the owner put on a card doesn't lock members out of it.
 - **A card tagged `agent` or `gauntlet` is read only to members.** No edit to its title,
   notes, due date, tags, or checkboxes, no move, no delete, no file added or removed
   (`[agent_card] That card is a work order for the owner's agents …`). The order of those

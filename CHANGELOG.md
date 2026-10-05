@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - If a card you're editing on a shared board turns read only under you (you were made a viewer, the owner's plan lapsed, or the owner tagged it for an agent), what you typed stays on screen to copy, with a note that it wasn't saved. It used to vanish
 - In the audit log, a run of deleted cards by one person (clearing a lane, say) shows as one line you can open, like "Deleted 733 cards", so invites and role changes aren't buried. The downloads still list every card
 - Your audit log names an admin on a plan change only when that admin's own Pro switch caused it. A subscription that lapsed moments after an admin edited your account used to be put down to that admin
+- On a shared board a member can't use more tags that only look like yours: a digit for a letter (`ag3nt`, `ship-0k`), an odd Latin letter, or Cherokee or Lisu letters drawn like Latin ones. A member's title can't hold `#agent` anywhere in it, not only at the end
 
 ## [0.2.0] - 2026-10-04
 

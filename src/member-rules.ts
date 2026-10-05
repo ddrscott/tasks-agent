@@ -178,38 +178,105 @@ export const OWNER_TAGS: readonly string[] = [AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO
 export const isOwnerTag = (tag: string) => OWNER_TAGS.includes(tag);
 
 // A tag doesn't have to be an owner tag to be read as one. `\u0430gent` with a Cyrillic \u0430,
-// `\uff41\uff47\uff45\uff4e\uff54` in fullwidth letters, `ship_ok`, `shipok`, and `agent-` all look like the
-// owner's on a card's face, and an agent that matches tags loosely would take them. So what a
-// member adds is compared by how it reads, not by its code points (`ownerTagLike`). Only the
-// comparison is folded: the owner's own tags are stored as typed, and so is a member's tag
-// that reads like nothing of the owner's.
+// `\uff41\uff47\uff45\uff4e\uff54` in fullwidth letters, `ship_ok`, `shipok`, `agent-`, `ag3nt`, and `agen\u0167`
+// all look like the owner's on a card's face, and an agent that matches tags loosely would
+// take them. So what a member adds is compared by how it reads, not by its code points
+// (`ownerTagLike`). Only the comparison is folded: the owner's own tags are stored as typed,
+// and so is a member's tag that reads like nothing of the owner's.
+//
+// The reading is built from rules first and a table second, because no table of look-alike
+// letters is ever complete:
+//
+//  1. Compatibility forms are unfolded (NFKD: fullwidth, ligatures, superscripts, math
+//     alphabets), accents and invisible characters come out, everything is lower-cased, and
+//     whatever isn't a letter or a digit is dropped. `ship-ok`, `ship_ok`, `shipok` are one.
+//  2. A digit reads as itself or as the letter it's used for (0 o, 1 l or i, 3 e, 4 a, 5 s,
+//     6 g, 7 t, 8 b, 9 g).
+//  3. A letter of another alphabet that's drawn like a Latin one reads as that one
+//     (`LOOKS_LIKE`: Cyrillic, Greek, Armenian, Cherokee, Lisu, and some odd Latin).
+//  4. Any other Latin-script letter outside a to z (\u0167, \u0260, \u01ad, an IPA letter) reads as
+//     whatever letter is needed: every one of them is some Latin letter with something done
+//     to it. So does an unknown letter of any script when it's mixed in with plain a to z.
+//  5. A tag that reads exactly as an owner tag under 1 to 4 is refused. A tag that has any
+//     letter outside a to z is also refused when it's one letter away from one (one letter
+//     swapped, added, or missing), which covers a look-alike nothing above knows.
+//
+// Plain a-to-z words are only ever judged by rules 1 and 2, so `agents`, `urgent`, `reagent`,
+// `agency`, `shipping`, `ship`, `ok`, and `agent2` are a member's to use. So is a word in
+// another alphabet that isn't a letter away from an owner tag: Russian `\u0430\u0433\u0435\u043d\u0442` reads `areht`.
 
 /** Characters that take no room on screen: zero-width spaces and joiners, the soft hyphen, direction marks, variation selectors, and blank filler letters. */
 const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0]|\udb40[\udc00-\uddef]/g;
-/** Letters of other alphabets, and Latin letters outside a to z, that are drawn like a plain Latin one. Not every such letter there is: the common ones. */
-const LOOKS_LIKE: Readonly<Record<string, string>> = {
-  // Cyrillic
-  "\u0430": "a", "\u0432": "b", "\u0441": "c", "\u0501": "d", "\u0435": "e", "\u050d": "g", "\u04bb": "h", "\u043d": "h", "\u0456": "i", "\u0458": "j", "\u043a": "k", "\u04cf": "l", "\u043c": "m",
-  "\u043f": "n", "\u043e": "o", "\u0440": "p", "\u051b": "q", "\u0433": "r", "\u0455": "s", "\u0442": "t", "\u0438": "u", "\u051d": "w", "\u0445": "x", "\u0443": "y",
-  // Greek
-  "\u03b1": "a", "\u03b2": "b", "\u03b5": "e", "\u03b7": "n", "\u03b9": "i", "\u03ba": "k", "\u03bd": "v", "\u03bf": "o", "\u03c1": "p", "\u03c2": "s", "\u03c3": "o", "\u03c4": "t", "\u03c5": "u", "\u03c7": "x", "\u03b3": "y",
-  // Armenian
-  "\u0581": "g", "\u0570": "h", "\u0578": "n", "\u057d": "u", "\u0585": "o",
-  // Latin letters outside a to z: script and small-capital forms, and letters with a stroke
-  "\u0251": "a", "\u1d00": "a", "\u1d04": "c", "\u0111": "d", "\u1d07": "e", "\u0261": "g", "\u0262": "g", "\u01e5": "g", "\u0127": "h", "\u029c": "h", "\u0131": "i", "\u0269": "i", "\u026a": "i",
-  "\u1d0b": "k", "\u0142": "l", "\u029f": "l", "\u0274": "n", "\u00f8": "o", "\u1d0f": "o", "\u1d18": "p", "\ua731": "s", "\u1d1b": "t", "\u1d1c": "u",
-};
+/** Letters of other alphabets, and Latin letters outside a to z, that are drawn like a plain Latin one. Not every such letter there is: the common ones. Rules 4 and 5 above are for the rest. */
+const LOOKS_LIKE: Readonly<Record<string, string>> = (() => {
+  const t: Record<string, string> = {
+    // Cyrillic
+    "\u0430": "a", "\u0432": "b", "\u0441": "c", "\u0501": "d", "\u0435": "e", "\u050d": "g", "\u04bb": "h", "\u043d": "h", "\u0456": "i", "\u0458": "j", "\u043a": "k", "\u04cf": "l", "\u043c": "m",
+    "\u043f": "n", "\u043e": "o", "\u0440": "p", "\u051b": "q", "\u0433": "r", "\u0455": "s", "\u0442": "t", "\u0438": "u", "\u051d": "w", "\u0445": "x", "\u0443": "y",
+    // Greek
+    "\u03b1": "a", "\u03b2": "b", "\u03b5": "e", "\u03b7": "n", "\u03b9": "i", "\u03ba": "k", "\u03bd": "v", "\u03bf": "o", "\u03c1": "p", "\u03c2": "s", "\u03c3": "o", "\u03c4": "t", "\u03c5": "u", "\u03c7": "x", "\u03b3": "y",
+    // Armenian
+    "\u0581": "g", "\u0570": "h", "\u0578": "n", "\u057d": "u", "\u0585": "o",
+    // Latin letters outside a to z: script and small-capital forms, and letters with a stroke
+    "\u0251": "a", "\u1d00": "a", "\u1d04": "c", "\u0111": "d", "\u1d07": "e", "\u0261": "g", "\u0262": "g", "\u01e5": "g", "\u0127": "h", "\u029c": "h", "\u0131": "i", "\u0269": "i", "\u026a": "i",
+    "\u1d0b": "k", "\u0142": "l", "\u029f": "l", "\u0274": "n", "\u00f8": "o", "\u1d0f": "o", "\u1d18": "p", "\ua731": "s", "\u1d1b": "t", "\u1d1c": "u",
+  };
+  // Cherokee and Lisu each hold a set of letters drawn like Latin capitals. Cherokee has two
+  // cases, and lower-casing turns one into the other, so both are filled in from one list.
+  const cherokee: Record<string, string> = {
+    "\u13aa": "a", "\u13f4": "b", "\u13df": "c", "\u13a0": "d", "\u13ac": "e", "\u13c0": "g", "\u13bb": "h", "\u13a5": "i", "\u13ab": "j", "\u13e6": "k", "\u13de": "l", "\u13b7": "m",
+    "\u13c1": "n", "\u13be": "o", "\u13e2": "p", "\u13a1": "r", "\u13da": "s", "\u13d5": "s", "\u13a2": "t", "\u13d9": "v", "\u13cc": "u", "\u13b3": "w", "\u13d4": "w", "\u13c3": "z", "\u13a9": "y",
+  };
+  for (const [ch, as] of Object.entries(cherokee)) { t[ch] = as; t[ch.toLowerCase()] = as; }
+  const lisu = "bp.dt.gk.jc.zf.mnlsr..vh..wxy.a.e.iou...";
+  [...lisu].forEach((as, i) => { if (as !== ".") t[String.fromCodePoint(0xa4d0 + i)] = as; });
+  return t;
+})();
+/** What a digit can stand in for. */
+const DIGIT_AS: Readonly<Record<string, string>> = { "0": "o", "1": "li", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g" };
+const ANY = "*";
 /**
- * How a tag reads: compatibility forms unfolded (fullwidth, ligatures), accents and invisible
- * characters dropped, lower case, look-alike letters as the Latin ones they resemble, and
- * everything that isn't a letter or a digit left out, so `ship-ok`, `ship_ok`, and `shipok`
- * are one thing.
+ * How a tag reads, one entry per character: the letters it can be taken for (`*` for any).
+ * `odd` says it has a letter outside a to z, which is what turns on the one-letter-away rule.
  */
-const reading = (s: string) =>
-  s.normalize("NFKD").replace(/\p{M}/gu, "").replace(INVISIBLE, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/./gu, (ch) => LOOKS_LIKE[ch] ?? ch);
-const OWNER_READINGS: ReadonlyMap<string, string> = new Map(OWNER_TAGS.map((t) => [reading(t), t]));
-/** The owner tag that `tag` is, or reads as: `agent` for `agent`, for `\u0430gent`, and for `agent-`. Null for a tag that's nobody's but the member's. */
-export const ownerTagLike = (tag: unknown): string | null => (typeof tag === "string" ? OWNER_READINGS.get(reading(tag)) ?? null : null);
+function readingOf(s: string): { cells: string[]; odd: boolean } {
+  const chars = [...s.normalize("NFKD").replace(/\p{M}/gu, "").replace(INVISIBLE, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")];
+  const plain = chars.some((ch) => ch >= "a" && ch <= "z");
+  let odd = false;
+  const cells = chars.map((ch) => {
+    if (ch >= "a" && ch <= "z") return ch;
+    if (ch >= "0" && ch <= "9") return ch + (DIGIT_AS[ch] ?? "");
+    if (/\p{L}/u.test(ch)) odd = true;
+    const like = LOOKS_LIKE[ch];
+    if (like) return like;
+    return /\p{Script=Latin}/u.test(ch) || (plain && /\p{L}/u.test(ch)) ? ANY : ch;
+  });
+  return { cells, odd };
+}
+const fits = (cell: string, ch: string) => cell === ANY || cell.includes(ch);
+/** Whether `cells` reads as `word`, letter for letter. */
+const readsAs = (cells: string[], word: string) => cells.length === word.length && cells.every((cell, i) => fits(cell, word[i]));
+/** Whether `cells` is `word` with at most one letter swapped, added, or missing. */
+function oneAway(cells: string[], word: string): boolean {
+  if (Math.abs(cells.length - word.length) > 1) return false;
+  let prev = Array.from({ length: word.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= cells.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= word.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (fits(cells[i - 1], word[j - 1]) ? 0 : 1));
+    prev = row;
+  }
+  return prev[word.length] <= 1;
+}
+const OWNER_READINGS: readonly (readonly [string, string])[] = OWNER_TAGS.map((t) => [t.replace(/[^a-z0-9]/g, ""), t] as const);
+/** The owner tag that `tag` is, or reads as: `agent` for `agent`, for `\u0430gent`, for `ag3nt`, and for `agent-`. Null for a tag that's nobody's but the member's. */
+export function ownerTagLike(tag: unknown): string | null {
+  if (typeof tag !== "string" || tag.length > 200) return null;
+  const { cells, odd } = readingOf(tag);
+  if (!cells.length) return null;
+  for (const [word, owner] of OWNER_READINGS) if (readsAs(cells, word)) return owner;
+  if (odd) for (const [word, owner] of OWNER_READINGS) if (oneAway(cells, word)) return owner;
+  return null;
+}
 /** A card that's a work order for the owner's agents (`agent` or `gauntlet`): read only to members. */
 export const isAgentCard = (c: Pick<Card, "tags">) => forAgent(c as Card);
 /** Which owner tag a member is trying to add or remove between two versions of a card, if any. */
@@ -231,17 +298,16 @@ function lookalikeAdded(p: Card | undefined, c: Card): [string, string] | null {
   return null;
 }
 /**
- * An owner tag typed at the end of a title ("Do evil #agent"), the way quick add reads tags.
- * It isn't a tag there, but it looks like one that took, so a member's title can't end in it.
+ * An owner tag written into a title with its `#` ("Do evil #agent", "Do #agent evil",
+ * "[#agent]"). It isn't a tag there, but on a card's face it looks like one that took, and a
+ * model reading the title sees the same thing. So a member's title can't hold one anywhere.
+ * `#agents` and "talk to the agent" are just words.
  */
 export function ownerTagInTitle(title: string): string | null {
-  // Read the way it shows: `\uff03agent` is #agent, an invisible character after the tag isn't
-  // there, and neither is the full stop in `Do evil #agent.`
-  const words = title.normalize("NFKC").replace(INVISIBLE, "").trim().split(/[\s\p{Z}]+/u).filter(Boolean);
-  while (words.length > 1) {
-    const w = words.pop()!.replace(/[^\p{L}\p{N}_#-]+$/u, "");
-    if (!/^#[^#]{1,64}$/u.test(w)) return null;
-    const tag = ownerTagLike(w.slice(1));
+  // Read the way it shows: `\uff03agent` is #agent, and an invisible character inside the tag isn't there.
+  const shown = title.normalize("NFKC").replace(INVISIBLE, "");
+  for (const m of shown.matchAll(/[#\u266f\u2317]([\p{L}\p{N}\p{M}_-]{1,64})/gu)) {
+    const tag = ownerTagLike(m[1]);
     if (tag) return tag;
   }
   return null;

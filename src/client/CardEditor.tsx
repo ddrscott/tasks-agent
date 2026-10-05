@@ -240,7 +240,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
     // What they typed, when it only reads as the owner's tag (`ship_ok`, a look-alike letter).
     const typed = inTags ? patch.tags!.find((t) => !(card.tags ?? []).includes(t) && ownerTagLike(t) === inTags) : undefined;
     if (inTags) setError(`${OWNER_TAG_NOTE(inTags, who, typed)} ${typed ? `Take ${typed} out of Tags` : `Put ${inTags} back in Tags`} to save.`);
-    else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who)} Take #${inTitle} off the end of the title to save.`);
+    else if (inTitle) setError(`${OWNER_TAG_NOTE(inTitle, who)} Take the # tag out of the title to save.`);
     return !!(inTags || inTitle);
   }
 
