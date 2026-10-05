@@ -1821,7 +1821,10 @@ and `GET /tasks/api/attachments/<attachment id>?board=<owner id>`. A viewer's up
 `403 {"error":"…","code":"read_only"}`. Anyone without access, a bad id, and a staged upload
 (`stage=1`) by a member are `404 {"error":"not found"}`. A member can download only files on
 the board right now (not ones undo could bring back), and their copies are `Cache-Control: no-store`.
-Uploads land under the owner's prefix and count against the owner's quota. Both calls answer
+Uploads land under the owner's prefix and count against the owner's quota. Each file on the
+board records who uploaded it, `by: { email, role: "owner" | "member" }`, written by the board
+from the connection (**What a member puts on a card stays marked as theirs**), and a member's
+file name has invisible characters taken out. Both calls answer
 `429 slow_down` with `Retry-After` past the HTTP allowance (**What a member can cost you**), and an
 upload to a card tagged `#agent` or `#gauntlet` is `403 agent_card`.
 
@@ -2033,7 +2036,8 @@ address or a guess, and nothing on screen offers a change the server would refus
   changed a card on it. A board only its owner has ever touched shows none, so a solo board
   looks the way it always did (`WhoContext` in `src/client/member.tsx`).
 - **Attachments** on a shared board go through `?board=`. A viewer gets Open and Download and
-  no Attach or Remove.
+  no Attach or Remove. A file a member attached says "attached by dana@example.com, a member"
+  under its name.
 
 ## // SEARCH
 

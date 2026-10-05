@@ -16,7 +16,7 @@ import { describeSession } from "./presence";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 import { WAIT_SECONDS, workingRules } from "./agent-rules";
-import { askState } from "./shared";
+import { askState, fileMember, fileNote } from "./shared";
 
 export const MCP_PATH = "/tasks/mcp";
 
@@ -141,22 +141,27 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       for (const a of card.attachments) {
         const image = IMAGE_TYPES.has(a.type);
         if (!image && !TEXT_TYPES.test(a.type)) continue;
+        // A file a member attached says so right here, on the line that names it, directly above
+        // what's in it: the board recorded who uploaded it (Attachment.by), and an agent reading
+        // the contents can't have missed whose they are. The card's text said it once already.
+        const member = fileMember(a, user.email);
+        const whose = member ? ` — ${fileNote(member)}` : "";
         if (image && (a.size > MAX_IMAGE_BYTES || imageBytes + a.size > MAX_IMAGES_TOTAL_BYTES)) {
-          content.push({ type: "text", text: `[${a.id}] ${a.name} is too large to include here. The owner can open it in the app.` });
+          content.push({ type: "text", text: `[${a.id}] ${a.name}${member ? `${whose} It's` : " is"} too large to include here. The owner can open it in the app.` });
           continue;
         }
         if (!image && a.size > MAX_TEXT_BYTES) continue;
         // Keys start with the user id (attachments.ts), so this can only reach the token owner's files.
         const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
         if (!obj || obj.customMetadata?.sealed === "1") {
-          content.push({ type: "text", text: `[${a.id}] ${a.name} couldn't be read.` });
+          content.push({ type: "text", text: `[${a.id}] ${a.name}${member ? `${whose} It` : ""} couldn't be read.` });
           continue;
         }
         if (image) {
           imageBytes += a.size;
-          content.push({ type: "text", text: `[${a.id}] ${a.name}:` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
+          content.push({ type: "text", text: `[${a.id}] ${a.name}${whose}${member ? " The image:" : ":"}` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
         } else {
-          content.push({ type: "text", text: `[${a.id}] ${a.name}:\n${await obj.text()}` });
+          content.push({ type: "text", text: `[${a.id}] ${a.name}${whose}${member ? " What the file says:" : ":"}\n${await obj.text()}` });
         }
       }
       return { content };

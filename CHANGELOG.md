@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board a member can't use a tag that only looks like one of yours either: `ship_ok`, `agent-`, or `agent` spelled with a look-alike letter from another alphabet is refused, and so is a title that ends in one behind a full stop or an invisible character
 - A card a member wrote keeps saying so after you move it, tag it, or answer a question on it. Agents see it in `get_card`, `get_board`, and on the event feed (`member`), and you see "words by" on the card
 - When someone leaves your board, your open board says who
+- Every file on a shared board records who uploaded it. A file a member attached says "attached by" them under its name, and your agents are told it's a member's file, not yours, right where `get_card` shows the file's name and what's in it
 - "These words are mine now", in the card editor on your own board: the one way a member's mark comes off a card. The editor says what the mark does, next to the button
 
 ### Changed

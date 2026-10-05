@@ -1647,6 +1647,10 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .member-words-mark { flex: none; color: var(--accent); font-weight: 700; }
 .member-words-act { display: flex; }
 .member-words-act .btn { height: 30px; font-size: 12px; }
+/* A file a member attached says so under its name. */
+.att-main { min-width: 0; display: flex; flex-direction: column; }
+.att-main .att-name { display: block; }
+.att-by { font: 11px/1.4 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .dialog-body .tag-lock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .card-by { margin-top: 6px; display: flex; flex-wrap: wrap; column-gap: 5px; min-width: 0; font: 11px/1.4 var(--font-mono); color: var(--muted); }
 .card-by-who { min-width: 0; overflow-wrap: anywhere; }

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Attachment } from "../shared";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { fileMember, type Attachment } from "../shared";
 import { api } from "./base";
 import { IconClip, IconClose } from "./icons";
+import { WhoContext } from "./member";
 import { openSealedFile, uploadSealed } from "./migrate";
 import type { Vault } from "./vault";
 
@@ -79,6 +80,8 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget, 
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  // A file a member attached says so on its row (`by` on the attachment, written by the board).
+  const who = useContext(WhoContext);
 
   // One at a time, so each upload's quota check sees the ones before it.
   const add = useCallback(async (files: File[]) => {
@@ -148,7 +151,10 @@ export function Attachments({ cardId, vault, attachments, onRemove, dropTarget, 
               <a className="att-thumb" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer" title={`Open ${a.name}`}>
                 {isImage(a) ? <img src={fileUrl(a, false, board)} alt="" loading="lazy" /> : <span>{(a.name.split(".").pop() ?? "").slice(0, 4) || "file"}</span>}
               </a>
-              <a className="att-name" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer">{a.name}</a>
+              <span className="att-main">
+                <a className="att-name" href={fileUrl(a, false, board)} target="_blank" rel="noreferrer">{a.name}</a>
+                {fileMember(a) && <span className="att-by" title={new Date(a.addedAt).toLocaleString()}>attached by {fileMember(a) === who?.me ? "you" : fileMember(a)}, a member</span>}
+              </span>
               <span className="att-size">{formatBytes(a.size)}</span>
               <a className="btn ghost" href={fileUrl(a, true, board)} download={a.name} title="Download" aria-label={`Download ${a.name}`}>↓</a>
               {!readOnly && <button type="button" className="btn ghost icon" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.id)}><IconClose /></button>}

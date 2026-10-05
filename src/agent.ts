@@ -824,7 +824,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   async attach(cardId: string, att: Attachment, who?: { id: string; email: string }): Promise<{ ok: true } | { ok: false; error: string }> {
     try {
-      await this.asUser(who, undefined, () => this.mutate("Attach file", (b) => ops.addAttachment(b, cardId, att)));
+      // Who uploaded it is written by `stampBy`, from the caller `asUser` just checked: the
+      // owner, or a member this object looked up itself. Whatever `att` says about that is dropped.
+      const { by: _, ...file } = att;
+      await this.asUser(who, undefined, () => this.mutate("Attach file", (b) => ops.addAttachment(b, cardId, file)));
       return { ok: true };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
