@@ -1782,7 +1782,9 @@ hyphen, blank filler letters, invisible math operators; and half of a surrogate 
 that's empty after that is refused in words, alone or as a line of a pasted list, so there's
 no blank card. A member's file name gets the same, strictly (`cleanName` in
 `src/attachments.ts`), so `invoice` + a right-to-left override + `txt.exe` is stored as
-`invoicetxt.exe`. Two kinds of zero-width character do something a person sees and are kept
+`invoicetxt.exe`. Control characters come out of every file name, C1 as well as C0 (U+0085,
+"next line", used to get through, and a name holding one could be laid out as two rows of a
+file list), along with the line and paragraph separators. Two kinds of zero-width character do something a person sees and are kept
 where they do: a joiner between two emoji (a family, a flag) or between two letters of a script
 that shapes with them (Arabic, Syriac, N'Ko, Mongolian, the Indic scripts), and a variation
 selector right after a visible character (the heart that's red). Anywhere else, and always in

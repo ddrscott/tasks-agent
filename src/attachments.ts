@@ -39,11 +39,16 @@ const limit = (v: string | undefined, fallback: number) => (Number(v) > 0 ? Numb
  * `member`: the upload is a member's. Their file's name is words on the owner's board like any
  * others, so what can't be seen comes out of it (visibleText in member-rules.ts): direction
  * overrides that make `exe.txt` read as `txt.exe`, zero-width characters, hidden tag characters.
+ * Control characters come out of everyone's.
  */
 function cleanName(raw: string | null, member = false): string {
   let name = "file";
   try { name = decodeURIComponent(raw ?? "") || name; } catch { /* keep default */ }
-  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f"]/g, "");
+  // No control characters, the same rule a title is held to (CONTROL in member-rules.ts): the
+  // C0 set, DEL, and the C1 set too. U+0085 is "next line" in there, and a name holding one
+  // could be laid out as two lines, the second shaped like another file's row. The line and
+  // paragraph separators go for the same reason.
+  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029"]/g, "");
   if (member) name = visibleText(name, true).replace(/\s+/g, " ");
   return (name.trim() || "file").slice(0, 200);
 }
