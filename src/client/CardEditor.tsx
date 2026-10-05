@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { isOwnerTag, ownerTagLike } from "../member-rules";
 import { AskBlock, AskOwnerContext } from "./Ask";
-import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
+import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, type Mode } from "./member";
 import { NoAgentLine } from "./AgentNudge";
 import { Attachments, NoFiles } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
@@ -40,6 +40,8 @@ type Props = {
   board?: string;
   /** On a shared board: it's view only because its owner's Pro plan lapsed, not because of your role. */
   lapsed?: boolean;
+  /** The owner's "These words are mine now": take the member's mark off this card. Only the owner's own board passes it. */
+  onClaim?(): void;
 };
 
 /**
@@ -139,7 +141,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft }: Props & { draft: React.MutableRefObject<Draft | null> }) {
+function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft, onClaim }: Props & { draft: React.MutableRefObject<Draft | null> }) {
   const ref = useRef<HTMLDialogElement>(null);
   // A writer can't finish or delete a card while its question is open: that would end the
   // agent's wait, which is the owner's call. Those controls aren't offered, and a line says why.
@@ -301,6 +303,8 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
         {/* Save and close first: answering rewrites the notes and tags this dialog is holding. */}
         <AskBlock card={card} before={save} />
         {held && <p className="held-note">{ASK_HOLDS(owner ?? "the board's owner")}</p>}
+        {/* The owner's own board: what a member put on this card, what that means, and the one way it comes off. */}
+        {(!mode || mode === "owner") && <MemberWords card={card} onClaim={onClaim} />}
         <div className="notes-read">
           <div className="notes-head">
             <span id="notes-label">Notes</span>
@@ -364,7 +368,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
         )}
         <div className="dialog-meta">
           created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
-          <ByLine card={card} />
+          <ByLine card={card} marks={!!mode && mode !== "owner"} />
         </div>
       </div>
       {guard.asking ? <DiscardBar onKeep={guard.keep} onDiscard={onClose} /> : (

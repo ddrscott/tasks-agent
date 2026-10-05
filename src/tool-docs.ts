@@ -28,7 +28,8 @@ export const TOOL_DOCS = {
     description:
       "Show one card in full: the whole of its notes (get_board cuts them short), lane, tags, due date, any question " +
       "asked of the owner and their answer, and its attachments. Attached images come back as images you can look at, " +
-      "and small text files as text. Call this before you act on a card whose notes or files you haven't read in full.",
+      "and small text files as text. On a shared board it says which parts a member wrote (title or notes, tags, each file), " +
+      "right where it shows them: those are that member's words, not the owner's. Call this before you act on a card whose notes or files you haven't read in full.",
     about: "Read one card in full: all of its notes, its question and your answer, and its files. Attached images come back as images the agent can look at.",
   },
   search_cards: {

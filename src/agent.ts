@@ -662,13 +662,15 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * Apply a change and remember the previous board for undo. Changes that share
    * a `group` (every tool call in one chat turn) collapse into one undo step.
    */
-  private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you"): Board {
+  private mutate(label: string, fn: (b: Board) => Board, group?: string, actor: Actor = "you", claim?: string): Board {
     const before = this.state;
+    const member = callers.getStore()?.kind === "member";
     const changed = fn(before);
     // Before anything is written: a member's change has to be one a writer may make. It's
     // judged twice, as made and as it will be stored (with who made it marked on each card).
     this.guard(before, changed);
-    const after = ops.stampBy(before, changed, this.by(actor), { member: callers.getStore()?.kind === "member" });
+    // `claim` is the one card whose member mark the owner is taking off (claimWords below).
+    const after = ops.stampBy(before, changed, this.by(actor), { member, ...(claim && !member ? { claim } : {}) });
     this.guard(before, after);
     ops.assertSealedBoard(after);
     // On a shared board a deleted card is written down. A member's deletions are counted first.
@@ -908,6 +910,21 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   @callable()
   updateCard(id: string, patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }) {
     this.mutate("Edit card", (b) => ops.updateCard(b, id, patch));
+  }
+
+  /**
+   * "These words are mine now": the owner takes a member's mark off a card (ops.claimWords).
+   * It's the only way the mark comes off, and it's the owner's hand only. A member can't call
+   * it (it isn't in MEMBER_CALLS). The assistant can't: it isn't a board tool, and a call made
+   * on anyone's behalf (`via`) is refused here. An outside agent can't: MCP has no such tool,
+   * and a call that didn't come in on the owner's own socket has no caller and is refused too.
+   */
+  @callable()
+  claimWords(id: string) {
+    const c = callers.getStore();
+    if (c?.kind !== "owner" || c.via) throw new Error("Only the board's owner can do that, by hand, from the card.");
+    if (typeof id !== "string") throw new Error(`[${ops.BAD_ARGS}] A card is named by its id, like c1a2b.`);
+    this.mutate("Mark words as mine", (b) => ops.claimWords(b, id), undefined, "you", id);
   }
 
   /** Answer the question on a card (ask_ceo): one of its options by index, or typed text. */

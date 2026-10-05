@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
-import { clean, doneLaneId, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
+import { clean, doneLaneId, memberTouch, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
@@ -757,7 +757,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const editingCard = board.cards.find((c) => c.id === editing);
   // Names on cards show once a board is shared: you're a member of it, or someone else has
   // changed a card on it. A board only its owner has touched shows none (member.tsx).
-  const showWho = member || board.cards.some((c) => (c.by && c.by.email !== me.email) || !!c.memberText);
+  const showWho = member || board.cards.some((c) => (c.by && c.by.email !== me.email) || !!memberTouch(c));
   const banner = access ? bannerText(access) : null;
 
   return (
@@ -914,6 +914,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
             void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).then(() => say(`Moved "${editingCard.title}" to ${to}`, true), refused);
           }}
           onDelete={() => { const t = editingCard.title; void agent.stub.deleteCard(editingCard.id).then(() => say(`Deleted "${t}"`, true, DESTRUCTIVE_TOAST_MS), refused); }}
+          onClaim={member ? undefined : () => void agent.stub.claimWords(editingCard.id).then(() => say("Marked as your words. Your agents will read this card as yours.", true), refused)}
           isDone={editingCard.laneId === doneLane}
           onToggleDone={doneLane ? () => {
             const reopen = editingCard.laneId === doneLane;

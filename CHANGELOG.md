@@ -34,8 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admins get an Admin page from the account menu: every account, with a switch to make someone an admin and a switch to give them Pro without a subscription. An email that hasn't signed in yet can be added ahead of time
 - Pro given by an admin counts for team boards like a paid plan: that owner can invite people, and if an admin takes it back, members can only look from that moment, on the boards they have open, until Pro returns
 - On a shared board a member can't use a tag that only looks like one of yours either: `ship_ok`, `agent-`, or `agent` spelled with a look-alike letter from another alphabet is refused, and so is a title that ends in one behind a full stop or an invisible character
-- A card a member wrote keeps saying so after you move it, tag it, or answer a question on it. Agents see it in `get_card`, `get_board`, and on the event feed (`memberText`), and you see "words by" on the card. It goes away only when you retitle the card and replace its notes yourself
+- A card a member wrote keeps saying so after you move it, tag it, or answer a question on it. Agents see it in `get_card`, `get_board`, and on the event feed (`member`), and you see "words by" on the card
 - When someone leaves your board, your open board says who
+- "These words are mine now", in the card editor on your own board: the one way a member's mark comes off a card. The editor says what the mark does, next to the button
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it
@@ -55,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board, a writer editing a card with an open question sees `#needs-ceo` locked under the Tags field, with the reason, instead of finding out on Save that they can't remove it
 - If a card you're editing on a shared board turns read only under you (you were made a viewer, the owner's plan lapsed, or the owner tagged it for an agent), what you typed stays on screen to copy, with a note that it wasn't saved. It used to vanish
 - In the audit log, a run of deleted cards by one person (clearing a lane, say) shows as one line you can open, like "Deleted 733 cards", so invites and role changes aren't buried. The downloads still list every card
+- A card a member wrote on stays marked however you edit it. The mark used to come off when an edit looked like a rewrite, which a one-letter fix to the title could set off and a full rewrite of the notes could miss. Now only "These words are mine now" takes it off
+- Tags a member puts on your card, or takes off it, are marked as theirs too, on the card and everywhere your agents read it
 - Your audit log names an admin on a plan change only when that admin's own Pro switch caused it. A subscription that lapsed moments after an admin edited your account used to be put down to that admin
 - On a shared board a member can't use more tags that only look like yours: a digit for a letter (`ag3nt`, `ship-0k`), an odd Latin letter, or Cherokee or Lisu letters drawn like Latin ones. A member's title can't hold `#agent` anywhere in it, not only at the end
 

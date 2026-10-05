@@ -1638,6 +1638,15 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .dialog-body .unsaved p { margin: 0; font-size: 13px; line-height: 1.5; }
 .dialog-body .unsaved label { display: flex; flex-direction: column; gap: 4px; font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .dialog-body .unsaved .field { font: 13px/1.5 var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--ink); resize: vertical; }
+/* The owner's editor, on a card a member wrote on: whose words, what the mark does, and the button that takes it off. */
+.member-words { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.member-words p { margin: 0; overflow-wrap: anywhere; }
+.member-words-who { display: flex; align-items: baseline; gap: 8px; color: var(--ink); }
+.member-words-who > span:last-child { min-width: 0; display: flex; flex-direction: column; }
+.member-words-who b { font-weight: 600; }
+.member-words-mark { flex: none; color: var(--accent); font-weight: 700; }
+.member-words-act { display: flex; }
+.member-words-act .btn { height: 30px; font-size: 12px; }
 .dialog-body .tag-lock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .card-by { margin-top: 6px; display: flex; flex-wrap: wrap; column-gap: 5px; min-width: 0; font: 11px/1.4 var(--font-mono); color: var(--muted); }
 .card-by-who { min-width: 0; overflow-wrap: anywhere; }

@@ -12,15 +12,20 @@
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { doneLaneId } from "./lanes";
-import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card, type MemberText } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, memberTouch, NEEDS_CEO_TAG, type Board, type Card, type MemberTouch } from "./shared";
 
 // The tags live in shared.ts, where the app can reach them too.
 export { AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
 
-/** `memberText` is there when a member wrote the card's title or notes (shared.ts): the words aren't the owner's, whoever made this change. */
-type CardRef = { id: string; title: string; lane: string; tags: string[]; memberText?: MemberText };
+/**
+ * `member` is there when a member put something on the card (memberTouch in shared.ts): `text`
+ * when they wrote its title or notes, `tags` when they last changed its tags, `files` for each
+ * file they attached, each with their email and when. Those parts aren't the owner's, whoever
+ * made the change this line reports.
+ */
+type CardRef = { id: string; title: string; lane: string; tags: string[]; member?: MemberTouch };
 /**
  * Who made the change an event reports. `role` is always "owner" on the feed: a member's
  * change never publishes (agentEvents). `via` is "app" for a change made by hand and
@@ -34,10 +39,10 @@ export type TaskEvent =
   | ({ type: "answered"; answer?: string; question?: string; by: EventBy } & CardRef)
   | { type: "hello"; cards: CardRef[] };
 
-const ref = (b: Board, c: Card): CardRef => ({
-  id: c.id, title: c.title, lane: b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId, tags: c.tags ?? [],
-  ...(c.memberText ? { memberText: c.memberText } : {}),
-});
+const ref = (b: Board, c: Card): CardRef => {
+  const member = memberTouch(c);
+  return { id: c.id, title: c.title, lane: b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId, tags: c.tags ?? [], ...(member ? { member } : {}) };
+};
 
 /**
  * What changed on #agent and #gauntlet cards between two boards, one event per card. "answered" means

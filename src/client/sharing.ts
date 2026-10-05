@@ -32,7 +32,7 @@ export function sharingFacts(members: number | null): Fact[] {
     },
     {
       q: "Can a member give my agents work?",
-      a: "No. The tags your agents act on (#agent, #gauntlet, #needs-ceo, #ship-ok) are yours alone: a member can't put one on a card or take one off, and a card that carries #agent or #gauntlet is read only to members. Only you can answer an agent's question.",
+      a: "No. The tags your agents act on (#agent, #gauntlet, #needs-ceo, #ship-ok) are yours alone: a member can't put one on a card or take one off, and a card that carries #agent or #gauntlet is read only to members. Only you can answer an agent's question. What a member writes, tags, or attaches on any other card is marked as theirs wherever your agents read it, and stays marked whatever you do to the card, until you press \"These words are mine now\" on it.",
     },
     {
       q: "Can a board have two owners?",

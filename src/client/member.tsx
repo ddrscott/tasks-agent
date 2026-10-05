@@ -5,7 +5,7 @@
 
 import { createContext, useContext } from "react";
 import { isAgentCard, ownerTagInTitle, ownerTagLike, type ActivityFrame } from "../member-rules";
-import type { By, Card } from "../shared";
+import { memberTouch, type By, type Card, type MemberTouch } from "../shared";
 
 /** A member's way into someone else's board, as the server reports it. */
 export type MemberAccess = {
@@ -205,48 +205,100 @@ export function joinRun(prev: ActivityRun | null, f: ActivityFrame, showing: num
 
 const verb = (c: Card) => (c.createdAt === c.updatedAt ? "Added" : "Edited");
 
-/** In the open card: "Edited by dana@example.com · 3m ago". Nothing on a board that isn't shared, or a card from before names were kept. */
-export function ByLine({ card }: { card: Card }) {
+/** In the open card: "Edited by dana@example.com · 3m ago". Nothing on a board that isn't shared, or a card from before names were kept. `marks` adds what a member wrote on it (WroteLine); the owner's editor says that in its own block (MemberWords). */
+export function ByLine({ card, marks = true }: { card: Card; marks?: boolean }) {
   const who = useContext(WhoContext);
   if (!who || !card.by) return null;
   return (
     <div className="by-line" title={new Date(card.updatedAt).toLocaleString()}>
       {verb(card)} by <b>{whoText(card.by, who.me)}</b> · {ago(card.updatedAt, who.now)}
-      <WroteLine card={card} />
+      {marks && <WroteLine card={card} />}
     </div>
   );
 }
 
 /**
- * Whose words the title and notes are, when they're a member's and the last change was someone
- * else's (`memberText` in shared.ts). The owner sees it before tagging the card for an agent.
+ * What a member put on a card that the card's last line doesn't already say: their title or
+ * notes, their tags (`member` on the card), their files (`by` on each file). A part is left
+ * out when that same member made the last change by hand, since "Edited by dana@…" says it.
+ * `me` leaves out the viewer's own parts, for the card's face.
  */
-function wroteBy(card: Card): string | null {
-  const t = card.memberText;
-  return t && (t.email !== card.by?.email || !!card.by?.via) ? t.email : null;
+function touched(card: Card, me?: string): MemberTouch | null {
+  const t = memberTouch(card);
+  if (!t) return null;
+  const last = card.by && !card.by.via ? card.by.email : null;
+  const keep = (email: string) => email !== last && email !== me;
+  const text = t.text && keep(t.text.email) ? t.text : undefined;
+  const tags = t.tags && keep(t.tags.email) ? t.tags : undefined;
+  const files = (t.files ?? []).filter((f) => keep(f.email));
+  return text || tags || files.length ? { ...(text ? { text } : {}), ...(tags ? { tags } : {}), ...(files.length ? { files } : {}) } : null;
 }
 function WroteLine({ card }: { card: Card }) {
   const who = useContext(WhoContext);
-  const email = wroteBy(card);
-  if (!who || !email || !card.memberText) return null;
+  const t = touched(card);
+  if (!who || !t) return null;
+  const name = (email: string) => (email === who.me ? "you" : email);
   return (
-    <span className="by-wrote" title={new Date(card.memberText.at).toLocaleString()}>
-      Title or notes written by <b>{email === who.me ? "you" : email}</b>, a member · {ago(card.memberText.at, who.now)}
-    </span>
+    <>
+      {t.text && <span className="by-wrote" title={new Date(t.text.at).toLocaleString()}>Title or notes written by <b>{name(t.text.email)}</b>, a member · {ago(t.text.at, who.now)}</span>}
+      {t.tags && <span className="by-wrote" title={new Date(t.tags.at).toLocaleString()}>Tags set by <b>{name(t.tags.email)}</b>, a member · {ago(t.tags.at, who.now)}</span>}
+    </>
   );
+}
+
+/**
+ * In the owner's card editor: what a member wrote on this card, what that mark does, and the
+ * button that takes it off. The mark never comes off because of an edit, however complete, so
+ * this is where the owner says "I've read these and they're mine". Files are marked on their
+ * own rows and stay marked while they're on the card.
+ */
+export function MemberWords({ card, onClaim }: { card: Card; onClaim?(): void }) {
+  const who = useContext(WhoContext);
+  const t = memberTouch(card);
+  if (!t || (!t.text && !t.tags)) return null;
+  const now = who?.now ?? Date.now();
+  return (
+    <div className="member-words" role="note" aria-label="A member wrote on this card">
+      <p className="member-words-who">
+        <span className="member-words-mark" aria-hidden="true">$</span>
+        <span>
+          {t.text && <span title={new Date(t.text.at).toLocaleString()}>Title or notes written by <b>{t.text.email}</b>, a member · {ago(t.text.at, now)}</span>}
+          {t.tags && <span title={new Date(t.tags.at).toLocaleString()}>Tags set by <b>{t.tags.email}</b>, a member · {ago(t.tags.at, now)}</span>}
+        </span>
+      </p>
+      <p className="member-words-why">
+        Your agents are told these aren't your words and to ask you before acting on them. Editing the card doesn't change that. This button does.
+        {t.files ? " Files a member attached stay marked for as long as they're on the card." : ""}
+      </p>
+      {onClaim && <div className="member-words-act"><button type="button" className="btn" onClick={onClaim}>These words are mine now</button></div>}
+    </div>
+  );
+}
+
+/** "words and tags by dana@…": what members put on a card, by person, for its face. */
+function touchWords(t: MemberTouch): string {
+  const by = new Map<string, string[]>();
+  const add = (email: string, what: string) => { if (!by.get(email)?.includes(what)) by.set(email, [...(by.get(email) ?? []), what]); };
+  if (t.text) add(t.text.email, "words");
+  if (t.tags) add(t.tags.email, "tags");
+  for (const f of t.files ?? []) add(f.email, (t.files ?? []).filter((x) => x.email === f.email).length > 1 ? "files" : "file");
+  const list = (parts: string[]) => (parts.length < 3 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`);
+  return [...by].map(([email, parts]) => `${list(parts)} by ${email}`).join(" · ");
 }
 
 /** On the card face, only when the last change wasn't yours by hand: that's the one worth a line. */
 export function ByFace({ card }: { card: Card }) {
   const who = useContext(WhoContext);
   if (!who || !card.by) return null;
-  // A member's words under the owner's last change: say whose they are, on the face, for everyone but that member.
-  const wrote = wroteBy(card);
-  const words = wrote && wrote !== who.me ? <span className="card-by-wrote">words by {wrote}</span> : null;
-  if (card.by.email === who.me && !card.by.via) return words ? <div className="card-by" title={`Title or notes written by ${wrote}, a member of this board`}>{words}</div> : null;
+  // A member's words, tags, or files under someone else's last change: say whose they are, on the face, for everyone but that member.
+  const t = touched(card, who.me);
+  const said = t ? touchWords(t) : "";
+  const words = said ? <span className="card-by-wrote">{said}</span> : null;
+  const long = said ? `${said[0].toUpperCase()}${said.slice(1)}, not the board's owner` : "";
+  if (card.by.email === who.me && !card.by.via) return words ? <div className="card-by" title={long}>{words}</div> : null;
   const text = whoText(card.by, who.me);
   return (
-    <div className="card-by" title={`${verb(card)} by ${text}, ${new Date(card.updatedAt).toLocaleString()}${wrote ? `. Title or notes written by ${wrote}, a member of this board` : ""}`}>
+    <div className="card-by" title={`${verb(card)} by ${text}, ${new Date(card.updatedAt).toLocaleString()}${long ? `. ${long}` : ""}`}>
       <span className="card-by-who">{text}</span><span className="card-by-when">· {ago(card.updatedAt, who.now)}</span>{words}
     </div>
   );
