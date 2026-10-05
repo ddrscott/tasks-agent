@@ -89,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turning encryption off on a board with files no longer blanks the page until you reload. The board was decrypted either way; now it shows right away
 - A note that only looks like encrypted text can't stop you from turning encryption off anymore. A member could leave one on a shared board, and after you encrypted it, decrypting said "Some of the board is still encrypted" until you edited that card
 - On a board that isn't encrypted, a tag typed to look like encrypted text is cleaned up like any other tag
+- When the board changes while a card is open, the lanes no longer flash on top of the card for half a second
 
 ## [0.2.0] - 2026-10-04
 

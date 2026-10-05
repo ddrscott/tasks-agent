@@ -360,7 +360,9 @@ run ahead of whatever serves the zone.
   hostile note and fails if anything but the renderer's own tags and attributes comes out. Run
   it after touching the renderer.
 - **Live sync.** Board state is Agents SDK synced state, so every open tab
-  updates at once. Changes animate with the View Transitions API. Cards the
+  updates at once. Changes animate with the View Transitions API, except while a modal dialog
+  is open: a transition paints the lanes above everything, the dialog included, so with one
+  open the board just updates behind it (`receive` in `App.tsx`). Cards the
   assistant touches flash briefly.
 - **Undo and redo.** Every change is undoable (⌘Z or the Undo button), including a
   whole assistant turn as one step, and an undo can be redone (⇧⌘Z, Ctrl+Y, the Redo

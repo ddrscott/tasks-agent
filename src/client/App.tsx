@@ -314,7 +314,11 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
     }
     const layoutChanged = !prev || JSON.stringify({ l: prev.lanes, c: prev.cards }) !== JSON.stringify({ l: next.lanes, c: next.cards });
     const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
-    if (prev && layoutChanged && doc.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // Not while a modal is open. A transition lifts every lane and card into its own layer, and those
+    // paint above the page, the open dialog included: for about half a second the lanes covered the card
+    // editor, right when it was saying someone else had just changed the card.
+    const modalOpen = !!document.querySelector("dialog[open]");
+    if (prev && layoutChanged && !modalOpen && doc.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       // Two updates a few milliseconds apart start two transitions, and the browser skips the first.
       // Its callback can then run after the second one's, so each callback shows the newest board
       // it knows of rather than the one it was started with.
