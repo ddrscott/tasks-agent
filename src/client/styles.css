@@ -778,8 +778,8 @@ dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
 /* Tags, with the board's tags offered above the input (TagField.tsx). */
 .tag-field { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
 .tag-field > label { font: 12px var(--font-mono); color: var(--muted); }
-.tag-suggest { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; margin: 0 -2px; padding: 0 2px; }
-.tag-suggest::-webkit-scrollbar { display: none; }
+/* The chips wrap onto as many rows as they need. They used to sit in one row that scrolled sideways with nothing to say so, and the ones past the edge were as good as not there. */
+.tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-suggest .chip { flex: none; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; }
 @media (hover: none) { .tag-suggest .chip { height: 40px; padding: 0 12px; font-size: 13px; } }
 /* Move to: one button per lane, for touch screens, where dragging across lanes is the hard way.

@@ -244,7 +244,9 @@ run ahead of whatever serves the zone.
 - **Tag suggestions.** The Tags field in both card dialogs (`src/client/TagField.tsx`)
   shows the tags already on the board above the input, most used first (`tagsByUse` in
   `src/shared.ts`). Typing narrows them, a tap or click adds one, and Tab takes the first
-  match. It reads the board in the tab, so it works on an encrypted board.
+  match. It reads the board in the tab, so it works on an encrypted board. The chips (twelve
+  at most) wrap onto as many rows as they need. They used to sit in one row that scrolled
+  sideways with nothing to show it did.
 - **On a phone.** Up to 560px wide, the card dialogs and Members take the whole screen with 12px
   padding and size to the space above the on-screen keyboard, so Tags and the buttons stay
   reachable while typing. Android Chrome shrinks the page for the keyboard
