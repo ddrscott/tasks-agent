@@ -1708,7 +1708,8 @@ The admin page's Pro switch (`// ADMIN`) takes the same path. After it writes th
 `update` in `src/users.ts` calls the same `planChanged`, before it answers the admin: the same
 two audit entries, in the admin's name (`actor` is their email and `actorRole` is `admin`, so
 the owner's log says a person did it and who; a change Stripe caused stays `system`), the same
-signal, the same retries, and the same sweep behind it. `check:members` gives and takes a
+signal, the same retries, and the same sweep behind it. The name is never a guess (**Whose
+name a plan entry carries**, below). `check:members` gives and takes a
 grant with a member's socket open and fails past one second either way. An admin gets nothing
 else on a board: `access` never looks at the admin role, so an admin who isn't a member is
 refused like any stranger, and one who is a member is exactly that member.
@@ -1805,10 +1806,23 @@ number on this board, `at` is epoch milliseconds, and `time` is the same instant
 billing or from a paid period running out. `actorRole: "admin"` is on a plan entry a site
 admin caused by giving or taking back Pro (`// ADMIN`): `actor` is that admin's email, and
 they aren't on the board. It's stored in the row's `detail` column as `{"actorRole":"admin"}`,
-so there's no new column. The admin page writes the grant and then records the change, and
-the owner's open tab or the board's sweep can notice the new plan in between; so a plan
-entry with nobody's name on it is still put down to an admin who changed that account in the
-last 10 seconds (`recentAdminChange` in `src/members.ts`, from `users.changed_by`). The audit tab shows `rae@example.com (a site admin)` and "an admin
+so there's no new column. **Whose name a plan entry carries.** An admin's, only when that
+admin's own request turned the grant on or off and that changed the plan. The admin page's
+write to `users.pro_grant` and the flip of the board's `board_sharing` row go in one D1
+transaction (`adminFlip` in `src/members.ts`, called from `update` in `src/users.ts`): the
+flip runs first and only if the grant really is changing, in the direction that changes the
+plan, for an owner who isn't also paying. The request then reads back whether its statement
+changed the row and writes the entry in the admin's name only if it did (`logAdminFlip`).
+Nobody else can see the new grant before the row is flipped, so nobody else can get there
+first, and every other writer of plan entries (`syncSharing`: the webhook, the sweep, the
+owner opening Members) only ever writes `system`. So a role-only edit, a Pro switch set to
+what it already was, a grant given or taken from an owner who pays, and anything Stripe did
+can't carry an admin's name. It used to be a guess: a plan entry with no name on it was put down to
+whichever admin had changed that account in the last 10 seconds, so a subscription that
+lapsed just after an admin edited a role read as that admin's doing. No migration: the
+existing rows carry it. If the owner's subscription starts or ends in the same instant as the
+admin's switch, the plan the transaction expected can be wrong; `planChanged` runs right
+after, reads the plan fresh, and writes the correction as `system`. The audit tab shows `rae@example.com (a site admin)` and "an admin
 took Pro back". `from` and `to` are the role before and
 after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too

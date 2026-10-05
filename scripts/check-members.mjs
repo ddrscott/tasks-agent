@@ -2195,6 +2195,51 @@ section("Pro given by an admin");
     ok("an owner with a subscription row is told there's one to manage", info.manage === !!use?.billing && use?.manage === !!use?.billing, [info, use]);
   }
 
+  // Whose name a plan entry carries. An admin's, only when that admin's own request turned the
+  // grant on or off and that changed the plan. It used to be that any plan entry written within ten
+  // seconds of an admin touching the account carried that admin's name, whatever caused it.
+  {
+    const plans = async () => (await audit(gOwner)).filter((e) => e.action.startsWith("sharing_"));
+    const cancel = () => d1(`UPDATE subscriptions SET status = 'canceled', updated_at = ${Date.now()} WHERE user_id = ${q(gOwner.id)}`);
+    const look = () => call(gOwner, "GET", "/api/board/members");
+    const n0 = (await plans()).length;
+    // Here the owner pays through Stripe and has no grant. An admin edits their role, and sets a
+    // Pro switch that's already off. Moments later the subscription ends by itself.
+    const roleOnly = await adminCall(admin, { email: gOwner.email, admin: false });
+    const sameGrant = await adminCall(admin, { email: gOwner.email, pro: false });
+    cancel();
+    await look();
+    await sleep(300);
+    let now = await plans();
+    ok("a subscription that ends moments after an admin edited the account is put down to `system`, not to that admin", roleOnly.status === 200 && sameGrant.status === 200 && usersRow(gOwner).changed_by === admin.email && now.length === n0 + 1 && now[0].action === "sharing_suspended" && now[0].actor === "system" && !("actorRole" in now[0]), now.slice(0, 2));
+    await adminCall(admin, { email: gOwner.email, admin: false });
+    makePro(gOwner);
+    await look();
+    await sleep(300);
+    now = await plans();
+    ok("and so is its return, through Stripe, moments after another admin edit", now.length === n0 + 2 && now[0].action === "sharing_restored" && now[0].actor === "system" && !("actorRole" in now[0]), now.slice(0, 2));
+    // A grant on top of a live subscription changes nothing for the board, so it names nobody, then or when the subscription ends.
+    const onTop = await adminCall(admin, { email: gOwner.email, pro: true });
+    cancel();
+    const still = await look();
+    await sleep(300);
+    ok("a grant given on top of a subscription writes nothing, and nothing when the subscription then ends: the grant holds Pro", onTop.status === 200 && still.data?.board?.sharing === "on" && (await plans()).length === n0 + 2, (await plans()).slice(0, 2));
+    // Now the grant is all that holds Pro. Taking it back is the admin's doing, with the owner's own tab asking in the same instant.
+    const [took] = await Promise.all([adminCall(admin, { email: gOwner.email, pro: false }), ...Array.from({ length: 6 }, look)]);
+    await sleep(400);
+    now = await plans();
+    ok("taking back the grant that was holding Pro is that admin's, written once, however many readers noticed in the same moment", took.status === 200 && now.length === n0 + 3 && now[0].action === "sharing_suspended" && now[0].actor === admin.email && now[0].actorRole === "admin", now.slice(0, 3));
+    const [gave] = await Promise.all([adminCall(admin, { email: gOwner.email, pro: true }), ...Array.from({ length: 6 }, look)]);
+    await sleep(400);
+    now = await plans();
+    ok("and so is giving it back", gave.status === 200 && now.length === n0 + 4 && now[0].action === "sharing_restored" && now[0].actor === admin.email && now[0].actorRole === "admin", now.slice(0, 3));
+    // Back to how the rest of this section expects the owner: paying, with no grant.
+    makePro(gOwner);
+    const back = await adminCall(admin, { email: gOwner.email, pro: false });
+    await sleep(300);
+    ok("taking the grant from an owner who pays again writes nothing", back.status === 200 && back.data.user.plan === "pro" && (await plans()).length === n0 + 4 && (await look()).data.board.sharing === "on");
+  }
+
   // A write that was already on its way in when the member was removed. The board reads the
   // member's access, the removal lands while that read is out, and the answer that comes back
   // ("a writer") is from before it. The dev server holds the frame in that gap on request.

@@ -12,8 +12,8 @@
 //   boards, no deleting accounts, no signing in as someone.
 
 import { currentUser, normalizeEmail, userIdFor, type User } from "./auth";
-import { subscriptionIsPro } from "./billing";
-import { planChanged } from "./members";
+import { planSource, subscriptionIsPro } from "./billing";
+import { adminFlip, logAdminFlip, planChanged } from "./members";
 
 export type Role = "user" | "admin";
 
@@ -130,7 +130,19 @@ async function update(req: Request, env: Env, admin: User): Promise<Response> {
   }
   const now = Date.now();
   const changed = setAdmin !== undefined || setPro !== undefined;
-  await env.DB.prepare(
+  const userId = await userIdFor(email);
+  // Does this request change what the owner's plan is? Only when it turns a grant on or off
+  // for someone who isn't also paying. Then, and only then, the board's sharing row is flipped
+  // in the same transaction as the grant (adminFlip in members.ts), and the audit entry for it
+  // carries this admin's name. A role-only edit, a switch set to what it already was, and a
+  // grant taken from a paying owner flip nothing here and name nobody.
+  let flipTo: 0 | 1 | null = null;
+  if (setPro !== undefined) {
+    const was = await planSource(env, userId);
+    const paying = was.plan === "pro" && !was.granted;
+    if (!paying && was.granted !== setPro) flipTo = setPro ? 0 : 1;
+  }
+  const write = env.DB.prepare(
     `INSERT INTO users (email, user_id, role, pro_grant, created_at, changed_by, changed_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
      ON CONFLICT(email) DO UPDATE SET user_id = excluded.user_id,
@@ -139,19 +151,26 @@ async function update(req: Request, env: Env, admin: User): Promise<Response> {
        changed_by = CASE WHEN ?10 THEN excluded.changed_by ELSE changed_by END,
        changed_at = CASE WHEN ?10 THEN excluded.changed_at ELSE changed_at END`,
   ).bind(
-    email, await userIdFor(email), setAdmin ? "admin" : "user", setPro ? 1 : 0, now,
+    email, userId, setAdmin ? "admin" : "user", setPro ? 1 : 0, now,
     changed ? admin.email : null, changed ? now : null,
     setAdmin !== undefined ? 1 : 0, setPro !== undefined ? 1 : 0, changed ? 1 : 0,
-  ).run();
+  );
+  if (flipTo === null) await write.run();
+  else {
+    // The flip goes first so it can compare the new grant with the stored one, then the grant.
+    const [flip] = await env.DB.batch([adminFlip(env, userId, flipTo, setPro ? 1 : 0, now), write]);
+    if (flip.meta.changes === 1) {
+      await logAdminFlip(env, userId, admin.email, flipTo).catch((e: Error) => console.error("recording an admin's plan change failed", e.message));
+    }
+  }
   // A shared board follows its owner's plan, and a grant is part of the plan (planSource in
   // billing.ts). So this tells the owner's board the same way the Stripe webhook does
-  // (storeSubscription): the audit log gets "sharing suspended" or "sharing restored", in this
-  // admin's name and marked as an admin's doing (`changed_by` on the users row says the same), and open
-  // member sockets drop to view only, or get their roles back, before this answers. It reads
-  // the plan fresh, so taking a grant from someone who also pays changes nothing. The board's
-  // own 30-second sweep is the backstop if this fails.
+  // (storeSubscription): open member sockets drop to view only, or get their roles back, before
+  // this answers. It reads the plan fresh, so if the plan isn't what the lines above expected
+  // (a subscription that started or ended in the same instant), the correction is written
+  // down too, as `system`. The board's own 30-second sweep is the backstop if this fails.
   if (setPro !== undefined) {
-    await planChanged(env, await userIdFor(email), admin.email).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
+    await planChanged(env, userId).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
   }
   const row = await env.DB.prepare(`${SELECT} WHERE u.email = ?`).bind(email).first<Row>();
   console.log(`admin: ${admin.email} set ${email}${setAdmin !== undefined ? ` admin=${setAdmin}` : ""}${setPro !== undefined ? ` pro=${setPro}` : ""}`);

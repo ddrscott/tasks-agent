@@ -252,11 +252,12 @@ async function signal(env: Env, ownerId: string, left?: string): Promise<void> {
  * opens the members list, so a lapse nobody announced (a missed webhook, a period that ran
  * out) is still written down.
  *
- * `admin` is the admin whose switch caused it, when one did (users.ts): the entry then names
- * them and says they acted as an admin, so the owner's log doesn't read "by system" for
- * something a person did. Everything else is `system`: Stripe, or a period that ran out.
+ * Every entry written here is `system`: Stripe, a period that ran out, or a row someone
+ * changed some other way. Nothing in this function can put a person's name on a plan change.
+ * An admin's name gets onto one in exactly one place, `adminFlip` below, which is the admin's
+ * own request changing the grant.
  */
-export async function syncSharing(env: Env, ownerId: string, admin?: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
+export async function syncSharing(env: Env, ownerId: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
   const row = await env.DB.prepare("SELECT suspended FROM board_sharing WHERE owner_id = ?").bind(ownerId).first<{ suspended: number }>();
   if (!row) return null; // never shared
   const suspended = (await planFor(env, ownerId)) === "pro" ? 0 : 1;
@@ -267,41 +268,48 @@ export async function syncSharing(env: Env, ownerId: string, admin?: string): Pr
       .bind(suspended, Date.now(), ownerId).run();
     flipped = true;
     if (changed.meta.changes === 1 && (await boardShared(env, ownerId))) {
-      const action = suspended ? "sharing_suspended" : "sharing_restored";
-      // The admin page writes the grant and then calls here with the admin's name. Anything
-      // else that looks at the plan in the instant between (the owner's open tab reading the
-      // members list, the board's sweep) gets here first, with no name. So a flip nobody
-      // claimed checks whether an admin changed this account in the last few seconds.
-      admin ??= await recentAdminChange(env, ownerId);
-      if (admin) {
-        await env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)")
-          .bind(ownerId, Date.now(), admin, action, ADMIN_DETAIL).run();
-      } else await audit(env, ownerId, "system", action, null);
+      await audit(env, ownerId, "system", suspended ? "sharing_suspended" : "sharing_restored", null);
     }
   }
   return { suspended: !!suspended, flipped };
 }
 
-/** How long after an admin changes an account a plan flip on its board is still put down to them. */
-const ADMIN_CHANGE_WINDOW_MS = 10_000;
-/** The admin who changed this account on the admin page within the last few seconds, if one did (`users.changed_by`). */
-async function recentAdminChange(env: Env, ownerId: string): Promise<string | undefined> {
-  try {
-    const row = await env.DB.prepare("SELECT changed_by, changed_at FROM users WHERE user_id = ?").bind(ownerId).first<{ changed_by: string | null; changed_at: number | null }>();
-    return row?.changed_by && row.changed_at && Date.now() - row.changed_at < ADMIN_CHANGE_WINDOW_MS ? row.changed_by : undefined;
-  } catch (e) {
-    console.error("users", (e as Error).message);
-    return undefined;
-  }
+/**
+ * The one way an admin's name gets onto a plan entry. The admin page's Pro switch (users.ts)
+ * runs this statement in the same D1 transaction as its write to `users.pro_grant`, ahead of
+ * it, when that write is about to change what the owner's plan is. It flips the board's
+ * sharing row only if the grant really is changing (`grant` is the new value, compared with
+ * the stored one right here) and the row isn't already where it's going. The admin's request
+ * then reads back whether this statement changed a row, and writes the entry in their name
+ * only if it did (`logAdminFlip`).
+ *
+ * So the name is never a guess. Nobody else can see the new grant before the row is flipped,
+ * because both land together, and a request that didn't change the grant in that direction
+ * (a role-only edit, a switch set to what it already was, anything Stripe did) can't flip the
+ * row here and so can't be named. Before this, any plan entry was put down to whichever admin
+ * had touched the account in the last ten seconds.
+ */
+export function adminFlip(env: Env, ownerId: string, suspended: 0 | 1, grant: 0 | 1, at: number): D1PreparedStatement {
+  return env.DB.prepare(
+    `UPDATE board_sharing SET suspended = ?1, updated_at = ?2
+     WHERE owner_id = ?3 AND suspended != ?1 AND COALESCE((SELECT pro_grant FROM users WHERE user_id = ?3), 0) != ?4`,
+  ).bind(suspended, at, ownerId, grant);
+}
+
+/** Write the entry for a flip `adminFlip` just made: the admin's email as the actor, marked as an admin's doing. */
+export async function logAdminFlip(env: Env, ownerId: string, admin: string, suspended: 0 | 1): Promise<void> {
+  if (!(await boardShared(env, ownerId))) return;
+  await env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)")
+    .bind(ownerId, Date.now(), admin, suspended ? "sharing_suspended" : "sharing_restored", ADMIN_DETAIL).run();
 }
 
 /**
  * The owner's plan just changed: Stripe's webhook stored a subscription (billing.ts), or an
- * admin gave or took back Pro (users.ts), in which case `admin` is their email. Record it and
- * tell the open sockets.
+ * admin gave or took back Pro (users.ts, which has already recorded its own flip). Record
+ * anything still unrecorded, as `system`, and tell the open sockets.
  */
-export async function planChanged(env: Env, ownerId: string, admin?: string): Promise<void> {
-  if ((await syncSharing(env, ownerId, admin)) !== null) return signal(env, ownerId);
+export async function planChanged(env: Env, ownerId: string): Promise<void> {
+  if ((await syncSharing(env, ownerId)) !== null) return signal(env, ownerId);
   // A board nobody was ever invited to has no members to recheck and nothing to log, but its
   // owner may have it open, with a menu that still says "Upgrade to Pro". One try, no retries:
   // the tab asks again by itself the next time it has a reason to.
