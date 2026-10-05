@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Text nobody can see is taken out of what a member writes on your board: zero-width characters, direction overrides, and hidden tag characters, in titles, notes, tags, and file names. A title of nothing else is refused instead of making a blank card
 - After a pasted list leaves lines behind, the button reads "Try these 3 again" instead of "Add 3 cards", and the box shows every line that's left, from the top
 - At the member cap or the daily invite cap, the email field and the role choice are off along with the Invite button, and the field says why. The passphrase fields in the Encryption dialog are off the same way on a shared board
+- Changing a member's role while your Pro plan is lapsed says they stay view only until it's back, instead of "It took effect right away"
 
 ## [0.2.0] - 2026-10-04
 

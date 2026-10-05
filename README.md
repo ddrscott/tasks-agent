@@ -1218,6 +1218,9 @@ each card.
   lines, the full board first, since that's the one to fix now, and the second line says
   making room won't be enough today. The API does the same: `409 member_limit` with
   `also: ["invite_limit"]` and both sentences in `error`.
+- **A role change while Pro is lapsed** doesn't say "It took effect right away". Everyone is
+  view only until Pro is back whatever their role says, so it says that: the role is saved,
+  and a new writer stays view only until the plan returns.
 - **Typing an address that's already there** doesn't call the API. The API would change a
   member's role or reissue a pending invite, and neither is what Invite looks like it does,
   so the form points at the row instead.

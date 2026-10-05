@@ -427,6 +427,10 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
     setBusy(null);
     if (!r.ok) tell({ kind: "error", text: explain(r, board, m.email) });
     else if (m.status === "pending") tell({ kind: "ok", text: `${m.email}'s invite is for ${a(next)} now. The link they have still works.` });
+    // While the plan is lapsed everyone is view only whatever their role says, so "took effect" would be wrong for a new writer.
+    else if (paused) tell({ kind: "ok", text: next === "writer"
+      ? `${m.email} is ${a(next)} now, but sharing is paused, so they stay view only until your Pro plan is back. The role is saved and takes effect then.`
+      : `${m.email} is ${a(next)} now. Sharing is paused, so they were already view only; they'll stay a viewer when your Pro plan is back.` });
     else tell({ kind: "ok", text: `${m.email} is ${a(next)} now. It took effect right away, in any tab they have open.` });
     void refreshMembers(me.id);
   }
