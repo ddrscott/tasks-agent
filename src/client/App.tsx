@@ -37,7 +37,7 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
-import { ADD_CARDS_MAX, ownerTagLike, plainError, plainText } from "../member-rules";
+import { ADD_CARDS_MAX, needsEdit, ownerTagLike, plainError, plainText } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string; /** Shows the Admin link. The admin page's API checks the role itself. */ admin?: boolean };
@@ -623,6 +623,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       // Each distinct reason the server gave, with the lines it was given for, in the order they came.
       const reasons = new Map<string, string[]>();
       let untried = 0;
+      // The lines that would be refused again as they are: the box asks for an edit instead of offering a retry.
+      const fix: string[] = [];
       for (let i = 0; i < lines.length && !left.length;) {
         const piece: { title: string; tags?: string[] }[] = [];
         let size = 0;
@@ -642,6 +644,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
             for (const x of r.left) {
               const reason = plainError(x.error);
               reasons.set(reason, [...(reasons.get(reason) ?? []), lines[i + x.index] ?? ""]);
+              if (needsEdit(x.error) && lines[i + x.index]) fix.push(lines[i + x.index]);
             }
             const not = new Set(r.left.map((x) => x.index));
             untried = lines.length - (i + piece.length);
@@ -650,13 +653,15 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         } catch (e) {
           why = e instanceof Error && e.message ? plainError(e.message) : null;
           left.push(...lines.slice(i));
+          // One line sent by itself and thrown back (a title that's all invisible characters, say) is that line's to fix.
+          if (piece.length === 1 && lines.length === 1 && e instanceof Error && needsEdit(e.message)) fix.push(lines[i]);
         }
         i += piece.length;
       }
       // One piece is one undo step, so the toast can offer it. More than one isn't, so it doesn't.
       if (added > 1) say(`Added ${added} cards`, pieces === 1);
       if (reasons.size) why = leftReasons(reasons, untried);
-      return { added, left, why };
+      return { added, left, why, fix };
     },
     moveCard: (id, laneId, index) => agent.stub.moveCard(id, laneId, index).catch(refused),
     addLane: async (name) => { laneClash(name); return agent.stub.addLane(await out(clean(name, 40))); },

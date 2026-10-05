@@ -119,6 +119,15 @@ export const errorCode = (message: string) => /^\[([a-z_]+)\]/.exec(message)?.[1
 /** The same error without its code, to show a person. */
 export const plainError = (message: string) => message.replace(/^\[[a-z_]+\]\s*/, "");
 export const SLOW_DOWN = "[slow_down] Slow down. That's too many changes at once. Wait a few seconds and try again.";
+/**
+ * Whether a refused line of a pasted list has to be edited before it can be a card: it holds
+ * one of the owner's tags or a look-alike, text that isn't text, or too much of it, or it has
+ * no title. Sending it again as it is gets the same answer, so the app doesn't offer to. Any
+ * other refusal (slow down, a board that's full until something is deleted, a dropped
+ * connection) can go through on a second try.
+ */
+export const needsEdit = (message: string) =>
+  ["owner_tag", "bad_text", "too_big", "bad_args"].includes(errorCode(message) ?? "") || /^A card (needs a title|can have \d+ tags)/.test(message);
 
 /**
  * The most a member may grow someone else's board to. The field sizes in characters are the

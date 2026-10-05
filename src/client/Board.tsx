@@ -14,7 +14,8 @@ import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
 
 /** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
-export type AddResult = { added: number; left: string[]; why: string | null };
+/** `fix` is the lines in `left` that will be refused again exactly as they are (needsEdit in member-rules.ts): they have to be edited first. */
+export type AddResult = { added: number; left: string[]; why: string | null; fix?: string[] };
 
 export type Actions = {
   /** Quick add: one card per line, as one change. Lines that can't be added come back in `left`. */
@@ -570,6 +571,10 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
   // The box exactly as the server left it: the lines it just turned down. While it still reads
   // that way the button says "Try again", not "Add 3 cards" for three lines that were refused.
   const [refused, setRefused] = useState<string | null>(null);
+  // The refused lines that trying again can't help (one of the owner's tags, a look-alike, a
+  // blank title): each has to be edited or taken out. While any is still in the box as it
+  // was, the button says so and stays off, instead of offering a retry that can't work.
+  const [mustFix, setMustFix] = useState<string[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (open && !frozen) ref.current?.focus(); }, [open, frozen]);
   // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
@@ -578,7 +583,7 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
   async function submit() {
     // Pasting a list adds one card per line, all in one change.
     const lines = quickAddLines(text);
-    if (!lines.length || busy) return;
+    if (!lines.length || busy || lines.some((l) => mustFix.includes(l))) return;
     setBusy(true);
     setNote("");
     // The box keeps what was typed until the server has answered, and afterwards it keeps
@@ -588,6 +593,7 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
     setBusy(false);
     setText(r.left.join("\n"));
     setRefused(r.left.length ? r.left.join("\n") : null);
+    setMustFix(r.fix ?? []);
     if (r.left.length) {
       const why = r.why ?? "That didn't go through. Try again.";
       setNote(lines.length === 1 ? `Not added. ${why}` : `${r.added} added, ${r.left.length} left. ${why}`);
@@ -602,13 +608,20 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
     return (
       <div className="quick-add frozen">
         <Unsaved draft={{ lines: text }} why={`${frozen} ${quickAddLines(text).length === 1 ? "This card wasn't" : "These cards weren't"} added.`} after="Dismiss throws it away." />
-        <div className="row"><button className="btn" onClick={() => { setText(""); setNote(""); setRefused(null); setOpen(false); }}>Dismiss</button></div>
+        <div className="row"><button className="btn" onClick={() => { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }}>Dismiss</button></div>
       </div>
     );
   }
 
-  const count = quickAddLines(text).length;
+  const now = quickAddLines(text);
+  const count = now.length;
   const again = refused !== null && text === refused;
+  /** How many lines in the box are still exactly a line that has to be edited first. */
+  const toFix = now.filter((l) => mustFix.includes(l)).length;
+  const label = busy ? "Adding…"
+    : toFix ? (count === 1 ? "Fix this to add it" : toFix === count ? `Fix these ${count} to add them` : `Fix ${toFix} of these ${count} to add them`)
+    : again ? (count > 1 ? `Try these ${count} again` : "Try again")
+    : count > 1 ? `Add ${count} cards` : "Add card";
 
   if (!open) {
     return (
@@ -622,17 +635,18 @@ function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; o
       <textarea
         ref={ref} className="field" rows={Math.min(8, Math.max(2, text.split("\n").length))} placeholder={`What needs doing? End with ${tagHint} to tag it, or paste a list.`} value={text} aria-label={`New card in ${lane.name}`}
         readOnly={busy} aria-busy={busy} aria-describedby={note ? `quick-add-note-${lane.id}` : undefined}
-        onChange={(e) => { setText(e.target.value); if (note) setNote(""); }}
+        // The reasons stay up until every line they're about has been edited or taken out.
+        onChange={(e) => { setText(e.target.value); if (note && !quickAddLines(e.target.value).some((l) => mustFix.includes(l))) setNote(""); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-          if (e.key === "Escape") { setText(""); setNote(""); setRefused(null); setOpen(false); }
+          if (e.key === "Escape") { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }
         }}
         onBlur={() => { if (!text.trim() && !busy) setOpen(false); }}
       />
       {note && <p className="quick-add-note" id={`quick-add-note-${lane.id}`} role="alert">{note}</p>}
       <div className="row">
-        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy}>{busy ? "Adding…" : again ? (count > 1 ? `Try these ${count} again` : "Try again") : count > 1 ? `Add ${count} cards` : "Add card"}</button>
-        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setRefused(null); setOpen(false); }}>Cancel</button>
+        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy || toFix > 0} title={toFix ? "Edit the lines named above, or take them out, and this adds the rest" : undefined}>{label}</button>
+        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }}>Cancel</button>
         <span className="hint"><kbd>↵</kbd> add · <kbd>esc</kbd> close</span>
       </div>
     </div>

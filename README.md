@@ -1480,7 +1480,14 @@ reasons." then `“bad line #gauntlet”: Only … can put #gauntlet on a card �
 and doesn't empty the box until the server has answered, so nothing is dropped and nothing has
 to be pasted twice. The box grows to show every line that's left (up to eight, then it
 scrolls) and goes back to its first line, and while it still holds exactly the lines that were
-turned down the button reads "Try these 3 again", not "Add 3 cards". One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
+turned down the button reads "Try these 3 again", not "Add 3 cards". That's only for lines a
+second try can help: a board that was full, a member going too fast, a dropped connection. A
+line refused for what it says (one of the owner's tags or a look-alike, a title nobody can
+read, text that's too long: `needsEdit` in `src/member-rules.ts`) would be refused again as it
+is, so while any such line is still in the box unedited the button is off and reads "Fix these
+4 to add them" ("Fix 2 of these 4 …" when the rest could go, "Fix this to add it" for one),
+Enter does nothing, and the reasons stay up. Edit those lines or take them out and it's "Add
+4 cards" again. One call takes up to 200 lines (`ADD_CARDS_MAX`) and the app keeps a
 member's frame under 24 KB, so a longer paste goes up in pieces: each piece is one change, the
 first one that doesn't fully land stops it, and the rest stays in the box. The other things a
 writer does are one or two frames each (a drag, Save, a tick, the in-browser assistant's turn,

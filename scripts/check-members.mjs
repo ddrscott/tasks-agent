@@ -564,6 +564,18 @@ section("access rules (pure)");
   ok("a card that's too big is refused on its own, and takes no room", (() => { const r = memberRoom(b); const before = { ...r }; return code(takeRoom(r, fresh("t".repeat(L.title + 1)))) === "too_big" && r.cards === before.cards && r.bytes === before.bytes; })());
   ok("what takeRoom lets in, the write guard lets in", (() => { const r = memberRoom(nearly); let acc = nearly; for (const t of ["a", "b"]) { const next = shared.addCard(acc, { title: t }); if (takeRoom(r, next.card) === null) acc = next.board; } return acc.cards.length === L.cards && memberChangeError(nearly, shared.stampBy(nearly, acc, { email: "w@example.com", via: "assistant" })) === null; })());
 
+  // Which refused lines of a pasted list can be sent again as they are, and which have to be edited first.
+  ok("a line refused for an owner tag, a look-alike, a blank title, or its size has to be edited: trying again can't help", (() => {
+    const r = () => memberRoom(b);
+    const tidy = (c) => rules.memberTidyCard(undefined, c);
+    return [takeRoom(r(), { ...fresh("x"), tags: ["agent"] }), takeRoom(r(), fresh("Do it #agent")), takeRoom(r(), { ...fresh("x"), tags: ["ag3nt"] }), takeRoom(r(), tidy(fresh("\u200b"))), takeRoom(r(), fresh("t".repeat(L.title + 1))), "A card needs a title", "[bad_args] A card's title has to be text."]
+      .every((why) => typeof why === "string" && rules.needsEdit(why));
+  })());
+  ok("a line refused because the board is full, or the member is going too fast, or the line dropped, can be tried again", (() => {
+    const full = memberRoom(nearly); takeRoom(full, fresh("a")); takeRoom(full, fresh("b"));
+    return [takeRoom(full, fresh("c")), rules.SLOW_DOWN, "The board's members are changing. Try again in a moment.", "", "That didn't go through. Try again."].every((why) => typeof why === "string" && !rules.needsEdit(why));
+  })());
+
   // The token bucket every member frame is charged to.
   const { spendToken, MEMBER_RATE: R } = rules;
   let bucket; let passed0 = 0; let refused0 = 0; let flood0 = false;
