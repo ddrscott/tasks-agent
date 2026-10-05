@@ -435,7 +435,7 @@ It reads stdin and writes the plain board to stdout, and asks on the terminal if
 against a real board, but it caps PBES2 at 16,384 rounds, so raise
 `jwcrypto.jwa.default_max_pbkdf2_iterations` first.
 
-**What the server does.** The ops in `src/shared.ts` pass sealed values through, so moves,
+**What the server does.** On an encrypted board the ops in `src/shared.ts` pass sealed values through, so moves,
 deletes, reordering, and undo work on ids without reading anything. `assertSealedBoard` runs on
 every change and rejects any field that isn't a JWE under the board's `kid`. That's what keeps
 plaintext off an encrypted board from any path: MCP, the cloud model, a stale tab, or a bug.
@@ -1511,7 +1511,7 @@ constants in `src/member-rules.ts` (`MEMBER_RATE`, `MEMBER_LIMITS`) and `src/age
 | One frame | 32 KB, text only | the socket is closed with code **1009** |
 | Sockets per member on one board | 4 | a fifth closes the oldest (code 1008) |
 | Member sockets on one board | 48 | the upgrade answers 503 until some close |
-| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date | `[too_big] …`. Checked on the result by the write guard, so text shaped like ciphertext (which the edit functions pass through untrimmed) doesn't get around it |
+| A card a member adds or changes | title 200 characters, notes 4,000, 10 tags of 32, a real due date | `[too_big] …`. Checked on the result by the write guard. Text shaped like ciphertext gets no pass: on a board that isn't encrypted it's trimmed and cleaned like any other text (**Text that looks encrypted**, below) |
 | The same text as it's stored (JSON, UTF-8 bytes) | title 600 bytes, notes 12 KB, the whole card 32 KB | `[too_big] …`. 4,000 characters of any script fit, and so do 4,000 quotes or line breaks. What doesn't is text that's short in characters and long in bytes |
 | Characters nobody can see in a member's title, notes, tags, or a file's name | taken out before it's stored | Zero-width spaces, direction overrides, the hidden Unicode tag block, blank filler letters, half a surrogate pair (**Text nobody can see**, below). A title that's nothing else is `[bad_text] A card needs a title someone can read. …` |
 | Control characters in a member's title, notes, or tags | none, except a newline and a tab in notes | `[bad_text] …`. One is six bytes as stored (`\u0001`). The app takes them out of what's typed or pasted before it sends (`plainText`), so a person never sees this |
@@ -1786,6 +1786,18 @@ tags that direct them are the owner's alone, and so are the cards that carry the
   - **What it doesn't cover.** The mark is a warning, not a lock: an owner who
     tags a member's card `#agent` has made it a work order, and an agent that ignores its
     rules can still read the notes as instructions. Read a member's card before tagging it.
+
+**Text that looks encrypted.** Whether a board is encrypted is its `sealed` field, never the
+shape of a string. On a board that isn't encrypted, text shaped like a JWE
+(`eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC`) is plain text: a title or lane name is trimmed, notes
+are cut at 4,000, a tag goes through `cleanTag`, and it isn't a due date. The edit functions
+used to wave anything of that shape through on any board, which let a member store a tag as
+typed. And turning encryption off used to refuse any board with a field of that shape, so
+one such note from a member, left before the board was encrypted, kept the owner from
+decrypting until they edited that card. `disableEncryption` now refuses only a field that
+is one of the board's own ciphertexts sent back as it was, which is what a browser that
+skipped a field would send. `check:members` plants the note and the tag, then encrypts and
+decrypts.
 
 **Text nobody can see.** A member's text is read by the owner on screen and by the owner's
 agents as characters, and those have to be the same thing. So the board takes what can't be

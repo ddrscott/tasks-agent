@@ -307,9 +307,13 @@ export function checkCardFields(v: unknown): asserts v is { title?: string; note
   if (f.tags !== undefined && !isTagList(f.tags)) throw badArgs("Tags have to be a list of words, like client and urgent, not one piece of text.");
 }
 export const clean = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
-/** Tidy plain text; sealed text is ciphertext and passes through as is. */
-const tidy = (s: string, max: number) => (isSealed(s) ? s : clean(s, max));
-const tidyNotes = (s: string) => (isSealed(s) ? s : s.slice(0, 4000));
+/**
+ * Tidy plain text. On an encrypted board (`sealed`), ciphertext passes through as is. On a plain
+ * board nothing does: text that only looks like ciphertext is text, and gets the same limits as
+ * any other. Whether a board is encrypted is the board's `sealed`, never the shape of a string.
+ */
+const tidy = (s: string, max: number, sealed: boolean) => (sealed && isSealed(s) ? s : clean(s, max));
+const tidyNotes = (s: string, sealed: boolean) => (sealed && isSealed(s) ? s : s.slice(0, 4000));
 
 /** One tag in its plain form: lower case, no leading #, spaces as dashes, letters, digits, - and _ only. */
 export const cleanTag = (s: string) =>
@@ -322,12 +326,16 @@ export function tagsByUse(b: Board): string[] {
   return [...n.keys()].sort((x, y) => n.get(y)! - n.get(x)! || x.localeCompare(y));
 }
 
-/** Tidy a tag list: clean each plain tag, drop blanks and repeats. Sealed tags pass through. */
-export function tidyTags(tags: string[]): string[] {
+/**
+ * Tidy a tag list: clean each tag, drop blanks and repeats. Sealed tags pass through on an
+ * encrypted board (`sealed`) and nowhere else: a member's `eyJh..A.b.C` on a plain board used
+ * to be kept as typed, around cleanTag.
+ */
+export function tidyTags(tags: string[], sealed = false): string[] {
   if (!isTagList(tags)) throw badArgs("Tags have to be a list of words, like client and urgent, not one piece of text.");
   const out: string[] = [];
   for (const t of tags) {
-    const v = isSealed(t) ? t : cleanTag(t);
+    const v = sealed && isSealed(t) ? t : cleanTag(t);
     if (v && !out.includes(v)) out.push(v);
   }
   if (out.length > MAX_TAGS_PER_CARD) throw new Error(`A card can have ${MAX_TAGS_PER_CARD} tags`);
@@ -429,7 +437,7 @@ export function addCard(
   checkCardFields(input);
   if (typeof input.title !== "string") throw badArgs("A card's title has to be text.");
   if (input.laneId !== undefined && typeof input.laneId !== "string") throw badArgs("A lane is named by its id or its name.");
-  const title = tidy(input.title, 200);
+  const title = tidy(input.title, 200, !!b.sealed);
   if (!title) throw new Error("A card needs a title");
   // No lane named: the card goes to the to do lane.
   const lane = input.laneId ? requireLane(b, input.laneId) : b.lanes.find((l) => l.id === todoLaneId(b.lanes));
@@ -438,12 +446,12 @@ export function addCard(
   const card: Card = withTags({
     id: shortId("c", new Set(b.cards.map((c) => c.id))),
     title,
-    notes: tidyNotes(input.notes ?? ""),
+    notes: tidyNotes(input.notes ?? "", !!b.sealed),
     laneId: lane.id,
-    due: validDue(input.due),
+    due: validDue(input.due, !!b.sealed),
     createdAt: t,
     updatedAt: t,
-  }, tidyTags(input.tags ?? []));
+  }, tidyTags(input.tags ?? [], !!b.sealed));
   const cards = [...b.cards];
   if (input.top) {
     const first = cards.findIndex((c) => c.laneId === lane.id);
@@ -461,13 +469,13 @@ export function updateCard(
   const card = requireCard(b, id);
   let next = { ...card, updatedAt: now() };
   if (patch.title !== undefined) {
-    const title = tidy(patch.title, 200);
+    const title = tidy(patch.title, 200, !!b.sealed);
     if (!title) throw new Error("A card needs a title");
     next.title = title;
   }
-  if (patch.notes !== undefined) next.notes = tidyNotes(patch.notes);
-  if (patch.due !== undefined) next.due = validDue(patch.due);
-  if (patch.tags !== undefined) next = withTags(next, tidyTags(patch.tags));
+  if (patch.notes !== undefined) next.notes = tidyNotes(patch.notes, !!b.sealed);
+  if (patch.due !== undefined) next.due = validDue(patch.due, !!b.sealed);
+  if (patch.tags !== undefined) next = withTags(next, tidyTags(patch.tags, !!b.sealed));
   // Taking #needs-ceo off by hand answers the question without picking an option, so it goes too.
   if (next.ask && !hasTag(next, NEEDS_CEO_TAG)) delete next.ask;
   return { ...b, cards: b.cards.map((c) => (c.id === id ? next : c)) };
@@ -507,7 +515,7 @@ export function answerAsk(b: Board, id: string, input: { choice?: number; text?:
   const line = `ANSWER: ${answer} (asked: ${ask.question}) — ${at.slice(0, 16).replace("T", " ")} UTC`;
   const next: Card = {
     ...withTags(rest, (card.tags ?? []).filter((t) => t !== NEEDS_CEO_TAG)),
-    notes: tidyNotes(card.notes ? `${line}\n\n${card.notes}` : line),
+    notes: tidyNotes(card.notes ? `${line}\n\n${card.notes}` : line, false),
     answer: { question: ask.question, answer, ...(choice !== undefined ? { choice } : {}), at, was: statusLine(card.notes) ?? "" },
     updatedAt: at,
   };
@@ -674,7 +682,7 @@ export function sortedIds(cards: Card[], by: SortBy): string[] {
 export function shownCards(b: Board, laneId: string): Card[] {
   const cards = laneCards(b, laneId);
   const by = b.lanes.find((l) => l.id === laneId)?.sort;
-  if (!by || !SORTS.some((o) => o.by === by) || cards.some((c) => isSealed(c.title))) return cards;
+  if (!by || !SORTS.some((o) => o.by === by) || (b.sealed && cards.some((c) => isSealed(c.title)))) return cards;
   const order = sortedIds(cards, by);
   const byId = new Map(cards.map((c) => [c.id, c]));
   return order.map((id) => byId.get(id)!);
@@ -733,9 +741,9 @@ export function deleteCards(b: Board, ids: string[]): Board {
 }
 
 export function addLane(b: Board, name: string): { board: Board; lane: Lane } {
-  const n = tidy(name, 40);
+  const n = tidy(name, 40, !!b.sealed);
   if (!n) throw new Error("A lane needs a name");
-  if (!isSealed(n) && findLane(b, n)) throw new Error(`There is already a lane called "${n}"`);
+  if (!(b.sealed && isSealed(n)) && findLane(b, n)) throw new Error(`There is already a lane called "${n}"`);
   if (b.lanes.length >= 8) throw new Error("Boards are limited to 8 lanes");
   const lane = { id: shortId("l", new Set(b.lanes.map((l) => l.id))), name: n };
   // Roles are written down first, so a new lane at the end doesn't become the done lane by landing last.
@@ -744,9 +752,9 @@ export function addLane(b: Board, name: string): { board: Board; lane: Lane } {
 
 export function renameLane(b: Board, ref: string, name: string): Board {
   const lane = requireLane(b, ref);
-  const n = tidy(name, 40);
+  const n = tidy(name, 40, !!b.sealed);
   if (!n) throw new Error("A lane needs a name");
-  const clash = isSealed(n) ? undefined : findLane(b, n);
+  const clash = b.sealed && isSealed(n) ? undefined : findLane(b, n);
   if (clash && clash.id !== lane.id) throw new Error(`There is already a lane called "${n}"`);
   // A lane keeps its role under a new name: "Done" renamed to "Shipped" is still the done lane.
   return { ...b, lanes: stampRoles(b.lanes).map((l) => (l.id === lane.id ? { ...l, name: n } : l)) };
@@ -786,9 +794,9 @@ export function moveLane(b: Board, ref: string, index: number): Board {
   return { ...b, lanes };
 }
 
-function validDue(due: string | null | undefined): string | null {
+function validDue(due: string | null | undefined, sealed: boolean): string | null {
   if (!due) return null;
-  if (isSealed(due)) return due;
+  if (sealed && isSealed(due)) return due;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due))) {
     throw new Error(`Due dates must look like 2026-09-30, got "${due}"`);
   }
@@ -928,7 +936,12 @@ export function sameShape(a: Board, b: Board): boolean {
 /** Whether a string holds any ciphertext, for example a tool summary that quotes a sealed title. */
 export const hasSealedText = (s: string) => new RegExp(SEALED_TOKEN_RE.source).test(s);
 
-/** Every piece of text on a board, for checking that a decrypted board really is plain. */
+/**
+ * Every piece of text on a board. Turning encryption off checks that none of the old board's
+ * ciphertext is in the new one (agent.ts). It compares values and doesn't go by shape: plain
+ * text can look like ciphertext, and a note a member left that did would keep the owner from
+ * ever decrypting.
+ */
 export function boardTexts(b: Board): string[] {
   return [
     ...b.lanes.map((l) => l.name),

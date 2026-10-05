@@ -1334,7 +1334,12 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!this.state.sealed) throw new Error("This board isn't encrypted.");
     await this.requireProof(input?.proof);
     const next = await this.adopt(input?.board, undefined);
-    if (ops.boardTexts(next).some(isSealed)) throw new Error("Some of the board is still encrypted.");
+    // A field the browser didn't decrypt is one of this board's own ciphertexts, sent back as it
+    // was. That's what is refused. Going by shape instead ("looks like a JWE") refused plain text
+    // too: a note reading eyJhbGciOiJkaXIifQ..AAAA.BBBB.CCCC, left by a member before the board
+    // was encrypted, kept its owner from turning encryption off until they edited that card.
+    const sealedNow = new Set(ops.boardTexts(this.state));
+    if (ops.boardTexts(next).some((t) => sealedNow.has(t))) throw new Error("Some of the board is still encrypted.");
     await this.swapBoard(next);
     this.sql`DELETE FROM seal_meta`;
     this.index.clear();

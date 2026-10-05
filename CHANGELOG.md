@@ -87,6 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A file's name can't hold a control character that breaks it onto a second line where your agents read the file list
 - The tags suggested above the Tags field wrap onto more rows instead of running off the right edge
 - Turning encryption off on a board with files no longer blanks the page until you reload. The board was decrypted either way; now it shows right away
+- A note that only looks like encrypted text can't stop you from turning encryption off anymore. A member could leave one on a shared board, and after you encrypted it, decrypting said "Some of the board is still encrypted" until you edited that card
+- On a board that isn't encrypted, a tag typed to look like encrypted text is cleaned up like any other tag
 
 ## [0.2.0] - 2026-10-04
 
