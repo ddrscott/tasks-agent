@@ -10,7 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
 - Agents see which lanes are the to do, doing, and done lanes in `get_board`
+- The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone
+- A card remembers who last changed it: you, a member, the assistant on someone's behalf, or an agent
+- An audit log of invites, role changes, removals, people leaving, and deleted cards, with who and when, that the owner can download as CSV or JSON. The CSV opens cleanly in Excel, accented and non-Latin titles included
+- Members, in the account menu: invite someone by email as a viewer or a writer, see who's on your board and since when, to the minute, change a role in place, and remove someone with two taps. Pending invites show when they were sent and when they expire, with Resend and Revoke
+- Members shows how many of the board's 10 places are taken and how many invite emails you have left today, and says why when it can't invite: a free plan (with Upgrade to Pro right at the Invite button), a full board, a spent day of invites (both, when it's both), or an address that's already there
+- When Pro lapses, Members says so: everyone's still listed, they can only look until Pro is back, and nothing was deleted. The button in the top bar reads "Sharing paused" and opens Members at the reason, and the assistant's plan label stops saying Pro
+- The audit log is a tab in Members, newest first, with each time in your time zone and in UTC, a filter by person and by kind (membership or deleted cards), and Download CSV and Download JSON buttons. Downloads number the entries from 1 with no gaps and give every time in ISO 8601 UTC
+- A shared board says "Shared with 2" in the top bar. Click it to open Members. The count and an open Members dialog follow within a second when someone accepts, leaves, or is removed, or when the plan changes
+- The Encryption dialog says up front when a board can't be encrypted because it's shared, with a button to Members, and Members says when a board can't be shared because it's encrypted
+- An invite link opens a page that shows who invited you, the role, and what that role can do, with Accept and Decline. It only works signed in as the address it was sent to, and it brings you back to the invite after you sign in. Open it again after you've accepted and it says you're already on the board, with a button to open it
+- A board switcher next to the logo, once someone has shared a board with you: your board, and each shared one with your role. The open board is in the address, so a reload or a bookmark comes back to it
+- A shared board says whose it is and what you can do on it. A viewer can read everything and change nothing; a writer can change cards, and lanes, undo, questions, agent cards, and board settings stay with the owner
+- Leave a shared board from the account menu
+- A shared board shows who last changed each card, and whether an agent or the assistant did it for them
+- When the owner changes your role, removes you, or their Pro plan lapses or comes back, the board you have open changes right then and says what happened (a plan change within a second of the payment system telling us, and within about half a minute at worst). A removed member's tabs are closed within a moment, every one of them
+- When someone deletes a card on a shared board, everyone else with it open sees who did and what it was called, and the owner's message has Undo. Several in a row from one person read as one message, and its Undo brings back all of them or none. The deletion goes in the audit log with the card's title and the lane it was in
+- When your own agent deletes a card over MCP, your open board says so, with Undo
+- The pricing section and the terms say what Pro buys: team boards, how many people a board holds, that members join free, what happens if Pro ends, who owns the cards, and that a viewer can copy what they can read. Members has the same answers under `// HOW_SHARING_WORKS`
+- A shared board holds up under a member's script: changes and requests sent faster than a person could are told to slow down, a member can't grow someone's board past 1,000 cards or 768 KB, big changes count for more against that pace than small ones, text that isn't text (control characters) is refused, and a burst of changes reaches everyone else's tab a few times a second instead of once per change
+- On a shared board your agents take orders from you alone. The tags that direct them (`#agent`, `#gauntlet`, `#needs-ceo`, `#ship-ok`) are the owner's: a member can't put one on a card or take one off, and a card tagged `#agent` or `#gauntlet` is read only to members and says so. A member who types one gets the reason, with what they typed still in the box
+- Every line on the agent event feed says who made the change (`by`), and only the owner's changes are ever sent. Over MCP, `get_card` and `get_board` say when a card was last changed by a member, and the working rules tell agents that only the owner gives them work or answers
 - Admins get an Admin page from the account menu: every account, with a switch to make someone an admin and a switch to give them Pro without a subscription. An email that hasn't signed in yet can be added ahead of time
+- Pro given by an admin counts for team boards like a paid plan: that owner can invite people, and if an admin takes it back, members can only look from that moment, on the boards they have open, until Pro returns
+- On a shared board a member can't use a tag that only looks like one of yours either: `ship_ok`, `agent-`, or `agent` spelled with a look-alike letter from another alphabet is refused, and so is a title that ends in one behind a full stop or an invisible character
+- A card a member wrote keeps saying so after you move it, tag it, or answer a question on it. Agents see it in `get_card`, `get_board`, and on the event feed (`member`), and you see "words by" on the card
+- When someone leaves your board, your open board says who
+- Every file on a shared board records who uploaded it. A file a member attached says "attached by" them under its name, and your agents are told it's a member's file, not yours, right where `get_card` shows the file's name and what's in it
+- "These words are mine now", in the card editor on your own board: the one way a member's mark comes off a card. The editor says what the mark does, next to the button
 
 ### Changed
 - What's new fills the screen on a phone, and has an X in the corner to close it
@@ -18,6 +45,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - To do, Doing, and Done are special because of what they are, not where they sit. Drag the lanes into any order, or rename them, and Done is still done: its cards stay struck through and out of the open count, Mark done still sends a card there, and agents' claims end there. Before, whichever lane was last counted as done
 - A lane added at the end no longer becomes the done lane, and deleting the done lane no longer turns the lane next to it into one
 - The working rules tell agents to put the card's id and the reason for a change in the git commit, so the repo explains itself if the card is later edited or deleted
+- A list pasted into Add a card goes in as one change, so one Undo takes it back out. If some lines can't be added (a shared board that's full, say), those lines stay in the box and it says how many were added, how many are left, and why
+- A malformed request to a shared board is refused with a plain sentence and stores nothing. Tags sent as one piece of text used to be saved a letter at a time
+- On a shared board a member can't drag one of your `#agent` or `#gauntlet` cards up or down inside its lane. Moving it to another lane was already refused
+- When an admin gives or takes back Pro, your audit log names the admin who did it instead of saying "system". Changes that come from billing still say system
+- Manage subscription only shows when there's a subscription to manage. With Pro an admin gave and took back, Members offered it and it answered "No subscription to manage yet"
+- When your plan changes while your board is open (Pro bought, lapsed, or given or taken back by an admin), the account menu and the assistant's limit follow right away, without a reload
+- A viewer on a board whose owner's Pro plan lapsed is told the plan lapsed, instead of being told to ask for a writer role that wouldn't help
+- Section labels inside menus (the board switcher, the account menu on a shared board, the lane menu) look like the app's other section headers
+- When a pasted list leaves lines behind for different reasons, it gives each reason with the line it's about, not only the first one
+- On a shared board, a writer editing a card with an open question sees `#needs-ceo` locked under the Tags field, with the reason, instead of finding out on Save that they can't remove it
+- If a card you're editing on a shared board turns read only under you (you were made a viewer, the owner's plan lapsed, or the owner tagged it for an agent), what you typed stays on screen to copy, with a note that it wasn't saved. It used to vanish
+- In the audit log, a run of deleted cards by one person (clearing a lane, say) shows as one line you can open, like "Deleted 733 cards", so invites and role changes aren't buried. The downloads still list every card
+- A card a member wrote on stays marked however you edit it. The mark used to come off when an edit looked like a rewrite, which a one-letter fix to the title could set off and a full rewrite of the notes could miss. Now only "These words are mine now" takes it off
+- Tags a member puts on your card, or takes off it, are marked as theirs too, on the card and everywhere your agents read it
+- `search_cards` and `claim_card` say when a member wrote on a card, tagged it, or attached a file to it, the same as `get_board`
+- Your audit log names an admin on a plan change only when that admin's own Pro switch caused it. A subscription that lapsed moments after an admin edited your account used to be put down to that admin
+- If you're made a viewer while typing in the New card dialog or a lane's Add a card box, what you typed stays on screen to copy, marked "Not saved." If you're removed from the board, your own board opens with what you'd been typing there
+- The privacy page says your audit log shows the email of a site admin who gave or took back your Pro plan, and what a shared board keeps about who wrote, tagged, or attached what
+- A writer who deletes a card is told that only the board's owner can bring it back
+- On a shared board a member can't use more tags that only look like yours: a digit for a letter (`ag3nt`, `ship-0k`), an odd Latin letter, or Cherokee or Lisu letters drawn like Latin ones. A member's title can't hold `#agent` anywhere in it, not only at the end
+- Text nobody can see is taken out of what a member writes on your board: zero-width characters, direction overrides, and hidden tag characters, in titles, notes, tags, and file names. A title of nothing else is refused instead of making a blank card
+- After a pasted list leaves lines behind, the button reads "Try these 3 again" instead of "Add 3 cards", and the box shows every line that's left, from the top
+- At the member cap or the daily invite cap, the email field and the role choice are off along with the Invite button, and the field says why. The passphrase fields in the Encryption dialog are off the same way on a shared board
+- Changing a member's role while your Pro plan is lapsed says they stay view only until it's back, instead of "It took effect right away"
+- "These words are mine now" goes by the words you read. If a member changes the card's title, notes, or tags before your click lands, even a moment before, nothing is marked as yours and the card says it changed. Press again once you've read what it says now
+- If someone changes a card while you have it open on your own board, the card says who, and shows what it says now. Fields you haven't typed in take the new words, and anything you were typing stays put
+- `get_card` hands your agents each file's text between a begin line and an end line that carry a code made for that one answer, so a member's file can't pose as one of yours or as the board. Notes a member wrote are fenced the same way
+- `get_card` says so when a file it lists isn't shown (a PDF, a text file over 32 KB, an image that's too big), instead of skipping it without a word
+- After a pasted list leaves lines behind, "Try these 3 again" is only offered when trying again could work. Lines turned down for what they say (one of the owner's tags, a title nobody can read) get "Fix these 3 to add them" instead, and the button comes back once they're edited or taken out
+- On a shared board every attached file says who attached it, yours included: "attached by you", or the owner's or member's email
+- On a shared board, when you ask the assistant for a card with a tag, it says the tag was left off and why. It used to add the card without the tag and say nothing
+- Your agents are told a member wrote a card's title everywhere the title is repeated to them: the list of claimed cards in `get_board`, a refused claim, `ask_ceo`, and what `move_cards`, `update_card`, and `delete_cards` answer
+- On a shared board a member's title can't dress up one of your tags with a look-alike `#`, an odd dash or dot, a space after the `#`, or an invisible character inside the word. `#agent-smith` and `C# agent notes` are still fine
+- Typing a look-alike of one of the owner's tags in the middle of a line in Add a card says what it was read as ("#ag3nt reads as #agent."), the same as the card editor does
+- When a board you're a member of goes view only because of its owner's plan, it says their Pro plan isn't active right now, which is true whether the plan ran out or an admin took it back
+
+### Fixed
+- Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board
+- The Add a card box grows to fit long lines that wrap, instead of cutting one off, and scrolls past a dozen lines. On a phone, the reasons under it no longer run under the floating Ask button
+- A file's name can't hold a control character that breaks it onto a second line where your agents read the file list
+- The tags suggested above the Tags field wrap onto more rows instead of running off the right edge
+- Turning encryption off on a board with files no longer blanks the page until you reload. The board was decrypted either way; now it shows right away
+- A note that only looks like encrypted text can't stop you from turning encryption off anymore. A member could leave one on a shared board, and after you encrypted it, decrypting said "Some of the board is still encrypted" until you edited that card
+- On a board that isn't encrypted, a tag typed to look like encrypted text is cleaned up like any other tag
+- When the board changes while a card is open, the lanes no longer flash on top of the card for half a second
+- Notes with line breaks in them can't pass for another card in what your agents and the assistant get back from a search. Each result is one line now, and it says so on that line when a member wrote the card. The same goes for every other list your agents read: one card, one line
+- A board can't end up both encrypted and shared. An invite sent at the same moment as turning encryption on used to be able to slip through, and that person got in when you later turned encryption off. Now one of the two is refused and says why
+- If an encrypted board does have someone on its members list, Members shows them, marked "no access", so you can take them off. An invite to an encrypted board can't be accepted, and turning encryption off removes whoever is left and writes it in the audit log
+- Turning encryption on and back off no longer wipes who changed each card last. Card faces keep the name and "words by", and the card editor keeps "Edited by". A card you change while the board is encrypted comes back as changed by you
+- Turning encryption on no longer forgets which lane is To do, Doing, and Done when they aren't in that order
+- A board with a question waiting on your answer can't be encrypted until you answer it. Encrypting used to drop the question without saying so, and the agent that asked kept waiting
 
 ## [0.2.0] - 2026-10-04
 

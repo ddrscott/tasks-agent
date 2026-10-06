@@ -3,10 +3,14 @@
 // card. Files wait in the dialog and upload once the card exists to hang them on.
 // The "Add a card" row at the bottom of a lane is still the quick way to type one title or paste a list.
 
-import { useEffect, useRef, useState } from "react";
+import { ownerTagLike, plainError } from "../member-rules";
+import { useContext, useEffect, useRef, useState } from "react";
+import { AskOwnerContext } from "./Ask";
+import { OWNER_TAG_NOTE } from "./member";
 import { cleanTag, splitTitleTags, type Lane } from "../shared";
 import { formatBytes, NoFiles, uploadFile } from "./Attachments";
 import { DiscardBar, useDiscardGuard } from "./Discard";
+import { Unsaved, useDraft } from "./Unsaved";
 import { MODAL, useModal } from "./modal";
 import { NotesFullButton } from "./NotesFull";
 import { IconClip, IconClose, IconPlus } from "./icons";
@@ -26,12 +30,20 @@ type Props = {
   vault: Vault | null;
   /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
   filesNote?: string;
+  /** The owner's id, on a board someone shared with you: files upload to that board. */
+  board?: string;
   /** Adds the card and resolves to its id. */
   onAdd(input: NewCardInput): Promise<string>;
   onClose(): void;
+  /**
+   * Set when the board turned view only under this dialog (made a viewer, or the owner's plan
+   * lapsed): why, in a sentence. Nothing can be added any more, so the dialog shows what was
+   * typed, read only, to copy out.
+   */
+  frozen?: string | null;
 };
 
-export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onClose }: Props) {
+export function NewCard({ lanes, laneId, knownTags, vault, filesNote, board, onAdd, onClose, frozen }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -47,6 +59,8 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   // Set once the card exists. From then on Add card only retries the files that didn't upload.
   const [addedId, setAddedId] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  // Set on a board someone shared with you: the owner's email. The tags that direct their agents are theirs.
+  const owner = useContext(AskOwnerContext);
 
   // showModal() would put focus on the X. The title is where typing starts.
   useModal(ref, { focus: (dialog) => dialog.querySelector<HTMLTextAreaElement>(".title-input")?.focus() });
@@ -81,6 +95,12 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   }, [filesNote]);
 
   const dirty = !!(title.trim() || notes.trim() || due || tags.trim() || files.length);
+  const typed = { ...(title.trim() ? { title } : {}), ...(notes.trim() ? { notes } : {}), ...(tags.trim() ? { tags: tags.trim() } : {}) };
+  // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
+  useDraft("new-card", addedId ? null : { ...typed, where: "The New card dialog" });
+  // Nothing typed, or the card already exists: there's nothing to keep, so a board that turned view only just closes this.
+  const nothingToKeep = !Object.keys(typed).length || !!addedId;
+  useEffect(() => { if (frozen && nothingToKeep) onClose(); }, [frozen, nothingToKeep]); // eslint-disable-line react-hooks/exhaustive-deps
   // The X and Esc ask before throwing away what was typed or queued. Once the card is added
   // there's nothing left to lose but a retry, so they just close.
   const guard = useDiscardGuard(() => dirty && !addedId, onClose);
@@ -107,6 +127,15 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
     try {
       if (!id) {
         const split = moveTitleTags();
+        // A member can't tag a card for the owner's agents. Said before anything is sent: the
+        // tag is in the Tags field by now, where it can be seen and taken out.
+        // One that only reads as the owner's (`ship_ok`, a look-alike letter) is refused the same way.
+        const typed = owner ? split.tags.find((t) => ownerTagLike(t)) : undefined;
+        if (typed) {
+          setError(`${OWNER_TAG_NOTE(ownerTagLike(typed)!, owner!, typed)} Take ${typed} out of Tags to add this card.`);
+          setBusy(false);
+          return;
+        }
         id = await onAdd({
           laneId: lanes.some((l) => l.id === lane) ? lane : laneId,
           title: split.title, notes, due: due || null,
@@ -115,7 +144,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
         setAddedId(id);
       }
     } catch (e) {
-      setError((e as Error).message || "That didn't save. Try again.");
+      setError(plainError((e as Error).message ?? "") || "That didn't save. Try again.");
       setBusy(false);
       return;
     }
@@ -123,7 +152,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
     const failed: File[] = [];
     let why = "";
     for (const f of files) {
-      try { await uploadFile(id, f, vault); } catch (e) { failed.push(f); why = (e as Error).message; }
+      try { await uploadFile(id, f, vault, board); } catch (e) { failed.push(f); why = (e as Error).message; }
     }
     if (!failed.length) return onClose();
     setFiles(failed);
@@ -132,6 +161,31 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
   }
 
   const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void add(); } };
+
+  if (frozen) {
+    if (nothingToKeep) return null;
+    return (
+      <dialog
+        ref={ref} className="card-dialog card-view" {...MODAL} aria-label="New card, not saved" tabIndex={-1}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
+        onCancel={(e) => { e.preventDefault(); onClose(); }}
+      >
+        <div className="dialog-body">
+          <div className="dialog-top">
+            <h2 className="h">NEW_CARD</h2>
+            <span className="role-chip" data-role="viewer">view only</span>
+            <button type="button" className="btn ghost icon dialog-x" aria-label="Close" title="Close (Esc)" onClick={onClose}><IconClose /></button>
+          </div>
+          <Unsaved draft={typed} why={`${frozen} This card wasn't added.`} after={`Closing this throws it away.${files.length ? ` The ${files.length === 1 ? "file you picked wasn't" : `${files.length} files you picked weren't`} uploaded.` : ""}`} />
+        </div>
+        <div className="dialog-foot">
+          <span className="view-note">View only: nothing can be added to this board right now.</span>
+          <span className="spacer" />
+          <button className="btn primary" onClick={onClose}>Close</button>
+        </div>
+      </dialog>
+    );
+  }
 
   return (
     <dialog
@@ -169,7 +223,7 @@ export function NewCard({ lanes, laneId, knownTags, vault, filesNote, onAdd, onC
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
         </div>
-        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} />
+        <TagField value={tags} onChange={setTags} known={knownTags} onEnter={() => void add()} placeholder={owner ? "client urgent" : undefined} />
         {error && <div className="dialog-error" role="alert">{error}</div>}
         {filesNote ? <NoFiles note={filesNote} /> : (
         <div className={`attachments${over ? " over" : ""}`}>

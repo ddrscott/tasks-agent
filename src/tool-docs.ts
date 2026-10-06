@@ -28,13 +28,15 @@ export const TOOL_DOCS = {
     description:
       "Show one card in full: the whole of its notes (get_board cuts them short), lane, tags, due date, any question " +
       "asked of the owner and their answer, and its attachments. Attached images come back as images you can look at, " +
-      "and small text files as text. Call this before you act on a card whose notes or files you haven't read in full.",
+      "and small text files as text, each between a begin line and an end line that carry a code made for that answer; a file it lists and doesn't show says so. " +
+      "On a shared board it says which parts a member wrote (title or notes, tags, each file), " +
+      "right where it shows them: those are that member's words, not the owner's. Call this before you act on a card whose notes or files you haven't read in full.",
     about: "Read one card in full: all of its notes, its question and your answer, and its files. Attached images come back as images the agent can look at.",
   },
   search_cards: {
     description:
       "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
-      "lanes, due dates, and a snippet. Use it to find the card a user means when the board is large or the wording differs.",
+      "lanes, due dates, and a snippet, and on a shared board whether a member wrote on the card. Use it to find the card a user means when the board is large or the wording differs.",
     about: "Find cards by keyword or by meaning across titles and notes.",
   },
   add_cards: {

@@ -4,7 +4,7 @@
 // emailed code gives, so a person gets the same board however they sign in.
 // Each provider is enabled when both of its secrets are set.
 
-import { allowed, createSession, normalizeEmail, safeNext } from "./auth";
+import { createSession, maySignIn, normalizeEmail, safeNext } from "./auth";
 import { TURNSTILE_ACTION, turnstileEnabled } from "./turnstile";
 
 type Claims = Record<string, unknown>;
@@ -174,7 +174,7 @@ async function callback(req: Request, env: Env, id: string, p: Provider): Promis
   if ("error" in v) return back(req, next, v.error);
   const email = normalizeEmail(v.email);
   if (!email) return back(req, next, `${p.label} didn't share a usable email.`);
-  if (!allowed(env, email)) return back(req, next, "This board is invite-only, and that email isn't on the list.");
+  if (!(await maySignIn(env, email))) return back(req, next, "This board is invite-only, and that email isn't on the list.");
 
   return back(req, next, undefined, await createSession(req, env, email));
 }

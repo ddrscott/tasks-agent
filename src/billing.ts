@@ -9,11 +9,18 @@
 // STRIPE_PRICE_ID are set.
 
 import { currentUser, type User } from "./auth";
+import { planChanged } from "./members";
+import { memberCap } from "./member-rules";
 import { proGranted } from "./users";
 
 export type Plan = "free" | "pro";
-/** `granted` is Pro an admin gave (users.ts): there's no subscription behind it to manage. */
-export type Usage = { plan: Plan; used: number; limit: number; billing: boolean; granted?: boolean };
+/**
+ * `granted` is Pro an admin gave (users.ts). `manage` is whether "Manage subscription" has
+ * anything to open: billing is on and this account has a Stripe customer (`canManage`). The
+ * app offers the button on that and nothing else, so it never leads to "No subscription to
+ * manage yet."
+ */
+export type Usage = { plan: Plan; used: number; limit: number; billing: boolean; granted?: boolean; manage: boolean };
 
 // past_due keeps Pro while Stripe retries the card; Stripe moves it to canceled or
 // unpaid if the retries fail, and the webhook downgrades then.
@@ -66,8 +73,23 @@ function form(params: Record<string, unknown>, prefix = "", out = new URLSearchP
   return out;
 }
 
-async function stripe<T>(env: Env, method: "GET" | "POST", path: string, params?: Record<string, unknown>, idempotencyKey?: string): Promise<T> {
-  const url = new URL(`https://api.stripe.com/v1${path}`);
+const STRIPE_API = "https://api.stripe.com/v1";
+
+/**
+ * A stand-in for Stripe's API that a signed webhook may name, on a dev server only
+ * (DEV_LOGIN_CODES=1) and only on this machine. `check:members` posts a correctly signed
+ * webhook and answers the "fetch the subscription" call itself, so the whole path from
+ * Stripe's event to an open member's board runs offline. Anywhere else the header is ignored.
+ */
+const DEV_STRIPE_HEADER = "X-Dev-Stripe-Api";
+function devStripeBase(req: Request, env: Env): string | undefined {
+  if (env.DEV_LOGIN_CODES !== "1") return undefined;
+  const base = req.headers.get(DEV_STRIPE_HEADER);
+  return base && /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}\/v1$/.test(base) ? base : undefined;
+}
+
+async function stripe<T>(env: Env, method: "GET" | "POST", path: string, params?: Record<string, unknown>, idempotencyKey?: string, base: string = STRIPE_API): Promise<T> {
+  const url = new URL(`${base}${path}`);
   if (method === "GET" && params) url.search = form(params).toString();
   const headers: Record<string, string> = { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` };
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
@@ -104,6 +126,13 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
        current_period_end = excluded.current_period_end, cancel_at_period_end = excluded.cancel_at_period_end,
        updated_at = excluded.updated_at`,
   ).bind(userId, sub.metadata.email ?? "", sub.customer, sub.id, sub.status, periodEnd, sub.cancel_at_period_end ? 1 : 0, Date.now()).run();
+  // A shared board follows its owner's plan: members drop to view only when Pro lapses and get
+  // their roles back when it returns, on the sockets they already have open. This is where
+  // that happens at once: the board is told right here, before Stripe gets its 200, and it
+  // rechecks every open member socket against the row just written (planChanged in members.ts,
+  // which retries). The board's own 30-second sweep is only the backstop for a webhook that
+  // never arrives.
+  await planChanged(env, userId).catch((e: Error) => console.error("telling the board about a plan change failed", e.message));
 }
 
 // ---------- public plans ----------
@@ -112,8 +141,12 @@ async function storeSubscription(env: Env, sub: StripeSubscription): Promise<voi
 export type PlanPrice = { amount: number; currency: string; interval: string; intervalCount: number };
 export type Plans = {
   free: { dailyChats: number };
-  /** Null while billing is off: Pro isn't on sale, so there's nothing to quote. */
-  pro: { dailyChats: number; price: PlanPrice | null } | null;
+  /**
+   * Null while billing is off: Pro isn't on sale, so there's nothing to quote. `members` is how
+   * many people a Pro owner can have on their board, pending invites included (MAX_BOARD_MEMBERS),
+   * the same number the invite API enforces.
+   */
+  pro: { dailyChats: number; price: PlanPrice | null; members: number } | null;
 };
 
 type StripePrice = { unit_amount: number | null; currency: string; active: boolean; recurring: { interval: string; interval_count: number } | null };
@@ -147,7 +180,7 @@ export async function handlePlans(req: Request, env: Env, path: string): Promise
   if (path !== "/api/plans" || req.method !== "GET") return null;
   const plans: Plans = {
     free: { dailyChats: dailyLimit(env, "free") },
-    pro: billingEnabled(env) ? { dailyChats: dailyLimit(env, "pro"), price: await proPrice(env) } : null,
+    pro: billingEnabled(env) ? { dailyChats: dailyLimit(env, "pro"), price: await proPrice(env), members: memberCap((env as { MAX_BOARD_MEMBERS?: string }).MAX_BOARD_MEMBERS) } : null,
   };
   // Short at the edge and in the browser when the price is missing, so a Stripe hiccup clears quickly.
   const maxAge = plans.pro && !plans.pro.price ? 60 : 600;
@@ -205,15 +238,25 @@ async function webhook(req: Request, env: Env): Promise<Response> {
   }
   if (!subscriptionId) return Response.json({ ignored: "no subscription" });
   // Fetch rather than trust the event body, so an old event can't overwrite newer state.
-  await storeSubscription(env, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${subscriptionId}`));
+  await storeSubscription(env, await stripe<StripeSubscription>(env, "GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, undefined, devStripeBase(req, env)));
   return Response.json({ ok: true });
 }
 
 // ---------- Checkout and the customer portal ----------
 
-async function customerFor(env: Env, user: User): Promise<string | null> {
+async function customerFor(env: Env, user: Pick<User, "id">): Promise<string | null> {
   const row = await env.DB.prepare("SELECT customer_id FROM subscriptions WHERE user_id = ?").bind(user.id).first<{ customer_id: string }>();
-  return row?.customer_id ?? null;
+  return row?.customer_id || null;
+}
+
+/**
+ * Whether the customer portal has something to open for this account: the same question
+ * `portal` below asks before it calls Stripe. Pro an admin gave, taken back or not, has no
+ * customer behind it, and neither does an account that never subscribed.
+ */
+export async function canManage(env: Env, userId: string): Promise<boolean> {
+  if (!billingEnabled(env)) return false;
+  try { return !!(await customerFor(env, { id: userId })); } catch (e) { console.error("billing", (e as Error).message); return false; }
 }
 
 async function checkout(req: Request, env: Env, user: User): Promise<Response> {

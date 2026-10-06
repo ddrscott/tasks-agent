@@ -25,7 +25,10 @@ type BoardTool<S extends z.ZodType> = {
 // entries the Connect page lists. A board tool with no entry there doesn't compile.
 const define = <S extends z.ZodType>(name: McpToolName, t: Omit<BoardTool<S>, "description" | "destructive">): BoardTool<S> => {
   const doc: { description: string; destructive?: boolean } = TOOL_DOCS[name];
-  return { ...t, description: doc.description, destructive: doc.destructive };
+  // A summary is one line. It repeats titles and lane names, some as stored and some as the
+  // caller sent them, and none of them gets to start a second line (oneLine in shared.ts).
+  const apply: BoardTool<S>["apply"] = (b, input) => { const r = t.apply(b, input); return { ...r, summary: ops.oneLine(r.summary) }; };
+  return { ...t, apply, description: doc.description, destructive: doc.destructive };
 };
 
 const TAGS_HINT = "Short labels like agent or client, lower case, no #. Only when the user or your own instructions call for one.";
@@ -124,20 +127,34 @@ export type SearchHit = {
   lane: string;
   due: string | null;
   match: "keyword" | "semantic" | "both";
+  /** What a member put on the card, as one line (memberNote in shared.ts). Left off a card that's all the owner's. */
+  member?: string;
 };
 export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
 
-/** Plain-text search results for a model: one line per card. */
+/**
+ * Plain-text search results for a model: exactly one line per card. The snippet is cut out of
+ * the notes as they were written, line breaks and all, and a member may have written them. Left
+ * as it was, notes holding a line shaped like a hit put that line in the results as a card of
+ * its own, with the note that says whose words they are a line further down. So the whole hit
+ * is flattened to one line (oneLine in shared.ts), the way get_board flattens its notes preview,
+ * and the member note is on that line.
+ */
 export function describeHits(r: SearchResult): string {
   const strip = (s: string) => s.replace(/[\u0001\u0002]/g, "");
   if (!r.hits.length) return "No matching cards.";
-  return r.hits.map((h) =>
-    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}`,
-  ).join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : "");
+  return r.hits.map((h) => ops.oneLine(
+    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}${h.member ?? ""}`,
+  )).join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : "");
 }
 
 /** What every tool call returns: a summary plus the fresh board, so the caller never works from a stale picture. */
-export type ToolOutcome = { ok: true; summary: string; board: string; ids?: string[] } | { ok: false; summary: string };
+/**
+ * `member` is for an outside agent (mcp.ts): the summary repeats the titles of the cards it
+ * touched, and when a member wrote one of those, this says so, a line per card. The in-app
+ * assistant's summaries are shown to the person who asked and carry none.
+ */
+export type ToolOutcome = { ok: true; summary: string; board: string; ids?: string[]; member?: string } | { ok: false; summary: string };
 
 function titlesOf(b: Board, ids: string[]): string[] {
   return ids.map((id) => b.cards.find((c) => c.id === id)?.title ?? id);

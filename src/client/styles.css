@@ -591,11 +591,24 @@ button.chip.tag:hover { border-color: var(--accent); }
 .quick-add { padding: 4px 10px 10px; }
 .quick-add .btn { width: 100%; justify-content: flex-start; color: var(--muted); }
 .quick-add .btn:hover { color: var(--ink); }
-.quick-add textarea { resize: none; display: block; min-height: 64px; }
-.quick-add .row { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+/* The box grows to fit what's in it, wrapped lines included, so a line left behind is never cut
+   off mid-wrap; past the max it scrolls, with a scrollbar that's always drawn. QuickAdd sizes it
+   by hand where field-sizing is missing. */
+.quick-add textarea { resize: none; display: block; field-sizing: content; min-height: 64px; max-height: 270px; max-height: calc(12lh + 20px + 2 * var(--border-w)); overflow-y: auto; }
+/* Twelve whole lines on a wide screen, six on a phone: the box and the reasons under it both have to fit in the lane above the keyboard. */
+@media (max-width: 900px) { .quick-add textarea { max-height: 170px; max-height: calc(6lh + 20px + 2 * var(--border-w)); } }
+.quick-add textarea::-webkit-scrollbar, .quick-add-note::-webkit-scrollbar { width: 8px; }
+.quick-add textarea::-webkit-scrollbar-thumb, .quick-add-note::-webkit-scrollbar-thumb { background: var(--muted); }
+.quick-add textarea::-webkit-scrollbar-track, .quick-add-note::-webkit-scrollbar-track { background: var(--line); }
+.quick-add .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
 .quick-add .row .btn { width: auto; flex: none; }
 .quick-add .row .btn.primary, .quick-add .row .btn.primary:hover { color: var(--accent-ink); }
-.quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; }
+.quick-add .hint { font: 11px var(--font-mono); color: var(--muted); margin-left: auto; white-space: nowrap; }
+/* What happened to the lines still in the box: "41 added, 19 left. …" */
+/* pre-line: a list left for more than one reason gets a row per reason (leftReasons in member.tsx). */
+/* A long list of reasons scrolls inside its own outline, so the button under it stays on screen. */
+.quick-add-note { margin: 6px 0 0; padding: 6px 8px; font: 12px/1.5 var(--font-mono); color: var(--ink); border: 1px solid var(--danger); overflow-wrap: anywhere; white-space: pre-line; max-height: min(28dvh, 252px); overflow-y: auto; }
+@media (max-width: 900px) { .quick-add-note { max-height: min(24dvh, 200px); } }
 
 .add-lane { flex: 0 0 auto; }
 .add-lane > .btn { border-style: dashed; background: transparent; color: var(--muted); }
@@ -752,7 +765,8 @@ dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
 .md ul:not(.md-tasks) > li.md-task, .md ol:not(.md-tasks) > li.md-task { margin-left: -22px; }
 .md li.md-task > ul, .md li.md-task > ol { grid-column: 2; }
 .md li.md-task > input { margin: 5px 0 0; width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
-.md li.md-task > input[readonly] { cursor: default; }
+/* A box nobody here can tick (a viewer's card): dimmed, and the cursor says so. */
+.md li.md-task > input:disabled { cursor: not-allowed; opacity: .45; }
 .md li.md-task.done > span { color: var(--muted); text-decoration: line-through; }
 .md a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .md a:hover { text-decoration-thickness: 2px; }
@@ -764,8 +778,8 @@ dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
 /* Tags, with the board's tags offered above the input (TagField.tsx). */
 .tag-field { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
 .tag-field > label { font: 12px var(--font-mono); color: var(--muted); }
-.tag-suggest { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; margin: 0 -2px; padding: 0 2px; }
-.tag-suggest::-webkit-scrollbar { display: none; }
+/* The chips wrap onto as many rows as they need. They used to sit in one row that scrolled sideways with nothing to say so, and the ones past the edge were as good as not there. */
+.tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-suggest .chip { flex: none; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; }
 @media (hover: none) { .tag-suggest .chip { height: 40px; padding: 0 12px; font-size: 13px; } }
 /* Move to: one button per lane, for touch screens, where dragging across lanes is the hard way.
@@ -880,7 +894,9 @@ a.att-name:hover { color: var(--accent-text); }
 .menu .menu-roles button[aria-checked="true"] { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
 /* Two groups in a row share one rule between them. */
 .menu-group + .menu-group { border-top: 0; margin-top: -4px; }
-.menu-label { padding: 6px 10px 2px; font: 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+/* A section label inside a menu. It's a section header like any other, so it takes `.h` with it in the markup: // CAPS_WITH_UNDERSCORES, slashes in the accent. */
+.menu-label { padding: 8px 10px 4px; }
+.menu-label .role-chip { margin-left: 8px; vertical-align: middle; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50;
@@ -1115,7 +1131,7 @@ a.att-name:hover { color: var(--accent-text); }
 .mono-box.live::before { content: "$ "; color: var(--accent); }
 
 .subhead { font-size: 14px; font-weight: 600; margin: 12px 0 0; }
-.legal section { display: flex; flex-direction: column; gap: 8px; }
+.legal section { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 72px; }
 .legal section p, .legal ul { color: var(--muted); max-width: 68ch; }
 .legal ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .legal li::marker { color: var(--accent); }
@@ -1239,6 +1255,9 @@ a.att-name:hover { color: var(--accent-text); }
   /* An open quick add sits at the bottom of its lane, right where the toast lands, and Undo would
      cover Add card. While one is open the toast goes to the top of the screen instead. */
   .app:has(.quick-add textarea) .toast { bottom: auto; top: calc(8px + env(safe-area-inset-top)); }
+  /* The reasons a pasted list left lines behind sit at the bottom of the lane, where the floating
+     Ask button is. While they're up the button steps aside; the assistant is still in the account menu. */
+  .app:has(.quick-add-note) .chat-fab { display: none; }
 }
 
 @media (max-width: 560px) {
@@ -1421,4 +1440,308 @@ a.chip.no-agent:hover { border-style: solid; }
 @media (max-width: 380px) {
   .demo .topbar { gap: 4px; }
   .demo .topbar .actions { gap: 2px; }
+}
+
+/* ============================================================ team boards: the owner's side
+   The Members dialog (Members.tsx), its audit log, the top bar's "Shared with N" button, and the
+   shared-board notice in the Encryption dialog. Role and status are said with a label chip or
+   plain text, never with a colored edge on a box. */
+.shared-btn { flex: none; }
+/* The last step of the top bar's fit (topbarFit.ts): the button gives up its place and its count
+   moves onto the account button, whose menu has Members. */
+.shared-badge { display: none; position: absolute; top: -6px; right: -6px; min-width: 16px; padding: 2px 3px; font: 600 10px/1 var(--font-mono); text-align: center; background: var(--accent); color: var(--badge-ink, var(--accent-ink)); border-radius: var(--radius-sm); }
+.account-btn { position: relative; }
+.topbar[data-tight~="shared"] .shared-btn { display: none; }
+.topbar[data-tight~="shared"] .shared-badge { display: block; }
+.menu .menu-note { margin-left: 8px; font: 11px var(--font-mono); color: var(--accent-text); }
+.shared-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); color: var(--accent-text); white-space: nowrap; }
+/* Pro lapsed: the button says sharing is paused. With the label showing, the chip is the count alone. */
+.shared-btn.paused .shared-count { border-color: var(--danger); color: var(--danger); }
+.shared-paused { display: none; }
+/* When the label has given way (a tight bar, a phone), the chip carries the word. */
+.topbar[data-tight~="labels"] .shared-btn.paused .shared-paused { display: inline; }
+@media (max-width: 900px) { .shared-btn.paused .shared-paused { display: inline; } }
+.mem-state:focus { outline: none; }
+.mem-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px, calc(100dvh - 32px)); }
+.mem-head { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 20px 20px 0; }
+.members-dialog .dialog-body { gap: 16px; padding-top: 16px; }
+.members-dialog p { margin: 0; }
+.members-dialog code { font: 12px var(--font-mono); }
+.mem-tabs { flex: none; display: flex; gap: 4px; border-bottom: var(--border-w) solid var(--line); }
+.mem-tabs [role="tab"] { background: none; border: 0; padding: 8px 12px 9px 0; margin-right: 12px; font: 600 12px var(--font-mono); letter-spacing: .04em; color: var(--muted); }
+.mem-tabs [role="tab"]::before { content: "$ "; color: var(--accent); visibility: hidden; }
+.mem-tabs [role="tab"][aria-selected="true"] { color: var(--ink); }
+.mem-tabs [role="tab"][aria-selected="true"]::before { visibility: visible; }
+.mem-tabs [role="tab"]:hover { color: var(--ink); }
+.mem-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.mem-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mem-summary { font-size: 14px; line-height: 1.55; }
+.mem-summary.live::before { content: "$ "; font: 600 14px var(--font-mono); color: var(--accent); }
+.mem-loading { font: 13px var(--font-mono); color: var(--muted); }
+.mem-loading::before { content: "$ "; color: var(--accent); }
+.mem-loading::after { content: "_"; color: var(--accent); animation: blink 1s steps(1) infinite; }
+.mem-chip { display: inline-block; padding: 1px 5px; font: 600 10px/1.5 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; color: var(--accent-text); border: 1px solid var(--accent); border-radius: var(--radius-sm); vertical-align: 1px; }
+.mem-chip.warn { color: var(--danger); border-color: var(--danger); }
+.mem-state, .mem-gate, .mem-dev { display: flex; flex-direction: column; gap: 8px; padding: 12px; font-size: 13px; line-height: 1.55; border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.mem-state-head { font-size: 14px; font-weight: 600; }
+.mem-gate { border-color: var(--accent); background: var(--accent-soft); }
+.mem-dev { border-style: dashed; }
+.mem-copy { display: flex; gap: 8px; }
+.mem-copy .field { flex: 1; min-width: 0; padding: 0 10px; height: 34px; font-size: 12px; }
+.mem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.mem-actions a.btn { text-decoration: none; }
+.mem-error { font-size: 13px; line-height: 1.5; color: var(--danger); }
+.mem-warn { color: var(--danger); }
+.mem-note { padding: 8px 10px; font-size: 13px; line-height: 1.5; border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.mem-note:empty { display: none; }
+.mem-note:focus { outline: none; }
+.mem-note.is-ok::before { content: "$ "; font: 600 13px var(--font-mono); color: var(--accent); }
+.mem-note.is-error { color: var(--danger); border-color: var(--danger); }
+.mem-empty, .mem-foot { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.mem-foot { font-size: 12px; }
+.mem-foot .linkish { font-size: inherit; }
+.mem-foot a { color: var(--accent-text); text-underline-offset: 3px; }
+
+/* // HOW_SHARING_WORKS: the same questions and answers in Members and under the pricing plans. */
+.mem-facts, .plan-facts dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px 24px; }
+.mem-facts dt, .plan-facts dt { font-size: 13px; font-weight: 600; color: var(--ink); }
+.mem-facts dd, .plan-facts dd { margin: 2px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.plan-facts { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.plan-facts dl { max-width: 900px; }
+
+.mem-invite { display: flex; flex-direction: column; gap: 12px; }
+.mem-roles { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.mem-roles legend { padding: 0; margin-bottom: 6px; font: 12px var(--font-mono); color: var(--muted); }
+.mem-roles:disabled, .mem-invite .field:disabled { opacity: .55; }
+/* A field that can't be typed in looks it: greyed, with no text cursor. */
+.mem-invite .field:disabled, .enc-fields .field:disabled { background: var(--surface-2); cursor: not-allowed; }
+.enc-off { margin: 0; font: 12px/1.5 var(--font-mono); color: var(--ink); }
+.dialog-body label.mem-role-opt { flex-direction: row; align-items: baseline; gap: 8px; font: 13px/1.5 var(--font-ui); color: var(--muted); cursor: pointer; }
+.mem-role-opt input { flex: none; margin: 0; accent-color: var(--accent); transform: translateY(2px); }
+.mem-role-opt b { color: var(--ink); font-weight: 600; margin-right: 4px; }
+.mem-submit { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.mem-caps { flex: 1 1 260px; font: 12px/1.5 var(--font-mono); color: var(--muted); }
+
+.mem-list { list-style: none; margin: 0; padding: 0; border-top: var(--border-w) solid var(--line); }
+.mem-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; padding: 10px 0; border-bottom: var(--border-w) solid var(--line); }
+.mem-who { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mem-email { font: 600 13px/1.4 var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.mem-meta { font: 12px/1.6 var(--font-mono); color: var(--muted); }
+.mem-ctl { flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mem-ctl .field.mem-role { width: auto; height: 34px; padding: 0 8px; font: 12px var(--font-mono); }
+.btn.mem-drop.armed, .btn.mem-drop.armed:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: var(--bg); font-weight: 600; }
+
+.audit-actions .mem-foot { flex: 1 1 220px; }
+/* Narrow the log by kind and by person. The server filters; these only ask. */
+.audit-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.dialog-body .audit-filter label { flex: 0 1 260px; min-width: 0; }
+.audit-filter .field { height: 36px; padding: 0 8px; font: 12px var(--font-mono); }
+.audit-filter .mem-foot { flex: 1 1 220px; }
+.audit { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.audit th:nth-child(1) { width: 22%; } .audit th:nth-child(2) { width: 27%; } .audit th:nth-child(3) { width: 15%; } .audit th:nth-child(4) { width: 23%; } .audit th:nth-child(5) { width: 13%; }
+.audit th { text-align: left; vertical-align: bottom; padding: 6px 12px 6px 0; font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: var(--border-w) solid var(--line); }
+.audit td { vertical-align: top; padding: 8px 12px 8px 0; line-height: 1.45; border-bottom: 1px solid var(--line); }
+.audit th:last-child, .audit td:last-child { padding-right: 0; }
+.audit-utc, .audit-code { display: block; font: 11px/1.5 var(--font-mono); color: var(--muted); }
+.audit-who, .audit-role { font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.audit-card { overflow-wrap: anywhere; }
+.audit-you, .audit-none { color: var(--muted); }
+/* A run of card entries drawn as one line (foldAudit in Members.tsx). */
+.audit-open { display: block; margin-top: 2px; font: 12px var(--font-mono); color: var(--accent-text); text-align: left; }
+.audit-open:hover { color: var(--ink); }
+
+.enc-shared { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); }
+.enc-fields { margin: 0; padding: 0; border: 0; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.enc-fields:disabled { opacity: .5; }
+
+@media (max-width: 720px) {
+  /* The audit table doesn't fit a narrow dialog. Each entry becomes a block, with the column's
+     name in front of each value. */
+  .audit thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .audit, .audit tbody, .audit tr, .audit td { display: block; width: auto; }
+  .audit tr { padding: 10px 0; border-bottom: var(--border-w) solid var(--line); }
+  .audit td { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 0 8px; padding: 2px 0; border: 0; }
+  .audit td::before { content: attr(data-th); grid-row: span 2; font: 600 10px/2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .audit td > * { grid-column: 2; }
+}
+@media (max-width: 560px) {
+  /* Members takes the whole screen on a phone, like the card dialogs. */
+  dialog.members-dialog {
+    inset: var(--vvt, 0px) 0 auto 0; margin: 0;
+    width: 100vw; max-width: 100vw; height: var(--vvh, 100dvh); max-height: var(--vvh, 100dvh);
+    border-width: 0; border-radius: 0; animation-name: sheet-in;
+  }
+  .mem-head { padding: max(12px, env(safe-area-inset-top)) 12px 0; }
+  .members-dialog .dialog-body { padding: 14px 12px calc(16px + env(safe-area-inset-bottom)); }
+  .mem-ctl { flex: 1 1 100%; }
+  .mem-ctl .btn { flex: 1 1 auto; justify-content: center; }
+  .mem-copy { flex-direction: column; }
+  .mem-submit .btn { flex: 1 1 100%; justify-content: center; }
+  .shared-btn { padding: 0 8px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .mem-ctl .field.mem-role, .mem-copy .field { height: 40px; }
+  .mem-tabs [role="tab"] { padding-top: 12px; padding-bottom: 12px; }
+  .dialog-body label.mem-role-opt { padding: 4px 0; }
+  .shared-btn { min-width: 40px; justify-content: center; }
+}
+
+/* ============================================================ team boards, the member's side */
+/* A board someone shared with you (member.tsx, BoardSwitcher.tsx, Invite.tsx). Role and state are
+   said with a label chip and plain words, in a full outline; nothing here is a colored edge. */
+
+/* viewer / writer / view only. The writer's is lit, the others are quiet. */
+.role-chip {
+  display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 6px;
+  font: 600 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+  color: var(--muted); border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent;
+}
+.role-chip[data-role="writer"] { color: var(--accent-text); border-color: var(--accent); }
+
+/* The switcher, by the wordmark. Not drawn at all with no shared boards. */
+.board-switch { flex: none; min-width: 0; }
+.board-switch-btn { gap: 8px; max-width: 320px; }
+.board-switch-btn svg { width: 15px; height: 15px; flex: none; }
+.board-switch-name { font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.board-switch-caret { font-size: 10px; color: var(--muted); }
+.board-switch > .popover { left: 0; right: auto; }
+/* The last step of the top bar's fit (topbarFit.ts): on a phone, an owner who shares a board and is
+   on someone else's has the switcher, a question, and Sessions in one row, and the account button
+   would fall off the end. The wordmark gives up its place; screen readers still get the heading. */
+.topbar[data-tight~="mark"]:has(.board-switch) .wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.board-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); max-height: min(70dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
+.board-menu > * { flex: none; }
+.menu.board-menu [role="menuitemradio"] { display: flex; align-items: baseline; gap: 8px; }
+.board-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.board-row-name { font: 13px var(--font-mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-row-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 11px var(--font-mono); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+/* In the account menu: whose board the next item is about. */
+.menu .menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The line under the top bar: whose board, what you can do, what would change it. It stays. */
+.member-line {
+  flex: none; margin: 12px 24px 0; padding: 7px 12px;
+  display: flex; align-items: baseline; gap: 10px;
+  font: 12px/1.5 var(--font-mono); color: var(--muted);
+  border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+}
+.member-line + .board { padding-top: 12px; }
+.member-line-mark { flex: none; color: var(--accent); font-weight: 700; }
+.member-line .role-chip { align-self: center; }
+.member-line-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.member-line-text b { font-weight: 600; color: var(--ink); }
+
+/* A member's board: lane names are text, and a viewer's cards open but don't lift. */
+.lane-name.static, .lane-name.static:hover { cursor: default; border-color: transparent; }
+.board[data-mode="viewer"] .card { cursor: pointer; }
+
+/* A question on someone else's board: the options as text, and who answers. Nothing to tap. */
+ol.ask-options { list-style: none; margin: 0; padding: 0; }
+.ask-opt.static, .ask-opt.static:hover { cursor: default; background: transparent; border-color: var(--line); border-style: dashed; color: var(--muted); }
+.ask-opt.static.rec, .ask-opt.static.rec:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.ask-owner { margin: 0; font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.ask-owner::before { content: "$ "; color: var(--accent); font-weight: 700; }
+/* On a writer's board, an agent's work order says whose it is, the way a question says who it waits on. */
+.card-held { margin: 6px 0 0; font: 11px/1.5 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.card-held::before { content: "$ "; color: var(--accent); font-weight: 700; }
+.dialog-body .held-note { flex: none; margin: 0; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); }
+
+/* Who made the last change: on the card face when it wasn't you, and in the open card. */
+/* Typing that couldn't be saved because the board went read only under the person: in the open card,
+   the New card dialog, a lane's "Add a card" box, and the notice on their own board. A full outline, no rail. */
+.unsaved { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); }
+.unsaved p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.unsaved label { display: flex; flex-direction: column; gap: 4px; font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.unsaved .field { font: 13px/1.5 var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--ink); resize: vertical; }
+/* Each box is as tall as what's in it, so nothing typed is hidden behind a scroll. */
+.unsaved textarea.field { field-sizing: content; min-height: 0; max-height: 240px; }
+.quick-add.frozen .unsaved { background: var(--surface); }
+.quick-add.frozen .unsaved .field { min-height: 0; }
+/* On your own board, after a shared one closed under you: why, and what you'd been typing there. */
+.kept-note {
+  flex: none; margin: 12px 24px 0; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  border: var(--border-w) solid var(--danger); border-radius: var(--radius-sm); background: var(--surface);
+  max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain;
+}
+.kept-note > p { margin: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.kept-head { display: flex; align-items: center; gap: 12px; }
+.kept-head .h { flex: 1; margin: 0; }
+.kept-note .unsaved { border-color: var(--line); background: var(--bg); }
+.kept-note + .board, .kept-note + .first-run { margin-top: 12px; }
+/* The owner's editor, on a card a member wrote on: whose words, what the mark does, and the button that takes it off. */
+.member-words { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--muted); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.member-words p { margin: 0; overflow-wrap: anywhere; }
+.member-words-who { display: flex; align-items: baseline; gap: 8px; color: var(--ink); }
+.member-words-who > span:last-child { min-width: 0; display: flex; flex-direction: column; }
+.member-words-who b { font-weight: 600; }
+.member-words-mark { flex: none; color: var(--accent); font-weight: 700; }
+.member-words-act { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.member-words-act .btn { height: 30px; font-size: 12px; }
+.member-words-hold { color: var(--ink); }
+.member-words .dialog-error { overflow-wrap: anywhere; line-height: 1.5; }
+/* The card's words changed while the owner had it open: who did it, and what it says now. Outlined all the way round in the accent, so it isn't missed. */
+.card-changed { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; font: 12px/1.55 var(--font-mono); color: var(--ink); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); background: var(--surface); }
+.card-changed p { margin: 0; overflow-wrap: anywhere; }
+.card-changed-who { display: flex; align-items: baseline; gap: 8px; }
+.card-changed-who b { font-weight: 600; }
+/* A card's saved words as plain text (SavedWords in member.tsx). */
+.saved-words { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: var(--border-w) dashed var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); }
+.saved-words .h { font-size: 11px; }
+.saved-words dl { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.saved-words dt { font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.saved-words dd { margin: 2px 0 0; font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.saved-words .saved-notes { max-height: 180px; overflow-y: auto; scrollbar-width: thin; }
+/* A file a member attached says so under its name. */
+.att-main { min-width: 0; display: flex; flex-direction: column; }
+.att-main .att-name { display: block; }
+.att-by { font: 11px/1.4 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.dialog-body .tag-lock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.card-by { margin-top: 6px; display: flex; flex-wrap: wrap; column-gap: 5px; min-width: 0; font: 11px/1.4 var(--font-mono); color: var(--muted); }
+.card-by-who { min-width: 0; overflow-wrap: anywhere; }
+.card-by-when { flex: none; white-space: nowrap; }
+.by-line { margin-top: 4px; overflow-wrap: anywhere; }
+.by-line b { font-weight: 600; color: var(--ink); }
+.by-wrote { display: block; }
+.card-by-wrote { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+
+/* The card as a viewer opens it: everything to read, one button. */
+.card-view .dialog-top { justify-content: flex-start; }
+.card-view .dialog-top .dialog-x { margin-left: auto; }
+.card-view-title { margin: 0; font: 600 18px/1.3 var(--font-display); overflow-wrap: anywhere; }
+.md-view.static, .md-view.static:hover { cursor: default; border-color: var(--line); }
+.card-facts { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; flex: none; }
+.card-facts dt, .invite-facts dt { font: 11px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.card-facts dd { margin: 4px 0 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px; overflow-wrap: anywhere; }
+.view-note { align-self: center; font: 11px var(--font-mono); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+
+/* The invite page. */
+.invite-card { width: min(460px, 100%); }
+.login-stack:has(.invite-card) { width: min(460px, 100%); }
+.invite-card a.wordmark { color: var(--ink); text-decoration: none; align-self: flex-start; }
+.invite-card p { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.invite-card p b { color: var(--ink); font-weight: 600; }
+.invite-card .mono { font-family: var(--font-mono); font-size: 13px; }
+.invite-card .invite-small { font-size: 13px; }
+.invite-facts { margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.invite-facts div { display: flex; align-items: baseline; gap: 12px; }
+.invite-facts dt { flex: none; width: 64px; }
+.invite-facts dd { margin: 0; min-width: 0; font: 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.invite-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.invite-actions .btn { flex: 1 1 auto; text-decoration: none; }
+.invite-wait { font: 13px var(--font-mono); }
+.invite-wait::before { content: "$ "; color: var(--accent); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .member-line, .kept-note { margin: 10px 16px 0; }
+  .board-switch-btn { padding: 0 8px; gap: 4px; }
+}
+@media (max-width: 560px) {
+  .member-line { margin: 8px 12px 0; padding: 6px 10px; gap: 8px; flex-wrap: wrap; }
+  .kept-note { margin: 8px 12px 0; padding: 10px; }
+  .member-line-text { flex-basis: 100%; }
+  .card-facts { grid-template-columns: 1fr 1fr; }
+  .login-card.invite-card { padding: 22px 18px; }
 }

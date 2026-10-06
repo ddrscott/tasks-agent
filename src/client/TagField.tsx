@@ -11,6 +11,8 @@ type Props = {
   /** Tags on the board, most used first. */
   known: string[];
   onEnter(): void;
+  /** Example tags shown in the empty field. A member's leaves out `agent`, which is the owner's. */
+  placeholder?: string;
 };
 
 const MAX_SHOWN = 12;
@@ -30,7 +32,7 @@ export function suggest(value: string, known: string[]): string[] {
   return [...open.filter((t) => t.startsWith(typing)), ...open.filter((t) => !t.startsWith(typing) && t.includes(typing))].slice(0, MAX_SHOWN);
 }
 
-export function TagField({ value, onChange, known, onEnter }: Props) {
+export function TagField({ value, onChange, known, onEnter, placeholder = "agent client" }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const options = suggest(value, known);
 
@@ -53,7 +55,7 @@ export function TagField({ value, onChange, known, onEnter }: Props) {
         </div>
       )}
       <input
-        id="tags-input" ref={input} className="field mono" value={value} placeholder="agent client"
+        id="tags-input" ref={input} className="field mono" value={value} placeholder={placeholder}
         spellCheck={false} autoCapitalize="off" autoCorrect="off" autoComplete="off" enterKeyHint="done"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {

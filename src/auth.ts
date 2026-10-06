@@ -2,6 +2,7 @@
 // plus a one-click link carrying the same code, and a verified code becomes a
 // 30-day session cookie. Only hashes of codes and session tokens are stored.
 
+import { hasInvite } from "./members";
 import { verifyTurnstile } from "./turnstile";
 import { isAdmin, noteSignIn } from "./users";
 
@@ -46,6 +47,15 @@ export function allowed(env: Env, email: string): boolean {
   return list.some((rule) => (rule.startsWith("@") ? email.endsWith(rule) : email === rule));
 }
 
+/**
+ * Whether this email may sign in: it's on the allow list, or someone invited it to their board
+ * (a live invite or a membership, members.ts). An invite lets that one address in and changes
+ * nothing else about the list.
+ */
+export async function maySignIn(env: Env, email: string): Promise<boolean> {
+  return allowed(env, email) || (await hasInvite(env, email));
+}
+
 function randomCode(): string {
   const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
   return n.toString().padStart(6, "0");
@@ -75,8 +85,13 @@ function sessionCookie(req: Request, token: string, maxAge: number): string {
  * crafted link can't bounce a fresh session to another site.
  */
 export function safeNext(raw: unknown): string | null {
-  if (typeof raw !== "string" || !raw.startsWith("/tasks/") || raw.startsWith("//") || /[\\\s]/.test(raw)) return null;
-  return raw.length <= 2000 ? raw : null;
+  if (typeof raw !== "string") return null;
+  // A fragment never comes along. `next` is written into the sign-in email and the SSO
+  // redirect, and a fragment is where an invite link keeps its token (// TEAM_BOARDS), so
+  // cutting it here means a token can't reach an email, a URL, or a log by way of `next`.
+  const path = raw.split("#")[0];
+  if (!path.startsWith("/tasks/") || path.startsWith("//") || /[\\\s]/.test(path)) return null;
+  return path.length <= 2000 ? path : null;
 }
 
 /** Start a 30-day session for a verified email. Returns the Set-Cookie header. */
@@ -119,7 +134,7 @@ async function start(req: Request, env: Env): Promise<Response> {
   if (!(await verifyTurnstile(req, env, body.turnstile))) {
     return json({ error: "We couldn't confirm you're human. Try again.", turnstile: true }, 403);
   }
-  if (!allowed(env, email)) return json({ error: "This board is invite-only, and that email isn't on the list." }, 403);
+  if (!(await maySignIn(env, email))) return json({ error: "This board is invite-only, and that email isn't on the list." }, 403);
 
   const prev = await env.DB.prepare("SELECT sent_at FROM login_codes WHERE email = ?").bind(email).first<{ sent_at: number }>();
   if (prev && Date.now() - prev.sent_at < RESEND_COOLDOWN_MS) {
@@ -164,7 +179,7 @@ async function start(req: Request, env: Env): Promise<Response> {
  * Count one guess against `key` and say whether it's within the hourly budget. One atomic
  * statement, so parallel requests can't all read the same count.
  */
-async function spendGuess(env: Env, key: string, max: number, windowMs: number): Promise<boolean> {
+export async function spendGuess(env: Env, key: string, max: number, windowMs: number): Promise<boolean> {
   const now = Date.now();
   const row = await env.DB.prepare(
     `INSERT INTO login_limits (key, window_start, guesses) VALUES (?1, ?2, 1)

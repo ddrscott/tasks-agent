@@ -11,12 +11,19 @@
 //           ciphertext and never learns either.
 // Download: GET  /tasks/api/attachments/<attachment id>[?download=1]
 //
+// A shared board (// TEAM_BOARDS): add ?board=<the owner's id> to either call. The member is
+//           checked with `access` (members.ts) first. A viewer can download and nothing else,
+//           a writer can upload, the file lands under the owner's prefix and counts against
+//           the owner's quota, and a member can only download files that are on the board now.
+//
 // Removing an attachment only drops it from the board, so undo can bring it back.
 // TodoAgent.collectAttachments deletes R2 objects once nothing refers to them.
 
 import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
 import { kidOf } from "./sealed";
+import { access, spendBoardCall, tooFast } from "./members";
+import { BOARD_ID, errorCode, plainError, SLOW_DOWN, visibleText } from "./member-rules";
 import { isSealed, type Attachment } from "./shared";
 
 const MB = 1024 * 1024;
@@ -28,11 +35,22 @@ const INLINE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "i
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const limit = (v: string | undefined, fallback: number) => (Number(v) > 0 ? Number(v) : fallback) * MB;
 
-function cleanName(raw: string | null): string {
+/**
+ * `member`: the upload is a member's. Their file's name is words on the owner's board like any
+ * others, so what can't be seen comes out of it (visibleText in member-rules.ts): direction
+ * overrides that make `exe.txt` read as `txt.exe`, zero-width characters, hidden tag characters.
+ * Control characters come out of everyone's.
+ */
+function cleanName(raw: string | null, member = false): string {
   let name = "file";
   try { name = decodeURIComponent(raw ?? "") || name; } catch { /* keep default */ }
-  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f"]/g, "").trim();
-  return (name || "file").slice(0, 200);
+  // No control characters, the same rule a title is held to (CONTROL in member-rules.ts): the
+  // C0 set, DEL, and the C1 set too. U+0085 is "next line" in there, and a name holding one
+  // could be laid out as two lines, the second shaped like another file's row. The line and
+  // paragraph separators go for the same reason.
+  name = name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029"]/g, "");
+  if (member) name = visibleText(name, true).replace(/\s+/g, " ");
+  return (name.trim() || "file").slice(0, 200);
 }
 
 function cleanType(raw: string | null): string {
@@ -40,7 +58,26 @@ function cleanType(raw: string | null): string {
   return /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(t) ? t : "application/octet-stream";
 }
 
-async function usedBytes(env: Env, user: User): Promise<number> {
+/**
+ * Whose files this request is about. No `board`, or your own id: yours. Anyone else's id goes
+ * through the membership check, and every failure is the same "not found".
+ */
+async function boardOf(req: Request, env: Env, user: User): Promise<{ ownerId: string; member: null | "viewer" | "writer"; lapsed: boolean } | Response | null> {
+  const board = new URL(req.url).searchParams.get("board");
+  if (board === null || board === user.id) return { ownerId: user.id, member: null, lapsed: false };
+  // In order of cost: an id that can't be a board, then this account's allowance for calls
+  // about other people's boards (a 429, with no lookup), and only then the membership read.
+  if (!BOARD_ID.test(board)) return null;
+  const slow = spendBoardCall(user.id);
+  if (slow) return slow;
+  const a = await access(env, user, board);
+  if (a.effective !== "viewer" && a.effective !== "writer") return null;
+  return { ownerId: board, member: a.effective, lapsed: a.reason === "plan_lapsed" };
+}
+
+const notFound = () => json({ error: "not found" }, 404);
+
+async function usedBytes(env: Env, user: { id: string }): Promise<number> {
   let total = 0;
   let cursor: string | undefined;
   do {
@@ -56,6 +93,15 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   const cardId = q.get("card");
   const staged = q.get("stage") === "1";
   if (!cardId && !staged) return json({ error: "Which card? Missing ?card=" }, 400);
+  const where = await boardOf(req, env, user);
+  if (!where) return notFound();
+  if (where instanceof Response) return where;
+  if (where.member === "viewer") {
+    return json({ error: where.lapsed ? "This board is view only until its owner's Pro plan is back." : "You can view this board, not change it.", code: "read_only" }, 403);
+  }
+  // Staged uploads only exist to turn encryption on or off, which is the owner's.
+  if (where.member && staged) return notFound();
+  const ownerId = where.ownerId;
   const sealedName = req.headers.get("X-Sealed-Name");
   const sealedType = req.headers.get("X-Sealed-Type");
   const sealed = sealedName !== null || sealedType !== null;
@@ -64,8 +110,11 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   // What this board accepts. An encrypted board takes files encrypted under its key, and plain
   // ones only while the owner is turning encryption off (beginDisable). A plain board takes
   // encrypted files only as staged uploads, which is how turning encryption on works.
-  const agent = await getAgentByName(env.TodoAgent, user.id);
-  const policy = await agent.uploadPolicy();
+  const agent = await getAgentByName(env.TodoAgent, ownerId);
+  const policy = await agent.uploadPolicy(where.member ? user.id : undefined, cardId);
+  if (policy.slow) return json({ error: plainError(SLOW_DOWN), code: "slow_down" }, 429);
+  if (policy.refused) return json({ error: plainError(policy.refused), code: errorCode(policy.refused) ?? "read_only" }, 403);
+  if (where.member && policy.kid) return notFound(); // an encrypted board has no members
   if (policy.kid) {
     if (!sealed && !(staged && policy.plainStaging)) return json({ error: "This board is encrypted, so files have to be too. Reload the page." }, 400);
     if (sealed && (kidOf(sealedName!) !== policy.kid || kidOf(sealedType!) !== policy.kid)) return json({ error: "That file was encrypted with a different key. Reload the page." }, 400);
@@ -77,18 +126,21 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
   if (!req.body || !Number.isFinite(size) || size <= 0) return json({ error: "That file is empty." }, 400);
   if (size > max) return json({ error: `Files can be up to ${max / MB} MB.` }, 413);
   const quota = limit(env.ATTACHMENT_QUOTA_MB, 250);
-  if ((await usedBytes(env, user)) + size > quota) {
-    return json({ error: `That would go over your ${quota / MB} MB of attachment space. Remove some files first.` }, 413);
+  // A member's upload counts against the board owner's space: the file is theirs to keep.
+  if ((await usedBytes(env, { id: ownerId })) + size > quota) {
+    return json({ error: where.member
+      ? `That would go over this board's ${quota / MB} MB of attachment space.`
+      : `That would go over your ${quota / MB} MB of attachment space. Remove some files first.` }, 413);
   }
 
   const att: Attachment = {
     id: `a${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    name: sealed ? sealedName! : cleanName(req.headers.get("X-Filename")),
+    name: sealed ? sealedName! : cleanName(req.headers.get("X-Filename"), !!where.member),
     size,
     type: sealed ? sealedType! : cleanType(req.headers.get("Content-Type")),
     addedAt: new Date().toISOString(),
   };
-  const key = `${user.id}/${att.id}`;
+  const key = `${ownerId}/${att.id}`;
   let body: ReadableStream | Uint8Array = req.body;
   if (sealed) {
     // Check it's really ciphertext under the same key before storing it, not a plain file with sealed headers.
@@ -105,25 +157,38 @@ async function upload(req: Request, env: Env, user: User): Promise<Response> {
     return json({ attachment: att });
   }
 
-  const r = await agent.attach(cardId!, att);
+  // The board checks the member again, with the same function, before it takes the file.
+  const r = await agent.attach(cardId!, att, { id: user.id, email: user.email });
   if (!r.ok) {
     await env.ATTACHMENTS.delete(key);
-    return json({ error: r.error }, 400);
+    return json({ error: plainError(r.error) }, 400);
   }
   return json({ attachment: att });
 }
 
 async function download(req: Request, env: Env, user: User, id: string): Promise<Response> {
-  if (!/^a[0-9a-f]{16}$/.test(id)) return json({ error: "not found" }, 404);
-  const obj = await env.ATTACHMENTS.get(`${user.id}/${id}`);
-  if (!obj) return json({ error: "That file is gone." }, 404);
+  if (!/^a[0-9a-f]{16}$/.test(id)) return notFound();
+  const where = await boardOf(req, env, user);
+  if (!where) return notFound();
+  if (where instanceof Response) return where;
+  // The owner can still fetch a file undo could bring back. A member gets what's on the board
+  // now, and the board counts the download against that member before R2 is read (fileFor).
+  if (where.member) {
+    const file = await (await getAgentByName(env.TodoAgent, where.ownerId)).fileFor(user.id, id);
+    if (file === "gone") return notFound();
+    if (file !== "ok") return tooFast(file.retryAfter);
+  }
+  const obj = await env.ATTACHMENTS.get(`${where.ownerId}/${id}`);
+  if (!obj) return where.member ? notFound() : json({ error: "That file is gone." }, 404);
+  // A member's copy isn't kept by the browser, so it's gone from there too once they're removed.
+  const cache = where.member ? "no-store" : "private, max-age=3600";
 
   // Ciphertext goes back as is, for the browser to decrypt. Never inline.
   if (obj.customMetadata?.sealed === "1") {
     return new Response(obj.body, {
       headers: {
         "Content-Type": "application/jose", "Content-Length": String(obj.size), "Content-Disposition": `attachment; filename="${id}.jwe"`,
-        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600", ETag: obj.httpEtag,
+        "X-Content-Type-Options": "nosniff", "Cache-Control": cache, ETag: obj.httpEtag,
         "Content-Security-Policy": "default-src 'none'; sandbox",
       },
     });
@@ -136,7 +201,7 @@ async function download(req: Request, env: Env, user: User, id: string): Promise
     "Content-Length": String(obj.size),
     "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
     "X-Content-Type-Options": "nosniff",
-    "Cache-Control": "private, max-age=3600",
+    "Cache-Control": cache,
     ETag: obj.httpEtag,
   });
   // PDFs need the browser's viewer; everything else renders with no scripts at all.

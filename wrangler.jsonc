@@ -85,6 +85,13 @@
     // Attachment storage per user, and the largest single file.
     "ATTACHMENT_QUOTA_MB": "250",
     "ATTACHMENT_MAX_MB": "25",
+    // Team boards (src/members.ts). The most people on one board, pending invites included;
+    // the most invite emails one owner can send in a UTC day, resends included, so an account
+    // can't be used to send spam; and how often a board rechecks its connected members against
+    // D1 as a backstop to the signal it gets when membership or the owner's plan changes.
+    "MAX_BOARD_MEMBERS": "10",
+    "MAX_DAILY_INVITE_EMAILS": "20",
+    "MEMBER_RECHECK_SECONDS": "30",
     // Workers AI embedding model for semantic search. Changing it re-embeds every card.
     "EMBEDDING_MODEL": "@cf/baai/bge-small-en-v1.5",
     // Stripe price for the Pro subscription (price_…). Billing stays off until this and

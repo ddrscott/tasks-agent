@@ -16,8 +16,9 @@ type Ctx = { board: Board; onConnect(): void };
 /** Set only while the board has cards and no agent has ever connected. */
 const NoAgentContext = createContext<Ctx | null>(null);
 
-export function NoAgentProvider({ board, onConnect, children }: { board: Board; onConnect(): void; children: ReactNode }) {
-  const needs = needsAgent(board);
+/** `off` on a board someone shared with you: connecting an agent is its owner's business, so none of this shows. */
+export function NoAgentProvider({ board, onConnect, off, children }: { board: Board; onConnect(): void; off?: boolean; children: ReactNode }) {
+  const needs = !off && needsAgent(board);
   const value = useMemo(() => (needs ? { board, onConnect } : null), [needs, board, onConnect]);
   return <NoAgentContext.Provider value={value}>{children}</NoAgentContext.Provider>;
 }

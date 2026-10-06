@@ -38,8 +38,15 @@ function loadTurnstile(): Promise<void> {
   return turnstileScript;
 }
 
-/** Only return to paths inside the app, matching safeNext on the server. */
-const safeNext = (raw: string | null) => (raw && raw.startsWith("/tasks/") && !raw.startsWith("//") && !/[\\\s]/.test(raw) ? raw : null);
+/**
+ * Only return to paths inside the app, matching safeNext on the server. A fragment is cut off:
+ * `next` is sent to the server and written into the sign-in email, and a fragment is where an
+ * invite link keeps its token (Invite.tsx holds that in the tab instead).
+ */
+const safeNext = (raw: string | null) => {
+  const path = raw?.split("#")[0];
+  return path && path.startsWith("/tasks/") && !path.startsWith("//") && !/[\\\s]/.test(path) ? path : null;
+};
 
 export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   // The front page keeps the full default title. At /tasks/pricing it's the pricing page, signed
@@ -74,7 +81,10 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     const e = q.get("email");
     const c = q.get("code");
     const failed = q.get("login_error");
-    history.replaceState(null, "", location.pathname); // drop the code from the address bar
+    // Drop the code from the address bar. A shared board's id stays (`?board=`), so a bookmark
+    // of someone's board opens it once you've signed in.
+    const board = q.get("board");
+    history.replaceState(null, "", location.pathname + (board && /^[0-9a-f]{32}$/.test(board) ? `?board=${board}` : ""));
     if (failed) setError(failed.slice(0, 200));
     fetch(api("/api/auth/providers")).then((r) => r.json() as Promise<{ providers: Provider[]; turnstile: TurnstileConfig | null }>)
       .then((r) => { setProviders(r.providers); setTurnstile(r.turnstile); }).catch(() => {});
@@ -176,6 +186,8 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
           <>
             {next?.startsWith("/tasks/oauth/")
               ? <p>Sign in to connect an agent to your Tasks.</p>
+              : next === `${BASE}/invite`
+              ? <p>Sign in to open your board invite. Use the address the invite was sent to; it only works for that one.</p>
               : <p>{providers.length > 0 ? "Use an account you already have, or get a code by email." : "We email you a code."} There's no password to remember.</p>}
             {providers.length > 0 && (
               <>

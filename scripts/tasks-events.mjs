@@ -14,7 +14,9 @@
 //
 // The first line after each connect is {"type":"hello","cards":[…]}: every open #agent
 // or #gauntlet card, so nothing is missed while offline. After that, one line per change you make:
-// added, tagged, answered (#needs-ceo came off), edited, moved, deleted. Changes an agent
+// added, tagged, answered (#needs-ceo came off), edited, moved, deleted. Each says who made it:
+// "by":{"email":"…","role":"owner","via":"app"|"assistant"}. Only the board owner's changes are
+// sent, and a line that says anything else is dropped here too. Changes an agent
 // makes over MCP never show up here. After 5 failed connects in a row it prints one
 // {"type":"offline",…} line (a bad token looks the same as Tasks being unreachable), keeps
 // retrying, and passes on the next hello when it's back.
@@ -102,6 +104,9 @@ function connect() {
     try { ev = JSON.parse(String(m.data)); } catch { return; }
     if (ev.type === "hello") ev = { ...ev, cards: ev.cards.filter(mine) };
     else if (ev.type !== "offline" && !mine(ev)) return;
+    // On a shared board only the owner gives an agent orders. The server sends no one else's
+    // changes; if a line ever says otherwise, it stops here.
+    if (ev.by && ev.by.role !== "owner") return;
     const line = JSON.stringify(ev);
     // A reconnect resends the queue; only pass it on when it changed.
     if (line.startsWith('{"type":"hello"')) {

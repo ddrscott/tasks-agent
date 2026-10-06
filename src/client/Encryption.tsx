@@ -4,6 +4,7 @@ import type { Board } from "../shared";
 import { plainWholeBoard, sealWholeBoard } from "./migrate";
 import { Footer } from "./Footer";
 import { IconClose } from "./icons";
+import { refreshMembers, useBoardMembers } from "./Members";
 import { MODAL, useModal } from "./modal";
 import { forgetKey, recallKey, rememberKey, Vault } from "./vault";
 
@@ -114,19 +115,25 @@ type DialogProps = {
   onDisabling(active: boolean): void;
   onDisabled(): void;
   onClose(): void;
+  /** Close this and open Members: a shared board has to be un-shared there before it can be encrypted. */
+  onMembers(): void;
   say(text: string): void;
 };
 
-export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabling, onDisabled, onClose, say }: DialogProps) {
+export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnabled, onDisabling, onDisabled, onClose, onMembers, say }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useModal(ref);
+  // Set while this dialog is turning encryption off. The plain board lands a moment before the
+  // call answers and the dialog closes, and until then it says so, not "Encrypt my board".
+  const [turningOff, setTurningOff] = useState(false);
   return (
     <dialog ref={ref} {...MODAL} aria-label="End-to-end encryption" className="enc-dialog" onCancel={(e) => { e.preventDefault(); onClose(); }}>
       <div className="dialog-body">
         <h2 className="h">END_TO_END_ENCRYPTION</h2>
         {view.sealed && vault
-          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabling={onDisabling} onDisabled={onDisabled} say={say} onClose={onClose} />
-          : <TurnOn view={view} userId={userId} email={email} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} />}
+          ? <Manage view={view} raw={raw} vault={vault} userId={userId} email={email} stub={stub} onDisabling={(on) => { setTurningOff(on); onDisabling(on); }} onDisabled={onDisabled} say={say} onClose={onClose} />
+          : turningOff ? <p role="status">Your board is decrypted.</p>
+          : <TurnOn view={view} userId={userId} email={email} stub={stub} onEnabled={onEnabled} say={say} onClose={onClose} onMembers={onMembers} />}
       </div>
       <div className="dialog-foot">
         <span className="spacer" />
@@ -136,7 +143,18 @@ export function EncryptionDialog({ view, raw, vault, userId, email, stub, onEnab
   );
 }
 
-function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<DialogProps, "view" | "userId" | "email" | "stub" | "onEnabled" | "say" | "onClose">) {
+function TurnOn({ view, userId, email, stub, onEnabled, say, onClose, onMembers }: Pick<DialogProps, "view" | "userId" | "email" | "stub" | "onEnabled" | "say" | "onClose" | "onMembers">) {
+  // A board with members or pending invites can't be encrypted (// TEAM_BOARDS): the server
+  // refuses it. Say so here, before anyone types a passphrase, instead of after.
+  const shared = useBoardMembers(userId);
+  useEffect(() => { void refreshMembers(userId); }, [userId]);
+  const on = shared.members.filter((m) => m.status === "accepted").length;
+  const waiting = shared.members.length - on;
+  const isShared = shared.members.length > 0;
+  // Until the members list has answered, nobody knows whether this board is shared, so the fields wait for it.
+  // A question an agent is waiting on can't go onto an encrypted board, so it has to be settled first (the server refuses too).
+  const asking = view.cards.filter((c) => c.ask).length;
+  const off = isShared || asking > 0 || shared.state === "loading";
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [remember, setRemember] = useState(true);
@@ -145,7 +163,7 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
   const [error, setError] = useState<string | null>(null);
   const short = pass.length > 0 && pass.length < MIN_PASSPHRASE;
   const mismatch = again.length > 0 && again !== pass;
-  const ready = pass.length >= MIN_PASSPHRASE && again === pass && understood && !busy;
+  const ready = pass.length >= MIN_PASSPHRASE && again === pass && understood && !busy && !off;
 
   async function go() {
     if (!ready) return;
@@ -162,13 +180,39 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
       say("Your board is end-to-end encrypted now.");
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      // Someone was invited between this dialog opening and the click. The server's refusal carries a code.
+      if (message.includes("[board_shared]")) {
+        void refreshMembers(userId);
+        setError("This board is shared, so it can't be encrypted. Remove its members and revoke its pending invites in Members first.");
+      } else setError(message);
       setBusy(null);
     }
   }
 
   return (
     <>
+      {isShared && (
+        <div className="enc-shared" role="note">
+          <p>
+            <b>This board is shared, so it can't be encrypted yet.</b>{" "}
+            {on > 0 && <>{on} {on === 1 ? "person is" : "people are"} on it</>}{on > 0 && waiting > 0 && " and "}
+            {waiting > 0 && <>{waiting} {waiting === 1 ? "invite is" : "invites are"} pending</>}.
+            {" "}An encrypted board is closed to everyone but you: the server can't serve members a board it can't read.
+          </p>
+          <p>Remove the members and revoke the pending invites in Members first. Nothing below works until then.</p>
+          <div className="enc-actions"><button type="button" className="btn primary" onClick={onMembers}>Open Members</button></div>
+        </div>
+      )}
+      {asking > 0 && (
+        <div className="enc-shared" role="note">
+          <p>
+            <b>{asking === 1 ? "A card has a question" : `${asking} cards have questions`} waiting on your answer, so this board can't be encrypted yet.</b>{" "}
+            An encrypted board can't hold a question: it would sit there unencrypted, and the agent that asked couldn't read your answer anyway.
+          </p>
+          <p>Answer {asking === 1 ? "it" : "them"} first, or take #needs-ceo off the card to drop the question. Nothing below works until then.</p>
+        </div>
+      )}
       <p>
         With a passphrase, your board is encrypted in this browser before it's sent. The server stores only
         ciphertext: lane names, cards, notes, due dates, files and their names, and assistant messages. Any device
@@ -177,24 +221,29 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
       <ul className="enc-list">
         <li>The assistant in this tab (Needle) keeps working. The cloud assistant can't read an encrypted board, so it's off.</li>
         <li>Outside agents (MCP) can't read or change it.</li>
+        <li>It can't be shared. Members is off while the board is encrypted, and a board that already has members or pending invites can't be encrypted.</li>
         <li>Search runs in your browser and matches words, not meaning.</li>
         <li>Undo history and the chat are cleared, so no plain copy is left behind.</li>
         <li><b>If you forget the passphrase, the board can't be recovered.</b></li>
       </ul>
       <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void go(); }}>
       <AccountField email={email} />
+      {isShared && <p className="enc-off">The fields below are off while the board is shared.</p>}
+      {!isShared && asking > 0 && <p className="enc-off">The fields below are off while a question is open.</p>}
+      <fieldset className="enc-fields" disabled={off}>
       <label>
         Passphrase ({MIN_PASSPHRASE}+ characters; a few random words works well)
-        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={pass} onChange={(e) => setPass(e.target.value)} />
+        <input className="field" type="password" id="new-passphrase" name="new-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={pass} disabled={off} onChange={(e) => setPass(e.target.value)} />
       </label>
       {short && <div className="login-error">At least {MIN_PASSPHRASE} characters.</div>}
       <label>
         Same passphrase again
-        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={again} onChange={(e) => setAgain(e.target.value)} />
+        <input className="field" type="password" id="confirm-passphrase" name="confirm-passphrase" autoComplete="new-password" minLength={MIN_PASSPHRASE} {...RULES} value={again} disabled={off} onChange={(e) => setAgain(e.target.value)} />
       </label>
       {mismatch && <div className="login-error">Those don't match.</div>}
       <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this device</label>
       <label className="check"><input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} /> I understand a forgotten passphrase means a lost board</label>
+      </fieldset>
       {error && <div className="login-error" role="alert">{error}</div>}
       <div className="enc-actions">
         <button type="submit" className="btn primary" disabled={!ready}>{busy ?? "Encrypt my board"}</button>
@@ -205,7 +254,11 @@ function TurnOn({ view, userId, email, stub, onEnabled, say, onClose }: Pick<Dia
 }
 
 function Manage({ view, raw, vault, userId, email, stub, onDisabling, onDisabled, say, onClose }: Pick<DialogProps, "view" | "raw" | "userId" | "email" | "stub" | "onDisabling" | "onDisabled" | "say" | "onClose"> & { vault: Vault }) {
-  const seal = raw.sealed!;
+  // `raw` is the server's board the moment it arrives; `view` follows a beat later (a decrypt, or a
+  // view transition). Right after encryption is turned off there's a render where `raw` is already
+  // plain and `view` isn't yet, so the seal comes from `view` then. Reading `raw.sealed!` there
+  // threw, and with no error boundary the whole app went blank.
+  const seal = raw.sealed ?? view.sealed!;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
@@ -264,6 +317,8 @@ function Manage({ view, raw, vault, userId, email, stub, onDisabling, onDisabled
   return (
     <>
       <p className="enc-on"><span className="prompt">$</span> Encrypted since {new Date(seal.since).toLocaleDateString(undefined, { dateStyle: "medium" })}. Key <code>{seal.kid}</code>, wrapped with PBES2-HS512+A256KW ({PBES2_COUNT.toLocaleString()} rounds); fields are A256GCM JWE.</p>
+
+      <p>An encrypted board can't be shared, so Members is off until encryption is. The server can't serve anyone else a board it can't read.</p>
 
       <h3 className="h">CHANGE_PASSPHRASE</h3>
       <form className="enc-form" action="#" method="post" onSubmit={(e) => { e.preventDefault(); void change(); }}>

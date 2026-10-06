@@ -4,15 +4,22 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
-import { AskBlock } from "./Ask";
+import { AskBlock, AskOwnerContext } from "./Ask";
+import { agentHeld, ByFace, type Mode } from "./member";
 import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
+import { Unsaved, useDraft } from "./Unsaved";
+
+/** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
+/** `fix` is the lines in `left` that will be refused again exactly as they are (needsEdit in member-rules.ts): they have to be edited first. */
+export type AddResult = { added: number; left: string[]; why: string | null; fix?: string[] };
 
 export type Actions = {
-  addCard(laneId: string, title: string, top?: boolean): Promise<unknown>;
+  /** Quick add: one card per line, as one change. Lines that can't be added come back in `left`. */
+  addCards(laneId: string, lines: string[]): Promise<AddResult>;
   moveCard(id: string, laneId: string, index: number): Promise<unknown>;
   addLane(name: string): Promise<unknown>;
   renameLane(id: string, name: string): Promise<unknown>;
@@ -43,6 +50,18 @@ type Props = {
   onDragging(active: boolean): void;
   /** `ms` is how long it stays; destructive actions ask for longer than the default. */
   toast(text: string, undo?: boolean, ms?: number): void;
+  /**
+   * What the person looking may do here (// TEAM_BOARDS). Left out, it's the owner's board:
+   * everything. A writer gets cards and no lane controls. A viewer gets a board with nothing
+   * on it that changes anything: cards don't lift, and there's no add, no check, no menu.
+   */
+  mode?: Mode;
+  /**
+   * Set when the board turned view only while someone could have been typing (made a viewer,
+   * the owner's plan lapsed): why, in a sentence. A lane's "Add a card" box that has text in
+   * it shows that text read only under it, to copy out, instead of vanishing.
+   */
+  frozen?: string | null;
 };
 
 const LANE_PREFIX = "lane:";
@@ -81,6 +100,8 @@ function stepBoard(side: number) {
 
 export function BoardView(p: Props) {
   const { board } = p;
+  const mode = p.mode ?? "owner";
+  const owner = useContext(AskOwnerContext);
   const [drag, setDrag] = useState<{ id: string; cards: Card[] } | null>(null);
   const cards = drag?.cards ?? board.cards;
   // Done is a role a lane holds (lanes.ts), not the last place on the board.
@@ -205,6 +226,17 @@ export function BoardView(p: Props) {
     const beforeIndex = shownCards(board, before.laneId).findIndex((c) => c.id === id);
     if (before.laneId === lane && beforeIndex === index) return;
     const target = board.lanes.find((l) => l.id === lane);
+    // Two things a writer's drag can't do, said here because the server would refuse them:
+    // reorder a sorted lane (that changes the lane's sort, which is the owner's), and finish a
+    // card whose question the owner hasn't answered. The card goes back where it was.
+    if (mode !== "owner" && target?.sort && before.laneId === lane) {
+      p.toast(`${target.name} is sorted by ${SORTS.find((o) => o.by === target.sort)?.say ?? "a rule"}. Only the board's owner can change its order.`);
+      return;
+    }
+    if (mode !== "owner" && before.ask && lane === doneLane && before.laneId !== doneLane) {
+      p.toast(`That card has a question waiting on ${owner ?? "the board's owner"}, so it can't be finished yet.`);
+      return;
+    }
     if (target?.sort && before.laneId === lane) {
       // Dragging a card to a new spot in a sorted lane is choosing your own order, so the lane goes
       // back to manual and keeps exactly what's on screen.
@@ -220,7 +252,11 @@ export function BoardView(p: Props) {
   /** Done means "in the done lane": send the card there, or back to the top of the to do lane. */
   function toggleDone(card: Card, fromKeyboard = false) {
     const target = card.laneId === doneLane ? todoLaneId(board.lanes) : doneLane;
-    if (!target || target === card.laneId) return;
+    if (!target || target === card.laneId || mode === "viewer") return;
+    if (mode === "writer" && card.ask && target === doneLane) {
+      p.toast(`That card has a question waiting on ${owner ?? "the board's owner"}, so it can't be finished yet.`);
+      return;
+    }
     void p.actions.moveCard(card.id, target, card.laneId === doneLane ? 0 : Number.MAX_SAFE_INTEGER);
     // The card remounts in its new lane, which drops keyboard focus; follow it there.
     if (fromKeyboard) {
@@ -245,18 +281,18 @@ export function BoardView(p: Props) {
       onDragCancel={() => { setDrag(null); p.onDragging(false); }}
     >
       {/* "No agent connected yet", until one is (AgentNudge.tsx). */}
-      <AgentNudge board={board} say={p.toast} />
-      <div className="board">
+      {mode === "owner" && <AgentNudge board={board} say={p.toast} />}
+      <div className="board" data-mode={mode === "owner" ? undefined : mode}>
         {board.lanes.map((lane, i) => (
           <LaneView
             key={lane.id} lane={lane} index={i} lanes={board.lanes}
             cards={drag ? cards.filter((c) => c.laneId === lane.id) : shownCards(board, lane.id)}
             isDone={lane.id === doneLane} role={roleOf(board.lanes, lane.id)} hasDone={!!doneLane}
             highlight={!!active && active.laneId === lane.id}
-            {...p} onToggle={toggleDone}
+            {...p} mode={mode} onToggle={toggleDone}
           />
         ))}
-        <AddLane onAdd={(name) => p.actions.addLane(name)} full={board.lanes.length >= 8} />
+        {mode === "owner" && <AddLane onAdd={(name) => p.actions.addLane(name)} full={board.lanes.length >= 8} />}
       </div>
       <DragOverlay dropAnimation={{ duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" }}>
         {active && <CardFace card={active} isDone={active.laneId === doneLane} overlay />}
@@ -269,6 +305,9 @@ function LaneView(props: Props & {
   lane: Lane; index: number; lanes: Lane[]; cards: Card[]; isDone: boolean; role: LaneRole | undefined; hasDone: boolean; highlight: boolean; onToggle(c: Card): void;
 }) {
   const { lane, cards, actions } = props;
+  // Lanes are the owner's: a member sees the name, the count, and the sort, with nothing to press.
+  const owns = (props.mode ?? "owner") === "owner";
+  const canCards = props.mode !== "viewer";
   const { setNodeRef } = useDroppable({ id: LANE_PREFIX + lane.id });
   const [renaming, setRenaming] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -311,7 +350,9 @@ function LaneView(props: Props & {
     >
       <header className="lane-head">
         <span className="lane-dot" />
-        {renaming ? (
+        {!owns ? (
+          <span className="lane-name static">{lane.name}</span>
+        ) : renaming ? (
           <input
             className="lane-name" autoFocus defaultValue={lane.name} maxLength={40} aria-label="Lane name"
             onBlur={(e) => commitRename(e.target.value)}
@@ -327,9 +368,10 @@ function LaneView(props: Props & {
           <span className="lane-count">{cards.length}</span>
         )}
         {/* Says why the cards are in this order, and that dragging one will change that. */}
-        {sortedBy && <span className="lane-sort" title={`Sorted by ${sortedBy.say}. Change it from the lane menu.`}>by {sortedBy.say}</span>}
+        {sortedBy && <span className="lane-sort" title={owns ? `Sorted by ${sortedBy.say}. Change it from the lane menu.` : `Sorted by ${sortedBy.say}. The board's owner sets the order.`}>by {sortedBy.say}</span>}
         <span className="spacer" />
-        <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>
+        {canCards && <button className="btn ghost icon" title={`New card in ${lane.name}`} aria-label={`New card in ${lane.name}`} onClick={() => props.onNew(lane.id)}><IconPlus /></button>}
+        {owns && (
         <div className="anchor">
           <button className="btn ghost icon" title="Lane options" aria-label={`${lane.name} lane options`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><IconDots /></button>
           {menu && (
@@ -339,7 +381,7 @@ function LaneView(props: Props & {
                 {props.index > 0 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index - 1); }}>Move left</button>}
                 {props.index < props.lanes.length - 1 && <button role="menuitem" onClick={() => { setMenu(false); void actions.moveLane(lane.id, props.index + 1); }}>Move right</button>}
                 <div className="menu-group" role="group" aria-label="Sort by">
-                  <div className="menu-label">Sort by</div>
+                  <div className="menu-label h">SORT_BY</div>
                   {SORTS.map((o) => (
                     <button key={o.by} role="menuitemradio" aria-checked={lane.sort === o.by} onClick={() => sort(o.by, o.say)}>{o.label}</button>
                   ))}
@@ -347,7 +389,7 @@ function LaneView(props: Props & {
                 </div>
                 {/* Which lane new cards land in, which holds work in progress, and which means finished. Where a lane sits has no say. */}
                 <div className="menu-group" role="group" aria-label="This lane is">
-                  <div className="menu-label">This lane is</div>
+                  <div className="menu-label h">THIS_LANE_IS</div>
                   {/* One row, so the menu stays short. Tap the lit one to make this an ordinary lane again. */}
                   <div className="menu-roles">
                     {LANE_ROLES.map((r) => (
@@ -389,39 +431,50 @@ function LaneView(props: Props & {
             </Popover>
           )}
         </div>
+        )}
       </header>
 
       <SortableContext id={lane.id} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="cards" ref={setNodeRef}>
           {cards.map((c) => (
             <SortableCard
-              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle} canToggle={props.hasDone}
+              key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle}
+              // No check for a viewer, and none for a writer on a card whose question is still open: the server refuses both.
+              // An agent's work order doesn't lift or tick for a writer either, and says why on its face.
+              canToggle={props.hasDone && canCards && !agentHeld(props.mode, c) && (owns || props.isDone || !c.ask)} locked={!canCards || agentHeld(props.mode, c)}
+              held={agentHeld(props.mode, c)}
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
           {cards.length === 0 && !adding && (
-            <div className="lane-empty">{props.index === 0 ? "Nothing here yet. Add a card, or ask the assistant." : "Drag cards here"}</div>
+            <div className="lane-empty">{!canCards ? "No cards" : props.index === 0 ? (owns ? "Nothing here yet. Add a card, or ask the assistant." : "Nothing here yet. Add a card.") : "Drag cards here"}</div>
           )}
         </div>
       </SortableContext>
 
-      <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(t) => actions.addCard(lane.id, t)} />
+      {/* Always mounted, so what's typed in it outlives the board turning view only. With nothing typed, a viewer's lane shows nothing here. */}
+      <QuickAdd lane={lane} open={adding} setOpen={(o) => props.setQuickAddLane(o ? lane.id : null)} add={(lines) => actions.addCards(lane.id, lines)} tagHint={owns ? "#agent" : "a #tag"} frozen={canCards ? null : props.frozen ?? "This board is view only for you now."} />
     </section>
   );
 }
 
 function SortableCard(p: {
   card: Card; isDone: boolean; flash: boolean; canToggle: boolean; faded: boolean; tagFilter: string | null;
+  /** A viewer's card, or an agent's work order on a writer's board: it opens, and that's all. */
+  locked?: boolean;
+  /** An agent's work order, as a writer sees it: the face says whose it is. */
+  held?: boolean;
   onOpen(c: Card): void; onToggle(c: Card, fromKeyboard?: boolean): void; onTag(tag: string): void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.card.id, disabled: !!p.locked });
   return (
     <div
-      ref={setNodeRef} {...attributes} {...listeners}
+      // A viewer's card is a plain button that opens: none of the drag handlers or the "press space to pick up" instructions.
+      ref={setNodeRef} {...(p.locked ? { role: "button", tabIndex: 0 } : attributes)} {...(p.locked ? {} : listeners)}
       style={{ transform: CSS.Translate.toString(transform), transition, viewTransitionName: isDragging ? undefined : `card-${p.card.id}` }}
       className={isDragging ? "dragging" : undefined}
       data-card-id={p.card.id}
-      aria-roledescription={`card. Space to pick up, Enter to edit, X to mark ${p.isDone ? "not done" : "done"}`}
+      aria-roledescription={p.locked ? "card. Enter to open" : `card. Space to pick up, Enter to edit${p.canToggle ? `, X to mark ${p.isDone ? "not done" : "done"}` : ""}`}
       onClick={() => p.onOpen(p.card)}
       onKeyDown={(e) => {
         listeners?.onKeyDown?.(e);
@@ -437,11 +490,12 @@ function SortableCard(p: {
 
 /** Exported so the signed-out landing page can draw sample cards with the real markup. */
 export function CardFace(p: {
-  card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null;
+  card: Card; isDone: boolean; flash?: boolean; overlay?: boolean; dragging?: boolean; faded?: boolean; tagFilter?: string | null; held?: boolean;
   onToggle?(c: Card): void; onTag?(tag: string): void;
 }) {
   const { card } = p;
   const status = !p.isDone && !card.ask ? faceLine(card) : null;
+  const boardOwner = useContext(AskOwnerContext);
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -459,9 +513,11 @@ export function CardFace(p: {
         <div className="card-title">{card.title}</div>
         <CardPresence cardId={card.id} />
         {!p.overlay && <AskBlock card={card} compact />}
+        {/* A writer can read an agent's work order and not change it. Said here, the way a question says who it's waiting on. */}
+        {p.held && !p.overlay && <p className="card-held">{boardOwner ?? "The owner"}'s agent card. Read only.</p>}
         {/* What the agent last said it's doing, so nobody opens the card to find out. An open question says it better, and a done card is done. */}
         {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
-        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : "Your answer. The agent hasn't written a new STATUS line yet."}>{status.text}</div>}
+        {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : `${boardOwner ? `${boardOwner}'s` : "Your"} answer. The agent hasn't written a new STATUS line yet.`}>{status.text}</div>}
         <div className="card-meta">
           {card.tags?.map((t) => (
             <button
@@ -479,6 +535,8 @@ export function CardFace(p: {
             <span className="chip" title={card.attachments.map((a) => a.name).join("\n")}><IconClip />{card.attachments.length}</span>
           )}
         </div>
+        {/* Who made the last change, on a shared board, when it wasn't you (member.tsx). */}
+        {!p.overlay && <ByFace card={card} />}
       </div>
     </div>
   );
@@ -501,18 +559,78 @@ function DueChip({ due, done }: { due: string; done: boolean }) {
   return <span className={`chip${cls}`}><IconCalendar />{label}</span>;
 }
 
-function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(t: string): Promise<unknown> }) {
+/** One card per line. A pasted list often comes with bullets, numbers, or checkboxes in front; those come off. */
+export const quickAddLines = (text: string) =>
+  text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "").trim()).filter(Boolean);
+
+function QuickAdd({ lane, open, setOpen, add, tagHint, frozen }: { lane: Lane; open: boolean; setOpen(o: boolean): void; add(lines: string[]): Promise<AddResult>; tagHint: string; frozen?: string | null }) {
   const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  // What happened to the lines still in the box: "41 added, 19 left. …"
+  const [note, setNote] = useState("");
+  // The box exactly as the server left it: the lines it just turned down. While it still reads
+  // that way the button says "Try again", not "Add 3 cards" for three lines that were refused.
+  const [refused, setRefused] = useState<string | null>(null);
+  // The refused lines that trying again can't help (one of the owner's tags, a look-alike, a
+  // blank title): each has to be edited or taken out. While any is still in the box as it
+  // was, the button says so and stays off, instead of offering a retry that can't work.
+  const [mustFix, setMustFix] = useState<string[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (open) ref.current?.focus(); }, [open]);
+  useEffect(() => { if (open && !frozen) ref.current?.focus(); }, [open, frozen]);
+  // CSS `field-sizing: content` grows the box to fit its lines, wrapped ones included. Where it's
+  // missing (Firefox), size it by hand; min-height and max-height in the stylesheet still clamp it.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    // `CSS` in this file is dnd-kit's helper, so the browser's is asked for by its full name.
+    if (!el || window.CSS.supports("field-sizing", "content")) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [text, open, busy]);
+  // The board keeps the same text, so a member who's removed outright finds it on their own board (Unsaved.tsx).
+  useDraft(`quick-add:${lane.id}`, text.trim() ? { where: `"Add a card" in ${lane.name}`, lines: text } : null);
 
   async function submit() {
-    // Pasting a list adds one card per line.
-    const lines = text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ x]\])\s*/i, "").trim()).filter(Boolean);
-    setText("");
-    for (const l of lines) await add(l);
-    ref.current?.focus();
+    // Pasting a list adds one card per line, all in one change.
+    const lines = quickAddLines(text);
+    if (!lines.length || busy || lines.some((l) => mustFix.includes(l))) return;
+    setBusy(true);
+    setNote("");
+    // The box keeps what was typed until the server has answered, and afterwards it keeps
+    // every line that didn't become a card, so nothing has to be pasted twice.
+    let r: AddResult;
+    try { r = await add(lines); } catch (e) { r = { added: 0, left: lines, why: e instanceof Error ? e.message : null }; }
+    setBusy(false);
+    setText(r.left.join("\n"));
+    setRefused(r.left.length ? r.left.join("\n") : null);
+    setMustFix(r.fix ?? []);
+    if (r.left.length) {
+      const why = r.why ?? "That didn't go through. Try again.";
+      setNote(lines.length === 1 ? `Not added. ${why}` : `${r.added} added, ${r.left.length} left. ${why}`);
+    }
+    // Back to the top of what's left: with the caret at the end, the first lines scrolled out of the box.
+    setTimeout(() => { const el = ref.current; if (!el) return; el.focus(); el.setSelectionRange(0, 0); el.scrollTop = 0; }, 0);
   }
+
+  // The board turned view only. Typed text stays, read only, until it's dismissed; with none there's nothing to show.
+  if (frozen) {
+    if (!text.trim()) return null;
+    return (
+      <div className="quick-add frozen">
+        <Unsaved draft={{ lines: text }} why={`${frozen} ${quickAddLines(text).length === 1 ? "This card wasn't" : "These cards weren't"} added.`} after="Dismiss throws it away." />
+        <div className="row"><button className="btn" onClick={() => { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }}>Dismiss</button></div>
+      </div>
+    );
+  }
+
+  const now = quickAddLines(text);
+  const count = now.length;
+  const again = refused !== null && text === refused;
+  /** How many lines in the box are still exactly a line that has to be edited first. */
+  const toFix = now.filter((l) => mustFix.includes(l)).length;
+  const label = busy ? "Adding…"
+    : toFix ? (count === 1 ? "Fix this to add it" : toFix === count ? `Fix these ${count} to add them` : `Fix ${toFix} of these ${count} to add them`)
+    : again ? (count > 1 ? `Try these ${count} again` : "Try again")
+    : count > 1 ? `Add ${count} cards` : "Add card";
 
   if (!open) {
     return (
@@ -524,17 +642,20 @@ function QuickAdd({ lane, open, setOpen, add }: { lane: Lane; open: boolean; set
   return (
     <div className="quick-add">
       <textarea
-        ref={ref} className="field" rows={2} placeholder="What needs doing? End with #agent to tag it, or paste a list." value={text} aria-label={`New card in ${lane.name}`}
-        onChange={(e) => setText(e.target.value)}
+        ref={ref} className="field" rows={Math.min(8, Math.max(2, text.split("\n").length))} placeholder={`What needs doing? End with ${tagHint} to tag it, or paste a list.`} value={text} aria-label={`New card in ${lane.name}`}
+        readOnly={busy} aria-busy={busy} aria-describedby={note ? `quick-add-note-${lane.id}` : undefined}
+        // The reasons stay up until every line they're about has been edited or taken out.
+        onChange={(e) => { setText(e.target.value); if (note && !quickAddLines(e.target.value).some((l) => mustFix.includes(l))) setNote(""); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); }
-          if (e.key === "Escape") { setText(""); setOpen(false); }
+          if (e.key === "Escape") { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }
         }}
-        onBlur={() => { if (!text.trim()) setOpen(false); }}
+        onBlur={() => { if (!text.trim() && !busy) setOpen(false); }}
       />
+      {note && <p className="quick-add-note" id={`quick-add-note-${lane.id}`} role="alert">{note}</p>}
       <div className="row">
-        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim()}>Add card</button>
-        <button className="btn ghost" onClick={() => { setText(""); setOpen(false); }}>Cancel</button>
+        <button className="btn primary" onMouseDown={(e) => e.preventDefault()} onClick={() => void submit()} disabled={!text.trim() || busy || toFix > 0} title={toFix ? "Edit the lines named above, or take them out, and this adds the rest" : undefined}>{label}</button>
+        <button className="btn ghost" onClick={() => { setText(""); setNote(""); setRefused(null); setMustFix([]); setOpen(false); }}>Cancel</button>
         <span className="hint"><kbd>↵</kbd> add · <kbd>esc</kbd> close</span>
       </div>
     </div>

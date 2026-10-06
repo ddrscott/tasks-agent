@@ -12,30 +12,52 @@
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { doneLaneId } from "./lanes";
-import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, NEEDS_CEO_TAG, type Board, type Card } from "./shared";
+import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, memberTouch, NEEDS_CEO_TAG, oneLine, type Board, type Card, type MemberTouch } from "./shared";
 
 // The tags live in shared.ts, where the app can reach them too.
 export { AGENT_TAG, GAUNTLET_TAG, NEEDS_CEO_TAG };
 /** The subprotocol a client offers alongside its token, and the one the server picks. */
 export const EVENTS_PROTOCOL = "tasks-events";
 
-type CardRef = { id: string; title: string; lane: string; tags: string[] };
+/**
+ * `member` is there when a member put something on the card (memberTouch in shared.ts): `text`
+ * when they wrote its title or notes, `tags` when they last changed its tags, `files` for each
+ * file they attached, each with their email and when. Those parts aren't the owner's, whoever
+ * made the change this line reports.
+ */
+type CardRef = { id: string; title: string; lane: string; tags: string[]; member?: MemberTouch };
+/**
+ * Who made the change an event reports. `role` is always "owner" on the feed: a member's
+ * change never publishes (agentEvents). `via` is "app" for a change made by hand and
+ * "assistant" for the in-app assistant acting on the owner's message. It's stamped by the
+ * board from the connection that made the change, the same as the mark on a card.
+ */
+export type EventBy = { email: string; role: "owner" | "member"; via: "app" | "assistant" };
 export type TaskEvent =
-  | ({ type: "added" | "tagged" | "edited" | "moved" | "deleted" } & CardRef)
+  | ({ type: "added" | "tagged" | "edited" | "moved" | "deleted"; by: EventBy } & CardRef)
   // `answer` and `question` are there when the card had a question (ask_ceo) and you answered it with a tap.
-  | ({ type: "answered"; answer?: string; question?: string } & CardRef)
+  | ({ type: "answered"; answer?: string; question?: string; by: EventBy } & CardRef)
   | { type: "hello"; cards: CardRef[] };
 
-const ref = (b: Board, c: Card): CardRef => ({
-  id: c.id, title: c.title, lane: b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId, tags: c.tags ?? [],
-});
+// An event is one line of JSON on the listener's stdout, and JSON leaves U+0085, U+2028, and
+// U+2029 as they are. So the text an event carries is made one line here (oneLine in shared.ts).
+const ref = (b: Board, c: Card): CardRef => {
+  const touch = memberTouch(c);
+  const member = touch?.files ? { ...touch, files: touch.files.map((f) => ({ ...f, name: oneLine(f.name) })) } : touch;
+  return { id: c.id, title: oneLine(c.title), lane: oneLine(b.lanes.find((l) => l.id === c.laneId)?.name ?? c.laneId), tags: c.tags ?? [], ...(member ? { member } : {}) };
+};
 
 /**
  * What changed on #agent and #gauntlet cards between two boards, one event per card. "answered" means
  * #needs-ceo came off, which is how you tell the agent you've replied.
+ *
+ * Every event says who made the change (`by`). Only the owner's changes are events. A member
+ * can't touch an agent's card or its tags in the first place (the write guard, member-rules.ts);
+ * if one ever did, it still must not reach an agent as "added" or "answered", because the
+ * agent would act on it with the owner's privileges. So a member's change publishes nothing.
  */
-export function agentEvents(before: Board, after: Board): TaskEvent[] {
-  if (after.sealed) return [];
+export function agentEvents(before: Board, after: Board, by: EventBy): TaskEvent[] {
+  if (after.sealed || by.role !== "owner") return [];
   const was = new Map(before.cards.map((c) => [c.id, c]));
   const out: TaskEvent[] = [];
   for (const c of after.cards) {
@@ -48,11 +70,11 @@ export function agentEvents(before: Board, after: Board): TaskEvent[] {
     else if (p.laneId !== c.laneId) type = "moved";
     else if (p.title !== c.title || p.notes !== c.notes || p.due !== c.due || (p.tags ?? []).join() !== (c.tags ?? []).join()) type = "edited";
     if (type === "answered" && p?.ask && c.answer && c.answer.at !== p.answer?.at) {
-      out.push({ type, ...ref(after, c), answer: c.answer.answer, question: c.answer.question });
-    } else if (type) out.push({ type, ...ref(after, c) } as TaskEvent);
+      out.push({ type, ...ref(after, c), answer: oneLine(c.answer.answer), question: oneLine(c.answer.question), by });
+    } else if (type) out.push({ type, ...ref(after, c), by } as TaskEvent);
   }
   const kept = new Set(after.cards.map((c) => c.id));
-  for (const p of before.cards) if (forAgent(p) && !kept.has(p.id)) out.push({ type: "deleted", ...ref(before, p) });
+  for (const p of before.cards) if (forAgent(p) && !kept.has(p.id)) out.push({ type: "deleted", ...ref(before, p), by });
   return out;
 }
 
