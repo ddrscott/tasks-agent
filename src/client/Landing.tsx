@@ -5,16 +5,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
-import { withAsks, type Claim, type Session } from "../presence-shared";
 import type { Card } from "../shared";
 import { pageAt } from "../routes";
 import { api, BASE } from "./base";
 import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
-import { IconSessions } from "./icons";
 import { sharingFacts } from "./sharing";
-import { blockedSessions, isLive, PresenceContext, SessionRow } from "./Sessions";
 import { useTitle } from "./title";
 
 const DEMO = `${BASE}/demo`;
@@ -95,11 +92,11 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
               </p>
             </li>
             <li>
-              <h3>See every session, and which ones need you.</h3>
+              <h3>One card, one agent.</h3>
               <p>
-                Claude Code sessions report in through hooks: working, waiting on you, or idle, with the
-                machine and the last thing each one did. An agent claims a card before it starts, and a
-                second session that tries for the same card is turned away.
+                An agent claims a card before it starts, and a second agent that tries for the same card
+                is turned away. The claim lets go when the card is done, when the agent gives it back,
+                or 15 minutes after the agent goes quiet, so a crashed run never keeps a card.
               </p>
             </li>
             <li>
@@ -248,11 +245,6 @@ function Proof() {
             <dd>The agent side is MCP over Streamable HTTP with OAuth sign-in, nothing custom. It all runs on Cloudflare Workers.</dd>
             <dd className="proof-go"><a href={`${BASE}/connect`}>See the setup</a></dd>
           </div>
-          <div>
-            <dt>Sessions</dt>
-            <dd>It's presence, not a log. Each session overwrites one row: its state and one line about its last action. No transcript, prompt, tool output, or Bash command is stored.</dd>
-            <dd className="proof-go"><a href={`${REPO}#-sessions`} {...out}>See what's stored</a></dd>
-          </div>
         </dl>
         <figure className="maker">
           <figcaption className="maker-who">
@@ -297,39 +289,18 @@ const DOING: Card[] = [
       askedAt: at(120_000),
     },
   }),
-  card("s5", "Move the sessions table to D1", { tags: ["agent"] }),
+  card("s5", "Move the orders table to D1", { tags: ["agent"] }),
 ];
 
-const session = (id: string, more: Partial<Session>): Session => ({
-  id, project: "checkout-api", machine: "macbook", agent: "lead", state: "working", last: "", cwd: "~/code/checkout-api", link: "",
-  startedAt: NOW - 3_600_000, seenAt: NOW, ...more,
-});
-
-// The rows as hooks write them (the event table in README, // SESSIONS). The first session asked
-// the question on s4 and is polling wait_for_answer, so it was heard from seconds ago; its claim
-// carries the question, and withAsks, the rule the app itself reads, turns its row into
-// "needs input" and "asked: …". Nothing here is wording the product doesn't produce.
-const HOOKS: Session[] = [
-  session("7c1e04b2-sample", { machine: "mini", last: "mcp__tasks__wait_for_answer", seenAt: NOW - 9_000 }),
-  session("3fa9d6e1-sample", { last: "Edit: 0007_sessions.sql", seenAt: NOW - 4_000 }),
-  session("b20c88a7-sample", { project: "docs-site", agent: "", state: "idle", last: "finished its turn", cwd: "~/code/docs-site", seenAt: NOW - 180_000 }),
+const DONE: Card[] = [
+  card("s6", "Add the CSV export", { tags: ["agent"], notes: "STATUS: done — export is behind the orders menu, tests pass" }),
+  card("s7", "Bump the Node version in CI"),
 ];
 
-const CLAIMS: Claim[] = [
-  { cardId: "s4", sessionId: HOOKS[0].id, agent: "lead", claimedAt: NOW - 600_000, asked: DOING[0].ask!.question, askedAt: NOW - 120_000 },
-  { cardId: "s5", sessionId: HOOKS[1].id, agent: "lead", claimedAt: NOW - 900_000 },
-];
+// The top bar's count, by the app's own rule: "need you" is the open questions.
+const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length;
 
-const SESSIONS = withAsks(HOOKS, CLAIMS);
-
-const PRESENCE = { sessions: SESSIONS, claims: CLAIMS, now: NOW };
-// The top bar's two counts, by the app's own rules: "need you" is open questions plus sessions
-// stopped at a prompt, and Sessions is the ones that are live.
-const NEED_YOU = [...TODO, ...DOING].filter((c) => c.ask).length + blockedSessions(SESSIONS, NOW, CLAIMS, [...TODO, ...DOING]).length;
-const LIVE = SESSIONS.filter((s) => isLive(s, NOW)).length;
-const titleOf = (id: string) => [...TODO, ...DOING].find((c) => c.id === id)?.title;
-
-function SampleLane({ name, index, cards }: { name: string; index: number; cards: Card[] }) {
+function SampleLane({ name, index, cards, done = false }: { name: string; index: number; cards: Card[]; done?: boolean }) {
   return (
     <section className="lane" style={{ ["--lane-color" as string]: `var(--lane-${index + 1})` }}>
       <header className="lane-head">
@@ -338,54 +309,32 @@ function SampleLane({ name, index, cards }: { name: string; index: number; cards
         <span className="lane-count">{cards.length}</span>
       </header>
       <div className="cards">
-        {cards.map((c) => <CardFace key={c.id} card={c} isDone={false} />)}
+        {cards.map((c) => <CardFace key={c.id} card={c} isDone={done} />)}
       </div>
     </section>
   );
 }
 
 /**
- * A small board with sample data: a question waiting on a card, a claimed card, and the Sessions
- * list. It's `inert`, so nothing in it takes a click or a tab stop; the demo board is the one to
- * play with. Screen readers get one sentence instead of a pile of dead buttons.
+ * A small board with sample data: a question waiting on a card, the count of what needs you, and
+ * finished work in Done. It's `inert`, so nothing in it takes a click or a tab stop; the demo
+ * board is the one to play with. Screen readers get one sentence instead of a pile of dead buttons.
  */
 function Shot() {
-  const groups = [...new Set(SESSIONS.map((s) => s.project))];
   return (
     <figure className="shot">
-      <div className="shot-frame" role="img" aria-label="A sample board. A card in Doing carries an agent's question, Limit by IP or by account, with three options and one marked recommended. Another card shows the session working on it. A Sessions list shows one session waiting on you, one working, and one idle.">
+      <div className="shot-frame" role="img" aria-label="A sample board with three lanes. A card in Doing carries an agent's question, Limit by IP or by account, with three options and one marked recommended. The top bar says one needs you. Done holds two finished cards.">
         <div className="shot-inner" inert aria-hidden="true">
-          <PresenceContext.Provider value={PRESENCE}>
-            <div className="topbar">
-              <span className="wordmark">tasks<span>.</span></span>
-              <span className="spacer" />
-              <span className="btn asks-btn"><span className="asks-count">?{NEED_YOU}</span><span className="label">need{NEED_YOU === 1 ? "s" : ""} you</span></span>
-              <span className="btn sess-btn"><IconSessions /><span className="label">Sessions</span><span className="sess-count">{LIVE}</span></span>
-            </div>
-            <div className="shot-body">
-              <SampleLane name="To do" index={0} cards={TODO} />
-              <SampleLane name="Doing" index={1} cards={DOING} />
-              <div className="sessions">
-                <h2 className="h">SESSIONS</h2>
-                {groups.map((project) => {
-                  const list = SESSIONS.filter((s) => s.project === project);
-                  return (
-                    <section key={project}>
-                      <h3 className="sess-project">{project}<span>{list.length}</span></h3>
-                      <ul>
-                        {list.map((s) => (
-                          <SessionRow
-                            key={s.id} session={s} now={NOW}
-                            cards={CLAIMS.filter((c) => c.sessionId === s.id).map((c) => titleOf(c.cardId)).filter((t): t is string => !!t)}
-                          />
-                        ))}
-                      </ul>
-                    </section>
-                  );
-                })}
-              </div>
-            </div>
-          </PresenceContext.Provider>
+          <div className="topbar">
+            <span className="wordmark">tasks<span>.</span></span>
+            <span className="spacer" />
+            <span className="btn asks-btn"><span className="asks-count">?{NEED_YOU}</span><span className="label">need{NEED_YOU === 1 ? "s" : ""} you</span></span>
+          </div>
+          <div className="shot-body">
+            <SampleLane name="To do" index={0} cards={TODO} />
+            <SampleLane name="Doing" index={1} cards={DOING} />
+            <SampleLane name="Done" index={2} cards={DONE} done />
+          </div>
         </div>
       </div>
       <figcaption>
@@ -445,7 +394,7 @@ function Pricing() {
             <ul>
               <li><b>{chats(loaded?.free.dailyChats)}</b> assistant messages a day</li>
               <li>Unlimited cards, lanes, and MCP calls</li>
-              <li>Questions, sessions, search, attachments, encryption</li>
+              <li>Questions, claims, search, attachments, encryption</li>
               <li>Join boards other people share with you</li>
             </ul>
           </div>

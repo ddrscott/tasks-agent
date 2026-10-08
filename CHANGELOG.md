@@ -80,6 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board a member's title can't dress up one of your tags with a look-alike `#`, an odd dash or dot, a space after the `#`, or an invisible character inside the word. `#agent-smith` and `C# agent notes` are still fine
 - Typing a look-alike of one of the owner's tags in the middle of a line in Add a card says what it was read as ("#ag3nt reads as #agent."), the same as the card editor does
 - When a board you're a member of goes view only because of its owner's plan, it says their Pro plan isn't active right now, which is true whether the plan ran out or an admin took it back
+- Claims work the way they did, with less behind them: `claim_card` and `release_card` still give each card one agent, `get_board` still lists who holds what, and a claim still ends when its card is done or deleted, when it's released, and 15 minutes after its agent's last call. `get_board` and a refused claim now name the holder as what it is, when it was last heard from, and its session id
+- "Need you" in the top bar counts open questions, and nothing else
+- `get_started` is the one place an agent gets its session id. The working rules no longer ask for a machine or a folder, and `claim_card` ignores `machine` and `project` from agents that still send them
+- The setup command on the Connect page installs the event feed and nothing else. Its section is `// EVENT_FEED` now
+- The front page and its sample board show questions, claims, and finished work instead of a Sessions list, and the demo board is one agent working its cards
+- The privacy policy says what's kept for a claim now: the card, the session id the agent gave, what kind of agent it says it is, and two times
 
 ### Fixed
 - Turning encryption on and back off no longer takes "written by a member" off cards, or "attached by" off files. The marks stay through both, and the privacy page says that record stays readable on an encrypted board
@@ -96,6 +102,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turning encryption on and back off no longer wipes who changed each card last. Card faces keep the name and "words by", and the card editor keeps "Edited by". A card you change while the board is encrypted comes back as changed by you
 - Turning encryption on no longer forgets which lane is To do, Doing, and Done when they aren't in that order
 - A board with a question waiting on your answer can't be encrypted until you answer it. Encrypting used to drop the question without saying so, and the agent that asked kept waiting
+
+### Removed
+- Sessions. Tasks no longer lists Claude Code sessions or what each one is doing: the Sessions button and its count are gone from the top bar, and a claimed card no longer shows a session's state under its title or in its editor. Tasks is the task list your agents share, and watching an agent work on a machine belongs to the tool that runs it
+- The seven Claude Code hooks and `tasks-presence.mjs`. If you installed them, run the setup command from the Connect page again: it takes the hooks back out of `~/.claude/settings.json`, after saving a backup beside it, and keeps every other hook and setting. Until you do, the old hooks keep getting a quiet OK from the server, so Claude Code shows no errors
+- What the server stored about a session: its folder path, machine, project, state, and last-action line. It's erased from your account the next time an agent calls your board or a card is finished or deleted
 
 ## [0.2.0] - 2026-10-04
 

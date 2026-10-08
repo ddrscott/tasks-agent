@@ -2,13 +2,10 @@
 // option on the card itself, the same in the card editor with a box for anything else, and a
 // count in the top bar that opens them all so they can be cleared in a row. On a touch screen
 // the buttons on the card itself take two taps, because the board is where stray taps land.
-// That count is everything waiting on you: it also takes in the sessions stopped at a prompt.
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Card } from "../shared";
 import { Popover } from "./Board";
-import { askingSession, projectName } from "../presence-shared";
-import { blockedSessions, PresenceLine, SessionRow, type Presence } from "./Sessions";
 
 export type AnswerFn = (cardId: string, input: { choice?: number; text?: string }) => void;
 
@@ -125,23 +122,17 @@ export function AskBlock({ card, compact, before }: BlockProps) {
   );
 }
 
-type ButtonProps = { cards: Card[]; presence: Presence; open: boolean; setOpen(o: boolean): void; onOpenCard(id: string): void };
-
-const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+type ButtonProps = { cards: Card[]; open: boolean; setOpen(o: boolean): void; onOpenCard(id: string): void };
 
 /**
- * "3 need you" in the top bar: the one count of what's waiting on you, and the one list. Open
- * questions come first because they're answered right here; then the sessions stopped at a prompt,
- * which have to be answered in their own terminal. It's only there while something is waiting.
- * A session stopped on the card it asked about is the same decision as the question, so it's
- * drawn under that question and not counted again (blockedSessions in presence-shared.ts).
+ * "3 need you" in the top bar: the count of open questions, and the list of them, oldest first,
+ * each answered right here. It's only there while something is waiting.
  */
-export function AsksButton({ cards, presence, open, setOpen, onOpenCard }: ButtonProps) {
+export function AsksButton({ cards, open, setOpen, onOpenCard }: ButtonProps) {
   const asking = cards.filter((c) => c.ask).sort((a, b) => a.ask!.askedAt.localeCompare(b.ask!.askedAt));
-  const blocked = blockedSessions(presence.sessions, presence.now, presence.claims, cards);
-  const total = asking.length + blocked.length;
+  const total = asking.length;
   if (!total) return null;
-  const summary = [asking.length && count(asking.length, "question"), blocked.length && count(blocked.length, "blocked session")].filter(Boolean).join(", ");
+  const summary = `${total} question${total === 1 ? "" : "s"}`;
   return (
     <div className="anchor">
       <button
@@ -160,22 +151,6 @@ export function AsksButton({ cards, presence, open, setOpen, onOpenCard }: Butto
               <section key={c.id}>
                 <button className="asks-card" onClick={() => { setOpen(false); onOpenCard(c.id); }} title="Open the card">{c.title}</button>
                 <AskBlock card={c} />
-                {/* Who's waiting on this answer: agent, machine, project, and how long the question has been open. */}
-                {(() => {
-                  const s = askingSession(c, presence.sessions, presence.claims);
-                  return s && <PresenceLine session={s} now={presence.now} askedAt={c.ask!.askedAt} />;
-                })()}
-              </section>
-            ))}
-            {blocked.map((s) => (
-              <section key={s.id}>
-                <h3 className="asks-project">{projectName(s)}</h3>
-                <ul className="card-session">
-                  <SessionRow
-                    session={s} now={presence.now}
-                    cards={presence.claims.filter((c) => c.sessionId === s.id).map((c) => cards.find((k) => k.id === c.cardId)?.title).filter((t): t is string => !!t)}
-                  />
-                </ul>
               </section>
             ))}
           </div>

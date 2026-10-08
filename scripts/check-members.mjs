@@ -983,7 +983,7 @@ section("stray WebSocket upgrades");
     `/tasks/agents/todo-agent/${owner.id}`, `/tasks/agents/todo-agent/${hex}`, `/agents/todo-agent/${owner.id}`,
     `/tasks/agent/sub/todo-agent/${owner.id}`, `/tasks/agent/`, "/tasks/", "/tasks", "/tasks/connect", "/tasks/invite", "/tasks/nope",
     "/tasks/assets/nope.js", "/tasks/og.png", "/tasks/api/me", "/tasks/api/board/members", "/tasks/mcp", "/tasks/setup.mjs",
-    "/tasks/oauth/token", "/tasks/presence/x", "/tasks/events/x", "/", "/.well-known/oauth-authorization-server",
+    "/tasks/oauth/token", "/tasks/presence", "/tasks/presence/x", "/tasks/events/x", "/", "/.well-known/oauth-authorization-server",
   ];
   for (const who of [null, owner, stranger]) {
     let bad = [];
@@ -1456,9 +1456,9 @@ section("who deleted it");
   solo.close();
 }
 
-// ---------- questions, MCP, the feed, presence ----------
+// ---------- questions, MCP, the feed, claims ----------
 
-section("questions, MCP, the event feed, presence");
+section("questions, MCP, the event feed, claims");
 {
   const ownerToken = (await call(owner, "POST", "/api/tokens", { name: "check owner" })).data.token;
   const writerToken = (await call(writer, "POST", "/api/tokens", { name: "check writer" })).data.token;
@@ -1531,15 +1531,20 @@ section("questions, MCP, the event feed, presence");
   });
   ok("the event feed takes no session cookie and no x-user header", noFeed === 401 || noFeed === null, noFeed);
 
-  // Presence: the owner has a session (it asked above). A member must not see it.
-  const ownerPresence = await call(owner, "GET", "/presence");
-  ok("the owner sees their own session", ownerPresence.text.includes(`check-${run}`), ownerPresence.text.slice(0, 200));
-  for (const [who, label] of [[writer, "a writer"], [viewer, "a viewer"], [stranger, "a stranger"]]) {
+  // Claims: asking above claimed the card for the owner's session. They're read over MCP and
+  // nowhere else, and a member's token reaches only the member's own board.
+  const ownerBoard = await mcp(ownerToken, "get_board", {});
+  ok("the owner's agent sees which session holds the card", ownerBoard.text.includes(`(session check-${run})`), ownerBoard.text.slice(-300));
+  ok("a member's agent sees none of the owner's claims", !(await mcp(writerToken, "get_board", {})).text.includes(`check-${run}`));
+  for (const [who, label] of [[owner, "the owner"], [writer, "a writer"], [viewer, "a viewer"], [stranger, "a stranger"]]) {
     const r = await call(who, "GET", `/presence?board=${owner.id}`, undefined, { "x-user": owner.id, "x-tasks-user": owner.id });
-    ok(`${label} can't see the owner's sessions`, r.status === 200 && !r.text.includes(`check-${run}`) && !r.text.includes("Ship it now"), r.text.slice(0, 200));
+    ok(`there's no list of sessions for ${label} to fetch`, r.status === 404 && !r.text.includes(`check-${run}`) && !r.text.includes("Ship it now"), [r.status, r.text.slice(0, 200)]);
   }
+  // Machines that still have the old Sessions hooks post here on every tool call. It answers
+  // the way it always did for a good token, and keeps nothing, on anyone's board.
   const report = await call(null, "POST", `/api/presence?board=${owner.id}`, { session_id: `intruder-${run}`, hook_event_name: "SessionStart", cwd: "/tmp/x" }, { Authorization: `Bearer ${writerToken}`, "x-user": owner.id });
-  ok("a member's token reports sessions to their own board only", report.status === 200 && !(await call(owner, "GET", "/presence")).text.includes(`intruder-${run}`));
+  ok("an old Sessions hook gets its 200, and what it sent is kept nowhere", report.status === 200 && report.text === "{}"
+    && !(await mcp(ownerToken, "get_board", {})).text.includes(`intruder-${run}`) && !(await mcp(writerToken, "get_board", {})).text.includes(`intruder-${run}`));
 }
 
 // ---------- the owner's agents take orders from the owner only ----------

@@ -12,7 +12,7 @@ Do these top to bottom. Each later step assumes the earlier ones.
 - [ ] Merge this work to `main` (a merge, not a rebase or a squash that rewrites what's already
       there) and run the checks: `npm run typecheck`, `npm run build`,
       `npm run check:markdown`, `npm run check:sort`, `npm run check:events`, `npm run check:nudge`,
-      `npm run check:setup`, `npm run check:tags`, `npm run check:presence`, `npm run check:launch`.
+      `npm run check:setup`, `npm run check:tags`, `npm run check:claims`, `npm run check:launch`.
 - [ ] `git push origin main`. The landing page links to GitHub for the source and the changelog
       (`…/blob/main/CHANGELOG.md`), and those links show whatever `main` on GitHub has. Until this
       is pushed, the page describes work the links can't back up.
@@ -82,33 +82,33 @@ Do these top to bottom. Each later step assumes the earlier ones.
 ### 5. Shoot the gallery again after the deploy
 
 The images in `docs/launch/gallery/` came from a dev server on a branch. Shoot them again so
-they show what's live. It takes two commands, because `05` is a signed-in picture:
+they show what's live. It takes two commands, because `04` is a signed-in picture:
 
-- [ ] Everything but `05`, from the live site:
-      `npm run shots -- https://askscottpierce.com --only 01,02,03,04,06,thumb`
-- [ ] `05` (the quick start on a new account's empty board) from a dev server on the deployed
+- [ ] Everything but `04`, from the live site:
+      `npm run shots -- https://askscottpierce.com --only 01,02,03,05,thumb`
+- [ ] `04` (the quick start on a new account's empty board) from a dev server on the deployed
       commit. The script signs up with a made-up address and reads the code off the screen,
       which only a dev server shows. In one terminal: `LOCAL_ONLY=1 npx vite dev --port 5190`.
-      In another: `npm run shots -- http://localhost:5190 --only 05`. The address in the
+      In another: `npm run shots -- http://localhost:5190 --only 04`. The address in the
       command is swapped for askscottpierce.com and the token is dotted out.
 - [ ] Run the quick start once for real on the live site, with a real agent, and hold the
-      board up against the pictures. `01` to `04` and `06` are the demo board, where the agent
+      board up against the pictures. `01` to `03` and `05` are the demo board, where the agent
       is scripted, so nothing proves they match a real run until you look. New account, Add a
       sample agent card, Copy the command, paste it in a terminal with Claude Code. Then compare
       what the board shows with each picture: the question and its answer buttons on the card
-      (`01`), the "need you" list (`02`), the Sessions list (`03`), the open card with its session
-      row, question, and notes (`04`), and the "need you" list on your phone (`06`). The words
+      (`01`), the "need you" list (`02`), the open card with its question and notes (`03`), and
+      the "need you" list on your phone (`05`). The words
       on the cards will differ; the parts, their order, and what they're called shouldn't. If
       the real board shows something a picture doesn't, or the other way around, fix the demo
       (`src/client/demoData.ts`) and shoot again before anything else.
 - [ ] `npm run check:launch`. It fails if a picture the copy names is missing, the wrong size,
       or 3 MB or more.
-- [ ] Open all seven PNGs (six images and the thumbnail) and look at them, and read each
+- [ ] Open all six PNGs (five images and the thumbnail) and look at them, and read each
       headline against what's live. If a run fails, it says which thing on the page it was
-      waiting for. If the wording of the quick start changed, `05` still shoots (it goes by the
+      waiting for. If the wording of the quick start changed, `04` still shoots (it goes by the
       section's structure, and draws the command a little smaller when it runs longer), but
       check that the headline "Four steps to a working agent" and the line under it, which
-      names the steps, are still true. Shrink `05` to 635px wide, the size Product Hunt shows
+      names the steps, are still true. Shrink `04` to 635px wide, the size Product Hunt shows
       before a click, and check the command can still be read.
 - [ ] Commit the new images.
 
@@ -118,7 +118,7 @@ they show what's live. It takes two commands, because `05` is a signed-in pictur
       turns the option into "Send: …?" and the second sends it. The "need you" list and an open
       card are one tap everywhere, and a card on the board is one click with a mouse. The tagline
       says "one tap", so someone will try it on a card on their phone and say it took two. The
-      gallery only says "one tap" over the list (`02`, `06`), and there's a ready answer in
+      gallery only says "one tap" over the list (`02`, `05`), and there's a ready answer in
       `product-hunt.md` ("One tap" took me two on my phone).
 
 ### 6. License
@@ -214,7 +214,7 @@ Keep a terminal open on each.
       browser for free, but a few hundred new accounts trying the assistant adds up.
       **Q:** is the account on Workers Paid? On the free plan Workers AI stops at its daily
       allocation (10,000 Neurons a day, last I knew; check the current number). If it runs out,
-      the board, MCP, questions, and Sessions all keep working. Only the assistant and semantic
+      the board, MCP, questions, and claims all keep working. Only the assistant and semantic
       search stop. The lever is `FREE_DAILY_CHATS`.
 - [ ] **Sign-in limits** (README, "Code guessing"). A code allows 5 tries. An email gets 10
       guesses an hour and 20 a day. An IP gets 30 guesses an hour. Someone behind a shared office
@@ -235,8 +235,9 @@ Keep a terminal open on each.
 - [ ] Day 2: reply to anything that came in overnight. Thank people by name.
 - [ ] Go through every comment and DM and put each real problem on the board as a card. Tag the
       ones an agent can take.
-- [ ] Write down what people expected that wasn't there. The likely ones: fuller session reporting for
-      agents other than Claude Code, sharing a board with a teammate, and agents on an encrypted board.
+- [ ] Write down what people expected that wasn't there. The likely ones: seeing what an
+      agent is doing between status lines, the event feed for agents other than Claude Code, and
+      agents on an encrypted board.
 - [ ] Post one follow-up when the first round of fixes ships: what people found and what changed.
       Add those lines to `CHANGELOG.md` as you go.
 - [ ] If you held Hacker News back, post the Show HN now, with what you learned folded in.

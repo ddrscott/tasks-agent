@@ -90,10 +90,10 @@ check("the feed's hello leaves out cards in Done, though it isn't last", agentQu
 check("get_board marks the special lanes", describeBoard(scotts).split("\n").filter((l) => !l.startsWith("  ")).map((l) => l.replace(/, \d+ cards.*$/, ")")),
   ["To do (lane id todo, the to do lane)", "Doing (lane id doing, the doing lane)", "Done (lane id l0axn, the done lane)", "Waiting on them (lane id done)"]);
 const lc = (b) => ({ lanes: b.lanes, cards: b.cards });
-check("dragging the lanes around ends no claim", endedCards(lc(scotts), lc(moveLane(scotts, "l0axn", 3)), "you"), []);
-check("a card moved into Done has ended", endedCards(lc(scotts), { lanes: scotts.lanes, cards: [card("x", "l0axn"), card("w", "done"), card("t", "l0axn")] }, "agent").map((e) => [e.cardId, e.lane]), [["t", "Done"]]);
-check("a card moved into the last lane, which isn't done, hasn't", endedCards(lc(scotts), { lanes: scotts.lanes, cards: [card("x", "l0axn"), card("w", "done"), card("t", "done")] }, "agent"), []);
-check("making a lane the done lane ends the cards in it", endedCards(lc(scotts), lc(setLaneRole(scotts, "done", "done")), "you").map((e) => [e.cardId, e.lane]), [["w", "Waiting on them"]]);
+check("dragging the lanes around ends no claim", endedCards(lc(scotts), lc(moveLane(scotts, "l0axn", 3))), []);
+check("a card moved into Done has ended", endedCards(lc(scotts), { lanes: scotts.lanes, cards: [card("x", "l0axn"), card("w", "done"), card("t", "l0axn")] }).map((e) => [e.cardId, e.lane]), [["t", "Done"]]);
+check("a card moved into the last lane, which isn't done, hasn't", endedCards(lc(scotts), { lanes: scotts.lanes, cards: [card("x", "l0axn"), card("w", "done"), card("t", "done")] }), []);
+check("making a lane the done lane ends the cards in it", endedCards(lc(scotts), lc(setLaneRole(scotts, "done", "done"))).map((e) => [e.cardId, e.lane]), [["w", "Waiting on them"]]);
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

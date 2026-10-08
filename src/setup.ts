@@ -1,5 +1,5 @@
-// The one-command Sessions setup, as served at /tasks/setup.mjs. It's scripts/tasks-setup.mjs
-// with the two scripts it installs and this server's origin written into it, so the one file
+// The one-command event feed setup, as served at /tasks/setup.mjs. It's scripts/tasks-setup.mjs
+// with the script it installs and this server's origin written into it, so the one file
 // someone pipes into node is everything that lands on their machine. Nothing is imported here:
 // server.ts hands in the script text, and scripts/check-setup.mjs builds the same file to test it.
 

@@ -51,7 +51,7 @@
       { "name": "TodoAgent", "class_name": "TodoAgent" },
       // Event sockets for agent sessions (src/events.ts), one per user, kept apart from the board's.
       { "name": "TaskEvents", "class_name": "TaskEvents" },
-      // Claude Code sessions reporting in, and card claims (src/presence.ts), one per user.
+      // Card claims (src/presence.ts), one per user. The name is from when it also held Claude Code sessions; boards have claims stored under it.
       { "name": "Presence", "class_name": "Presence" }
     ]
   },

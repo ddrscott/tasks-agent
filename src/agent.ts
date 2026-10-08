@@ -9,7 +9,7 @@ import { isSealed, NEEDS_CEO_TAG, THEME_IDS, type Attachment, type Board, type B
 import { ENVELOPE_ALG, kidOf, proofHash } from "./sealed";
 import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events";
-import { endedCards, settledAsks } from "./presence-shared";
+import { endedCards } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
 import {
@@ -694,28 +694,23 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
     if (actor === "you") this.publish(agentEvents(before, after, this.eventBy()));
-    this.endClaims(before, after, actor);
+    this.endClaims(before, after);
     return after;
   }
 
   /**
    * A card that just reached the done lane, or was deleted, can't still be "working": tell
    * Presence so its claim ends now instead of 15 minutes later (endedCards in presence-shared.ts).
-   * A question that was answered or taken back is told the same way, so the session that asked
-   * stops reading "needs input" (settledAsks).
    * This is the one place the board talks to Presence about a change, and it only ever sends:
    * nothing comes back into board state, so it adds no undo step, flashes no card, and publishes
-   * no agent event. An encrypted board keeps no presence, so there's nothing to tell.
+   * no agent event. An encrypted board holds no claims, so there's nothing to tell.
    */
-  private endClaims(before: Board, after: Board, by: Actor) {
+  private endClaims(before: Board, after: Board) {
     if (after.sealed) return;
-    const ended = endedCards(before, after, by);
-    // A question that was answered or taken back: the session that asked stops reading needs input.
-    const settled = settledAsks(before, after);
-    if (!ended.length && !settled.length) return;
+    const ended = endedCards(before, after).map((e) => e.cardId);
+    if (!ended.length) return;
     const presence = this.env.Presence.get(this.env.Presence.idFromName(this.name));
-    if (settled.length) this.ctx.waitUntil(presence.settle(settled).catch((e: Error) => console.warn("settling questions failed", e.message)));
-    if (ended.length) this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
+    this.ctx.waitUntil(presence.finish(ended).catch((e: Error) => console.warn("ending claims failed", e.message)));
   }
 
   /** Who to name on a feed event: the caller's email, whether they own the board, and whether the assistant did it for them. */
@@ -1048,7 +1043,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.reindex(before, this.state);
     // Undo and redo can finish or remove a card too (redoing a move to Done, undoing "Add card").
     // The other direction brings nothing back: a claim that ended stays ended.
-    this.endClaims(before, this.state, "you");
+    this.endClaims(before, this.state);
     const kept = new Set(ops.attachmentIds(this.state));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
   }
@@ -1343,9 +1338,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     } finally {
       this.encrypting = false;
     }
-    // An encrypted board keeps no session presence or claims (presence.ts): erase what's there.
+    // An encrypted board holds no claims (presence.ts): erase what's there.
     await this.env.Presence.get(this.env.Presence.idFromName(this.name)).wipe()
-      .catch((e: Error) => console.warn("presence wipe failed", e.message));
+      .catch((e: Error) => console.warn("erasing claims failed", e.message));
   }
 
   /**

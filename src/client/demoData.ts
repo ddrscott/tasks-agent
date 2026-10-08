@@ -1,10 +1,8 @@
 // What the demo board at /tasks/demo starts with, and the script its pretend agent follows
-// (Demo.tsx). All of it is made up: a small shop with three repos and a few agent sessions.
+// (Demo.tsx). All of it is made up: a small shop with three repos and an agent working its cards.
 // Nothing here is fetched or saved; a reload builds it again from scratch.
 
 import { NEEDS_CEO_TAG, type Ask, type Board, type Card } from "../shared";
-import { withAsks, type Claim, type Session } from "../presence-shared";
-import type { Presence } from "./Sessions";
 
 const MIN = 60_000;
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
@@ -26,11 +24,9 @@ export type Beat = {
   working(heard: string): string;
   /** The status line when the card goes to Done. `went` is the option it acted on. */
   done(went: string): string;
-  /** The session's last-action line at each point. */
-  last: { reading: string; working: string };
 };
 
-/** The lead session works these cards in order. The first one starts out claimed, with its question open. */
+/** The agent works these cards in order. The first one starts out with its question open. */
 export const PLOT: Beat[] = [
   {
     cardId: "c-orders",
@@ -42,8 +38,6 @@ export const PLOT: Beat[] = [
     pickup: "STATUS: picked up — reading the schema",
     working: (heard) => `STATUS: working — ${heard}, running the migration on staging`,
     done: (a) => `STATUS: done — orders is on the new schema. Went with: ${a}`,
-    // A Bash call is listed by its description, never the command, the same as a real session's.
-    last: { reading: "Read: schema.sql", working: "Bash: Run the migration on staging" },
   },
   {
     cardId: "c-ratelimit",
@@ -55,7 +49,6 @@ export const PLOT: Beat[] = [
     pickup: "STATUS: picked up — reading the search handler",
     working: (heard) => `STATUS: working — ${heard}, writing the limiter and its tests`,
     done: (a) => `STATUS: done — search is rate limited, tests pass. Went with: ${a}`,
-    last: { reading: "Read: search.ts", working: "Edit: rate-limit.ts" },
   },
 ];
 
@@ -156,97 +149,4 @@ export function seedBoard(theme: string): Board {
       }, 2600),
     ],
   };
-}
-
-const LEAD = "7c1e4f2a-93b6-4d0e-a5c8-2f6b1d9e0a41";
-
-/**
- * What the shop-web session is seen doing, over and over: each tool call and how many seconds
- * until the next. A real session reports after every tool call, so its row reads a few seconds
- * old, goes back to 0, and says something new. A row stuck on one number looks dead.
- */
-const SHOP_WEB: [last: string, seconds: number][] = [
-  // What a real row can say (reportFrom in presence.ts): a tool and a file name, or a Bash call's
-  // description. Never the command, which isn't stored.
-  ["Bash: Run the cart tests", 13],
-  ["Read: cart.test.ts", 6],
-  ["Read: usePrice.ts", 8],
-  ["Edit: cart.test.ts", 15],
-  ["Bash: Run the cart tests again", 11],
-  ["Edit: usePrice.ts", 9],
-  ["Bash: Run the cart test 200 times", 22],
-];
-const SHOP_WEB_LOOP = SHOP_WEB.reduce((n, [, s]) => n + s, 0) * 1000;
-
-/** The shop-web session's last action at `now`, and when it reported it. It opens 4 seconds into the first one. */
-function shopWebNow(now: number, startedAt: number): Pick<Session, "last" | "seenAt"> {
-  let into = (Math.max(0, now - startedAt) + 4000) % SHOP_WEB_LOOP;
-  for (const [last, seconds] of SHOP_WEB) {
-    if (into < seconds * 1000) return { last, seenAt: now - into };
-    into -= seconds * 1000;
-  }
-  return { last: SHOP_WEB[0][0], seenAt: now };
-}
-
-/** Which point of the script the lead session is at, worked out from the board (Demo.tsx). */
-export type Scene =
-  | { at: "idle"; since: number } // nothing left in the script; `since` is when it ran out
-  | { at: "between" } // about to take the next card
-  // On a card: reading before it asks, waiting on the answer, heard it a moment ago, or working on it.
-  | { at: "reading" | "waiting" | "heard" | "working"; beat: Beat; card: Card };
-
-/** How often a waiting agent is heard from: each wait_for_answer call holds this long (WAIT_SECONDS in agent-rules.ts). */
-const POLL_MS = 30_000;
-
-/**
- * The three sessions the Sessions list shows. Two run on the clock alone: the one in shop-web
- * keeps working through a short loop of tool calls, and the idle one in infra was last heard
- * from a minute before the demo opened and gets older from there, so it's marked stale four
- * minutes in, the way a real quiet session is. The lead
- * session in shop-api follows the scene and reads the way a real session does: while its card
- * has a question open it holds its claim and polls wait_for_answer, the claim carries the
- * question, and the app's own rule (withAsks) makes the row say needs input and "asked: …".
- * Answering takes the question off the claim, and the row is back to working in the same moment,
- * last heard from when the answer reached it.
- * Out of cards, it's idle from the moment it finished and gets older from there, like the other.
- *
- * `open` says whether a card can still be worked on. One in Done or deleted can't, and a claim
- * on it is over (endedCards in presence-shared.ts), so its session isn't waiting on it either.
- */
-export function demoPresence(scene: Scene, now: number, startedAt: number, open: (cardId: string) => boolean = () => true): Presence {
-  const leadNow = (): Pick<Session, "state" | "last" | "seenAt"> => {
-    if (scene.at === "idle") return { state: "idle", last: "finished its turn", seenAt: scene.since };
-    if (scene.at === "between") return { state: "working", last: "mcp__tasks__get_board", seenAt: now - 2000 };
-    if (scene.at === "waiting") {
-      // Heard from every time a wait_for_answer call comes back, so it never goes stale while it waits.
-      const asked = Date.parse(scene.card.ask?.askedAt ?? scene.card.updatedAt);
-      return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: now - (Math.max(0, now - asked) % POLL_MS) };
-    }
-    // The call that was holding came back with the answer. A session with hooks keeps the line its
-    // hooks last wrote, and routine tool reports are thinned out, so its row still names this
-    // tool for a while. (A session with no hooks would read `got your answer on "<card>"`.)
-    if (scene.at === "heard") return { state: "working", last: "mcp__tasks__wait_for_answer", seenAt: Date.parse(scene.card.answer?.at ?? "") || now - 1000 };
-    return { state: "working", last: scene.beat.last[scene.at], seenAt: now - 3000 };
-  };
-  const sessions: Session[] = [
-    { id: LEAD, project: "shop-api", machine: "macbook", agent: "lead", cwd: "~/code/shop-api", link: "", startedAt: startedAt - 52 * MIN, ...leadNow() },
-    {
-      id: "b40a9d17-5e2c-4c7f-8a31-6d0f3e5b7c92", project: "shop-web", machine: "macbook", agent: "lead", cwd: "~/code/shop-web", link: "",
-      state: "working", startedAt: startedAt - 18 * MIN, ...shopWebNow(now, startedAt),
-    },
-    {
-      id: "e2f8c630-1a7d-4b95-b0e4-9c5a7d3f1e68", project: "infra", machine: "build-box", agent: "", cwd: "~/code/infra", link: "",
-      state: "idle", last: "finished its turn", startedAt: startedAt - 140 * MIN, seenAt: startedAt - MIN,
-    },
-  ];
-  const held: Claim[] = [{ cardId: "c-flaky", sessionId: sessions[1].id, agent: "lead", claimedAt: startedAt - 17 * MIN }];
-  if (scene.at !== "idle" && scene.at !== "between") {
-    const ask = scene.at === "waiting" ? scene.card.ask : undefined;
-    held.push({
-      cardId: scene.card.id, sessionId: LEAD, agent: "lead", claimedAt: startedAt,
-      ...(ask ? { asked: ask.question, askedAt: Date.parse(ask.askedAt) } : {}),
-    });
-  }
-  const claims = held.filter((c) => open(c.cardId));
-  return { sessions: withAsks(sessions, claims), claims, now };
 }

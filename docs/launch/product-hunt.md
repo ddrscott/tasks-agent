@@ -19,7 +19,7 @@ From Product Hunt's own launch guide,
 | Description | "max 500 characters" | 260 (see below) |
 | Launch tags | "up to 3" | 3 |
 | Thumbnail | square, "We recommend 240x240", under 3 MB | 240x240 PNG |
-| Gallery | "Two required", "recommended size ... is 1270x760", under 3 MB each | six at 2540x1520 (1270x760 at 2x) |
+| Gallery | "Two required", "recommended size ... is 1270x760", under 3 MB each | five at 2540x1520 (1270x760 at 2x) |
 | Video | "Only YouTube links are supported", not private, full URL | see `video.md` |
 | Pricing | "free, paid, and paid (with a free trial or plan)" | see `// PRICING` |
 | First comment | asked for in the form, shows right under the gallery | 150 to 250 words |
@@ -93,7 +93,7 @@ If the form allows 500:
 
 <!-- count: chars 1-500 | description, long form -->
 ```
-A hosted kanban board your AI coding agents work over MCP. Claude Code, Cursor, Codex, or any other MCP client picks up cards, claims them, and keeps a status line on each. When one needs a decision, it asks on the card with a few options and you answer in one tap, from your desk or your phone. One list shows every open question and every Claude Code session stopped at a prompt. Optional end-to-end encryption. Nothing to install. Try the demo without signing up.
+A hosted kanban board your AI coding agents work over MCP. Claude Code, Cursor, Codex, or any other MCP client picks up cards, claims them, and keeps a status line on each. When one needs a decision, it asks on the card with a few options and you answer in one tap, from your desk or your phone. A claim means two agents never take the same card, and one list shows every open question. Optional end-to-end encryption. Nothing to install. Try the demo without signing up.
 ```
 
 ## // TOPICS
@@ -117,7 +117,7 @@ the landing page says "Pro isn't on sale yet."
 - **If Pro is not on sale at launch:** choose **Free** on the form. Pricing line:
 
   ```
-  Free. The board, MCP, questions, sessions, search, attachments, and encryption cost nothing, and your own agents are never capped. The built-in assistant gets 30 messages a day.
+  Free. The board, MCP, questions, claims, search, attachments, and encryption cost nothing, and your own agents are never capped. The built-in assistant gets 30 messages a day.
   ```
 
 - **If Pro is on sale at launch:** choose **Paid (with a free trial or plan)**. Pricing line:
@@ -155,11 +155,10 @@ uses when the launch is shared.
 | File | Headline in the image | What it shows | Caption |
 |---|---|---|---|
 | `01-board-question.png` | The task board your coding agents work from. | The demo board, three lanes, with an agent's question and its answer buttons on a card in Doing. | An agent hit a decision it shouldn't make alone, so it asked on the card. The option it would pick is marked REC. Pick one and it goes back to work. |
-| `02-need-you.png` | Everything waiting on you, in one list. | The "need you" button and the list it opens, nothing else. | "Need you" is one list: every open question, with the session that's waiting on it, and any other Claude Code session stopped at a prompt. An answer here is one tap. |
-| `03-sessions.png` | What every session is doing, by project. | The Sessions button and its list: three projects, one session each. | Every Claude Code session that's reporting in, on any machine, grouped by project. Working, needs input, or idle, and the last thing each one did. |
-| `04-card.png` | Each card says where it stands. | An open card from its title down to the end of the checklist in its notes. | An open card: the session that claimed it, its question, and its notes in markdown with a STATUS line and a checklist the agent keeps current. |
-| `05-quick-start.png` | Four steps to a working agent. | The command `// START_HERE` copies on a new account's board, drawn big, with its Copy button and the line about the token. The four steps are the line under the headline. The token in the command is dotted out. | Sign in, add a sample card, copy one command, paste it in a terminal. Claude Code claims the card and asks its first question on it. |
-| `06-phone.png` | Answer from your phone in one tap. | The "need you" list at 390 wide, in a plain phone outline. | It's a web page, so there's nothing to install on your phone. Open "need you" and tap an answer. |
+| `02-need-you.png` | Everything waiting on you, in one list. | The "need you" button and the list it opens, nothing else. | "Need you" is one list: every question your agents have open, oldest first, with the card each one is on. An answer here is one tap. |
+| `03-card.png` | Each card says where it stands. | An open card from its title down to the end of the checklist in its notes. | An open card: the agent's question, and its notes in markdown with a STATUS line and a checklist the agent keeps current. |
+| `04-quick-start.png` | Four steps to a working agent. | The command `// START_HERE` copies on a new account's board, drawn big, with its Copy button and the line about the token. The four steps are the line under the headline. The token in the command is dotted out. | Sign in, add a sample card, copy one command, paste it in a terminal. Claude Code claims the card and asks its first question on it. |
+| `05-phone.png` | Answer from your phone in one tap. | The "need you" list at 390 wide, in a plain phone outline. | It's a web page, so there's nothing to install on your phone. Open "need you" and tap an answer. |
 | `thumbnail-240.png` | | The favicon's three bars. | The thumbnail. |
 
 "One tap" is only said over the "need you" list, where it's true on every device. Answering
@@ -169,7 +168,7 @@ can't answer for you. An open card is one tap everywhere. If someone brings it u
 comments, that's the answer.
 
 The pictures in this folder came from a local dev server. None of them shows the footer, so no
-dev commit is in frame, and the address in `05`'s command was swapped for the hosted one. Shoot
+dev commit is in frame, and the address in `04`'s command was swapped for the hosted one. Shoot
 them again after the deploy so they match what's live; the exact commands are in
 `checklist.md`, step 5.
 
@@ -185,11 +184,11 @@ What it does:
 
 1. Your agent connects over MCP, picks up the cards you tagged for it, claims one, and keeps a status line on it.
 2. When it needs a decision, it asks on the card with a few options and marks the one it would pick. You tap one.
-3. "Need you" is one list of every open question and every Claude Code session stopped at a prompt, on any machine.
+3. "Need you" is one list of every open question, whichever agent or machine it came from.
 
 What's different: it's hosted, so there's nothing to install and it works from your phone. Any MCP client connects. Encryption is there if you want it.
 
-What's rough: only Claude Code reports every step to the Sessions list; other agents show up there when they claim a card. It's one person's board, with no teams. An encrypted board is closed to agents. It won't start your agents or review their diffs. And it's a v0.1 from one guy.
+What's rough: the board only knows what an agent writes on a card, so a status line is as fresh as the agent keeps it. Team boards are new and Pro only. An encrypted board is closed to agents. It won't start your agents or review their diffs. And it's a v0.1 from one guy.
 
 One ask: try the demo, no sign-up, and tell me where it breaks.
 https://askscottpierce.com/tasks/demo
@@ -215,7 +214,7 @@ commenter does, say it's a good project and leave it there.
 **How is this different from agentboards?**
 
 ```
-From their launch page, agentboards is about agents running their own board while you watch. Tasks leans the other way: the agent does the work, but when it reaches something it shouldn't decide alone, it stops and asks you, with options. The other thing I cared about is one list of what's waiting on me, across every session.
+From their launch page, agentboards is about agents running their own board while you watch. Tasks leans the other way: the agent does the work, but when it reaches something it shouldn't decide alone, it stops and asks you, with options. The other thing I cared about is one list of what's waiting on me, across every agent.
 ```
 
 **SCOTT:** I only read their launch page (tagline: "AI agents manage their own work. You just
@@ -230,19 +229,19 @@ Linear is a team issue tracker, and a good one. Tasks is a lot smaller: one pers
 **Does it work with Cursor / Codex / ChatGPT?**
 
 ```
-Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the live event feed and step-by-step session reporting are Claude Code only today, because they run on its hooks. Other agents show in Sessions as working while they hold a card, and wait for your answer with a tool call that comes back when you tap.
+Yes. It's a plain MCP server over HTTP with OAuth, so anything that speaks MCP can read and change the board and ask questions. The Connect page has steps for Claude, ChatGPT, Glean, Claude Code, Cursor, VS Code, and Codex. One honest limit: the optional event feed, which tells a running agent when the board changes, is Claude Code only today. Every agent, Claude Code included, waits for your answer with a tool call that comes back when you tap.
 ```
 
 **What about privacy?**
 
 ```
-The board holds card text and the files you attach. Session reporting is presence, not a log: session id, project folder, machine, state, one line like "Edit: server.ts", and the question an agent is waiting on. No transcripts, prompts, or commands are stored. You can also encrypt the board with a passphrase in your browser, and then the server only has ciphertext. The catch is that an encrypted board is closed to outside agents, since the server can't read it either.
+The board holds card text and the files you attach. When an agent claims a card, it also keeps the card's id, the session id the agent gave, what kind of agent it says it is, when it claimed the card, and when it was last heard from. No machine names, folder paths, transcripts, prompts, or commands are stored. You can also encrypt the board with a passphrase in your browser, and then the server only has ciphertext. The catch is that an encrypted board is closed to outside agents, since the server can't read it either.
 ```
 
 **Does my code leave my machine?**
 
 ```
-Not through Tasks. Your agents run wherever you run them, and Tasks never sees your repo. What reaches it is what an agent writes on a card, anything you attach, and the session hook's report: about 200 bytes with the session id, folder path, event name, tool name, file path, and notification text. What your agent sends to its own model provider is between you and them.
+Not through Tasks. Your agents run wherever you run them, and Tasks never sees your repo. What reaches it is what an agent writes on a card, anything you attach, and its claim on a card: a session id, what kind of agent it says it is, and when it claimed the card and was last heard from. What your agent sends to its own model provider is between you and them.
 ```
 
 **Is it open source?**
@@ -257,7 +256,7 @@ the license's name.
 **What's in the free plan?**
 
 ```
-Everything except a bigger assistant allowance. Cards, lanes, MCP calls, questions, sessions, search, attachments, and encryption are free and never capped. The built-in assistant gets 30 messages a day on Free, because that's the part that runs on my model bill.
+Everything except a bigger assistant allowance. Cards, lanes, MCP calls, questions, claims, search, attachments, and encryption are free and never capped. The built-in assistant gets 30 messages a day on Free, because that's the part that runs on my model bill.
 ```
 
 **SCOTT:** if Pro is on sale, add: "Pro raises that to 150 a day."
@@ -312,7 +311,7 @@ URL: `https://askscottpierce.com/tasks/demo` (Show HN wants something people can
 sign-up, and the demo is that). Then post this as the first comment:
 
 ```
-I run a few Claude Code sessions at once and kept finding one that had been parked on a question for an hour. Tasks is a hosted board the agents work over MCP: they claim cards, keep a status line, and call a tool to ask me a multiple-choice question that shows up on the card as buttons. One list shows every open question plus every Claude Code session stopped at a prompt. It runs on Cloudflare Workers and Durable Objects, the source is public (no license yet), and an optional passphrase encrypts the board in the browser, which also closes it to agents. The demo's agent is scripted; tell me where it falls over.
+I run a few Claude Code sessions at once and kept finding one that had been parked on a question for an hour. Tasks is a hosted board the agents work over MCP: they claim cards, keep a status line, and call a tool to ask me a multiple-choice question that shows up on the card as buttons. One list shows every open question, oldest first. It runs on Cloudflare Workers and Durable Objects, the source is public (no license yet), and an optional passphrase encrypts the board in the browser, which also closes it to agents. The demo's agent is scripted; tell me where it falls over.
 ```
 
 **SCOTT:** the HN title uses an en dash after "Tasks", which is the house style there. It's the one

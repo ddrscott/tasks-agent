@@ -9,7 +9,6 @@ import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCard
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
-import { CardPresence } from "./Sessions";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
 
@@ -511,7 +510,6 @@ export function CardFace(p: {
       )}
       <div>
         <div className="card-title">{card.title}</div>
-        <CardPresence cardId={card.id} />
         {!p.overlay && <AskBlock card={card} compact />}
         {/* A writer can read an agent's work order and not change it. Said here, the way a question says who it's waiting on. */}
         {p.held && !p.overlay && <p className="card-held">{boardOwner ?? "The owner"}'s agent card. Read only.</p>}

@@ -36,7 +36,7 @@ export const PAGE_META = {
   board: { name: "", description: "" },
   connect: {
     name: "Connect an agent",
-    description: "Connect Claude Code, Cursor, Codex, or any MCP client to your Tasks board. One command for Claude Code, the steps for the rest, and the hooks that list every session.",
+    description: "Connect Claude Code, Cursor, Codex, or any MCP client to your Tasks board. One command for Claude Code, the steps for the rest, and how questions and claims work.",
   },
   demo: {
     name: "Demo board",

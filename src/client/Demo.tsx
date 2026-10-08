@@ -20,13 +20,12 @@ import { BASE } from "./base";
 import { AskContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
-import { allChecked, CLOSED_BY_YOU, demoPresence, PLOT, seedBoard, withStatus, type Beat, type Scene } from "./demoData";
+import { allChecked, CLOSED_BY_YOU, PLOT, seedBoard, withStatus, type Beat } from "./demoData";
 import { Footer } from "./Footer";
 import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { SearchBox } from "./Search";
-import { PresenceContext, SessionsButton } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { readCachedTheme } from "./themes";
 import { useTitle } from "./title";
@@ -122,7 +121,6 @@ function advance(w: World, { beat, card, step }: Spot): World {
 }
 
 function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset(): void }) {
-  const [startedAt] = useState(() => Date.now());
   // `saved` is the board as it stands, with how far the agent has got on it; `board` is what's
   // drawn, which runs ahead of it during a drag.
   const saved = useRef<World>(null as unknown as World);
@@ -144,7 +142,6 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [asksOpen, setAsksOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; action: "undo" | "redo" | null; key: number; ms?: number } | null>(null);
@@ -295,29 +292,10 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
     boardEl.scrollLeft += lane.getBoundingClientRect().left - boardEl.getBoundingClientRect().left - pad;
   }, []);
 
-  // Sessions: the clock runs every second, so a working session's "4s ago" counts up and starts
-  // over when it does the next thing (demoData.ts), and the lead session follows the script.
-  const overAt = useRef<number | null>(null);
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-  // The lead session says needs input exactly while its card has a question open: the answer
-  // that closes the question is the same change that puts the session back to working.
-  // Out of cards, the lead's row is idle from the moment the script ran out, and ages from there.
-  if (spot) overAt.current = null;
-  else overAt.current ??= Date.now();
-  const scene: Scene = !spot ? { at: "idle", since: overAt.current ?? Date.now() }
-    : spot.step === "pickup" ? { at: "between" }
-    : { at: spot.card.ask ? "waiting" : spot.step === "ack" ? "heard" : spot.step === "finish" ? "working" : "reading", beat: spot.beat, card: spot.card };
   // The script ran out. `looped` is whether the visitor saw it through: a question answered and the card finished.
   const over = !spot;
   const looped = Object.values(saved.current.at).includes("done");
   const doneLane = doneLaneOf(board);
-  // A card that's finished or gone isn't being worked on, so nothing holds it, the lead's card included.
-  const live = new Set(board.cards.filter((c) => c.laneId !== doneLane).map((c) => c.id));
-  const presence = demoPresence(scene, Date.now(), startedAt, (id) => live.has(id));
 
   // Keyboard: n new card, t theme, / assistant, ⌘Z undo, ⇧⌘Z or Ctrl+Y redo, ⌘K search.
   useEffect(() => {
@@ -355,7 +333,6 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
   return (
     <AskContext.Provider value={answerAsk}>
-    <PresenceContext.Provider value={presence}>
     <div className="app demo">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
@@ -381,11 +358,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
                 <IconRedo />
               </button>
             </div>
-            <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
-            <SessionsButton
-              presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
-              cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
-            />
+            <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             <ThemePicker current={board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={pickTheme} />
             {/* The assistant runs on the server, so here it only says what it is. */}
             <div className="anchor hide-sm">
@@ -481,7 +454,6 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
         </div>
       )}
     </div>
-    </PresenceContext.Provider>
     </AskContext.Provider>
   );
 }

@@ -3,10 +3,9 @@ import type { GrantInfo } from "../oauth";
 import type { TokenInfo } from "../tokens";
 import { TOOL_LIST } from "../tool-docs";
 import { feedCommand, fullPrompt, STARTER_LINE } from "../agent-rules";
-// The two scripts a machine needs, as text, so the page can hand them out. Someone using the
-// hosted app has no checkout to copy them from, and this way they're always the build's own.
+// The script a machine needs, as text, so the page can hand it out. Someone using the
+// hosted app has no checkout to copy it from, and this way it's always the build's own.
 import eventsScript from "../../scripts/tasks-events.mjs?raw";
-import presenceScript from "../../scripts/tasks-presence.mjs?raw";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
 import { useTitle } from "./title";
@@ -15,9 +14,8 @@ import { IconCheck, IconTrash } from "./icons";
 // Everything about working the board with outside agents, at /tasks/connect: the four-step
 // quick start for Claude Code (QuickStart, which the empty board shows too), how to connect
 // any other client over MCP, the prompt that starts it on the board, the apps already connected with OAuth,
-// personal access tokens for clients that take a pasted token, the one command that sets up
-// the hooks behind // SESSIONS, and how the #agent tag, questions, claims, and the event feed
-// fit together.
+// personal access tokens for clients that take a pasted token, the one command that installs
+// the event feed, and how the #agent tag, questions, claims, and the event feed fit together.
 //
 // The page is public. Signed out, everything that explains is there; the parts that read or
 // change an account (connected apps, tokens) become a "Sign in to create a token" link.
@@ -44,7 +42,7 @@ const CLIENTS: Client[] = [
     steps: [
       <>The <a href="#quick">quick start</a> above does all of this in one command, with a token. This is the OAuth way, which leaves no token on disk. Run this once in a terminal:</>,
       <>Start Claude Code, run <code>/mcp</code>, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser opens here; sign in and <b>Allow</b>.</>,
-      <>Add <code>#agent</code> to a card's title, or use its Tags field, and paste in the <a href="#prompt">starter prompt</a> below. To see this machine's sessions on the board, run the one command under <a href="#sessions">Sessions</a>.</>,
+      <>Add <code>#agent</code> to a card's title, or use its Tags field, and paste in the <a href="#prompt">starter prompt</a> below.</>,
     ],
     code: (url) => claudeMcpAdd(url),
     lang: "sh",
@@ -122,35 +120,17 @@ const CLIENTS: Client[] = [
   },
 ];
 
-// Where a machine keeps the token and the two scripts. The scripts already look for the token here.
+// Where a machine keeps the token and the event feed script. The script already looks for the token here.
 const HOME = "~/.config/tasks";
-// The scripts talk to the hosted app unless told otherwise, so anywhere else the commands name this server.
-const HOSTED = "https://askscottpierce.com";
-const elsewhere = (name: string, url: string) => (location.origin === HOSTED ? "" : `${name}=${url} `);
-
 // One argument for a POSIX shell. Single quotes keep `$`, `!`, and backticks from meaning anything.
 const shq = (v: string) => `'${v.replace(/'/g, `'\\''`)}'`;
 
 const saveToken = (token: string) => `mkdir -p ${HOME} && echo '${token}' > ${HOME}/token && chmod 600 ${HOME}/token`;
 
-// The hooks for ~/.claude/settings.json. The two events that fire constantly run in the
-// background ("async"); the rest run in line, because a backgrounded Stop hook is killed when
-// a `claude -p` run exits and the session would be left saying "working".
-const HOOK_EVENTS: [string, boolean][] = [
-  ["SessionStart", false], ["UserPromptSubmit", true], ["PostToolUse", true], ["PermissionRequest", false],
-  ["Notification", false], ["Stop", false], ["SessionEnd", false],
-];
-function hooksJson(): string {
-  const command = `${elsewhere("TASKS_PRESENCE_URL", `${location.origin}${BASE}/api/presence`)}node ${HOME}/tasks-presence.mjs`;
-  const lines = HOOK_EVENTS.map(([event, background]) =>
-    `    ${`${JSON.stringify(event)}:`.padEnd(20)} [{ "hooks": [{ "type": "command", "command": ${JSON.stringify(command)}${background ? `, "async": true` : ""} }] }]`);
-  return `{\n  "hooks": {\n${lines.join(",\n")}\n  }\n}`;
-}
-
 const eventsCommand = () => feedCommand(location.origin, BASE);
 
-// The one-command Sessions setup. The Worker serves scripts/tasks-setup.mjs at /tasks/setup.mjs
-// with the two scripts inside it; the token rides in the environment, never in the URL.
+// The one-command event feed setup. The Worker serves scripts/tasks-setup.mjs at /tasks/setup.mjs
+// with the feed script inside it; the token rides in the environment, never in the URL.
 const setupUrl = () => `${location.origin}${BASE}/setup.mjs`;
 const setupCommand = (token: string) => `curl -fsSL ${setupUrl()} \\\n  | TASKS_TOKEN='${token}' \\\n    node --input-type=module -`;
 
@@ -374,7 +354,7 @@ function Snippet({ lang, code, live, wrap }: { lang: string; code: string; live?
 /** Where a signed-out visitor goes to sign in; they come back to this section afterwards. */
 const signInHref = (hash = "") => `${BASE}/?next=${encodeURIComponent(`${BASE}/connect${hash}`)}`;
 
-/** Saves one of the bundled scripts as a file. The browser puts it in Downloads; the step says where it goes. */
+/** Saves the bundled script as a file. The browser puts it in Downloads; the step says where it goes. */
 function DownloadButton({ name, text }: { name: string; text: string }) {
   return (
     <button
@@ -411,7 +391,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
     call<{ grants: GrantInfo[] }>("/api/grants").then((r) => setGrants(r.grants)).catch((e: Error) => setError(e.message));
   }, [signedIn]);
 
-  // Links like /tasks/connect#sessions land on their section. The page is drawn after the
+  // Links like /tasks/connect#events land on their section. The page is drawn after the
   // browser looked for the anchor, so it has to be scrolled to here.
   useEffect(() => {
     if (location.hash.length > 1) document.getElementById(location.hash.slice(1))?.scrollIntoView();
@@ -432,7 +412,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
     try { localStorage.setItem("todo-connect-client", id); } catch {}
   }
 
-  // `named` is the Sessions section's own button, which doesn't ask for a name.
+  // `named` is the event feed section's own button, which doesn't ask for a name.
   async function create(e: React.FormEvent | null, named = name) {
     e?.preventDefault();
     setBusy(true);
@@ -508,9 +488,8 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
 
         <p className="connect-rest">
           Not on Claude Code, or want OAuth instead of a token? <a href="#add">Add the URL to your agent</a> and
-          paste in the <a href="#prompt">starter prompt</a>. After that, <a href="#sessions">see your Claude Code
-          sessions on the board</a> and read <a href="#working">how the <code>#agent</code> tag, questions,
-          and claims work</a>.
+          paste in the <a href="#prompt">starter prompt</a>. After that, read <a href="#working">how
+          the <code>#agent</code> tag, questions, and claims work</a>.
         </p>
 
         <section className="connect-step">
@@ -579,9 +558,9 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
               <b>Getting your answer back to it.</b> While a question is open, the rules have the agent
               call <code>wait_for_answer</code>, which holds until you answer and hands it the card, for
               up to 10 minutes. That works in any MCP client, with no shell. After 10 minutes it stops
-              and says so: tell it <i>“check the board”</i>. With the <a href="#sessions">Sessions</a> setup
-              on a machine, Claude Code can also listen to the event feed, which tells it about new
-              cards and edits as well as answers. The same prompt works either way.
+              and says so: tell it <i>“check the board”</i>. With the <a href="#events">event feed</a> installed
+              on a machine, Claude Code can also listen for new cards and edits as well as answers.
+              The same prompt works either way.
             </p>
           </div>
         </section>
@@ -595,7 +574,7 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
                 <p className="muted">
                   Apps you allow show up here, and you can disconnect them at any time. Most agents sign you
                   in themselves and never need a token. For the ones that take a pasted token, like Codex,
-                  and for the Sessions setup below, you create one here.
+                  and for the event feed below, you create one here.
                 </p>
                 <div className="step-actions"><a className="btn primary" href={signInHref("#apps")}>Sign in to create a token</a></div>
               </>
@@ -659,14 +638,16 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
           </div>
         </section>
 
-        <section className="connect-step" id="sessions">
+        <section className="connect-step" id="events">
           <div className="step-num">05</div>
           <div className="step-main">
-            <h2 className="h">SESSIONS</h2>
+            <h2 className="h">EVENT_FEED</h2>
             <p>
-              The <b>Sessions</b> button on the board lists every Claude Code session that reports in, on any
-              machine: working, needs input, or idle. Sessions report through Claude Code hooks, so each
-              machine needs this once.
+              Optional, and for Claude Code. The event feed prints one line each time you add, edit,
+              move, answer, or delete an <code>#agent</code> card, so an agent on your machine hears
+              about it without polling. An agent already waits for your answers
+              with <code>wait_for_answer</code>, so skip this unless you want it to pick up new cards
+              and edits by itself. Each machine needs this once.
             </p>
             <Snippet lang="sh" code={setupCommand(token)} live={!!fresh} />
             {fresh ? (
@@ -677,58 +658,54 @@ export function Connect({ signedIn, onBack }: { signedIn: boolean; onBack(): voi
             ) : signedIn ? (
               <div className="setup-token">
                 <p className="muted">The command needs a token where it says <code>{PLACEHOLDER}</code>. Create one and it fills in.</p>
-                <button className="btn primary" type="button" disabled={busy} onClick={() => void create(null, "Sessions setup")}>
+                <button className="btn primary" type="button" disabled={busy} onClick={() => void create(null, "Event feed")}>
                   {busy ? "Creating…" : "Create a token"}
                 </button>
               </div>
             ) : (
               <div className="setup-token">
                 <p className="muted">The command needs a token where it says <code>{PLACEHOLDER}</code>.</p>
-                <a className="btn primary" href={signInHref("#sessions")}>Sign in to create a token</a>
+                <a className="btn primary" href={signInHref("#events")}>Sign in to create a token</a>
               </div>
             )}
             {error && signedIn && !fresh && <div className="login-error" role="alert">{error}</div>}
             <p>
-              <b>What it changes:</b> it saves the token to <code>{HOME}/token</code> (mode 600),
-              puts <code>tasks-presence.mjs</code> and <code>tasks-events.mjs</code> next to it, and adds
-              seven hooks to <code>~/.claude/settings.json</code> after saving a backup beside it. Hooks and
-              settings already there are kept, and running it again changes nothing.
+              <b>What it changes:</b> it saves the token to <code>{HOME}/token</code> (mode 600) and
+              puts <code>tasks-events.mjs</code> next to it. Nothing starts running: the feed runs only
+              when you tell an agent to use it.
+            </p>
+            <p>
+              <b>If this machine had the Sessions hooks:</b> Tasks used to list Claude Code sessions,
+              fed by seven hooks in <code>~/.claude/settings.json</code>. That's gone, and the hooks
+              do nothing now. This command takes them back out, after saving a backup beside the file,
+              and keeps every other hook and setting.
             </p>
             <p className="muted">
               Needs Node 22 or later and nothing else. <a href={setupUrl()} target="_blank" rel="noreferrer">Read the
               script</a> before you run it, or add <code>--dry-run</code> to the end to see what it would do.
-              Then start a Claude Code session: it shows up under <b>Sessions</b> within a few seconds.
             </p>
             <details className="by-hand">
               <summary>Do it by hand</summary>
               <div className="client-panel">
                 <ol>
                   <li>
-                    Create an access token above and save it on the machine. The hook reads it from this file:
+                    Create an access token above and save it on the machine. The script reads it from this file:
                     <Snippet lang="sh" code={saveToken(token)} />
                   </li>
                   <li>
-                    Download the hook script and move it to <code>{HOME}/tasks-presence.mjs</code>. It's one file
-                    and needs Node 22 or later, nothing else. The event feed script goes in the same folder.
+                    Download the script and move it to <code>{HOME}/tasks-events.mjs</code>. It's one file
+                    and needs Node 22 or later, nothing else.
                     <div className="step-actions">
-                      <DownloadButton name="tasks-presence.mjs" text={presenceScript} />
                       <DownloadButton name="tasks-events.mjs" text={eventsScript} />
                     </div>
                   </li>
                   <li>
-                    Add this to <code>~/.claude/settings.json</code>. If the file already has hooks, merge these in.
-                    <Snippet lang="json" code={hooksJson()} />
+                    If <code>~/.claude/settings.json</code> has hooks that
+                    run <code>tasks-presence.mjs</code>, delete them. They're left over from Sessions.
                   </li>
-                  <li>Start a Claude Code session. It shows up under <b>Sessions</b> within a few seconds.</li>
                 </ol>
               </div>
             </details>
-            <p className="muted">
-              What the hook sends: the session id, the folder, the tool's name, the file it touched, a Bash
-              call's description, and Claude's notification text. Prompts, tool output, and Bash commands
-              never leave the machine. Each session overwrites one row, and rows are deleted when the session
-              ends or after 24 hours.
-            </p>
           </div>
         </section>
 
@@ -765,13 +742,14 @@ you. One tap answers it. The answer is kept on the card. An agent that can't go 
                 </p>
               </li>
               <li>
-                <b>One card, one session.</b>
+                <b>One card, one agent.</b>
                 <p>
-                  An agent calls <code>claim_card</code> before it starts a card, so two sessions never work the
-                  same one, and says what it is and its folder. The server hands each agent a session id to
-                  claim with; a Claude Code session with the Sessions hooks uses its own, so it's one row. A claimed card shows the session's state under its title. A claim lapses 15
-                  minutes after its session goes quiet. The server tells every agent about claims and
-                  questions when it connects, so you don't have to.
+                  An agent calls <code>claim_card</code> before it starts a card, so two agents never work the
+                  same one. The server hands each agent a session id to claim with
+                  when it calls <code>get_started</code>, and a second agent that asks for a claimed card
+                  is refused. A claim ends when the card is done or deleted, when the agent gives it
+                  back, and 15 minutes after the agent's last call. The server tells every agent about
+                  claims and questions when it connects, so you don't have to.
                 </p>
               </li>
               <li>
@@ -779,7 +757,7 @@ you. One tap answers it. The answer is kept on the card. An agent that can't go 
                 <p>
                   The event feed prints one line of JSON each time you add, edit, move, answer, or delete
                   an <code>#agent</code> card, so an agent on your machine can act on it without polling.
-                  The <a href="#sessions">Sessions setup</a> installs it
+                  The <a href="#events">one command above</a> installs it
                   as <code>{HOME}/tasks-events.mjs</code>, next to the token it uses. It runs under Claude
                   Code's Monitor tool, and only when you ask: tell the agent to use the event feed, and
                   Claude Code asks once in the terminal before it runs the script. Left alone, an agent
@@ -791,7 +769,7 @@ you. One tap answers it. The answer is kept on the card. An agent that can't go 
             </ul>
             <p className="muted">
               An end-to-end encrypted board is closed to all of this. The server can't read it, so there are
-              no agent tools, no sessions, and no event feed.
+              no agent tools, no claims, and no event feed.
             </p>
           </div>
         </section>
