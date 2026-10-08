@@ -246,7 +246,7 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
-- **The top bar.** "Need you", due stats, and a tag filter all add to
+- **The top bar.** "Need you", due stats, the tag filter box, and a clicked tag's chip all add to
   the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
   guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
   gives up space one step at a time and stops at the first step that fits: the search box
@@ -260,6 +260,7 @@ run ahead of whatever serves the zone.
   (`// QUESTIONS`), and it's only there while one is open.
   Someone with a board shared with them also gets the board switcher next to the wordmark
   (`// TEAM_BOARDS`); its name and role chip drop to an icon at the "labels" step and on a phone.
+  The tag filter box does the same: its picked tags drop to `#` and a count.
 - **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
   `aria-label` (the account button is "Account", not the email address). The account and
   lane menus are `role="menu"` with `menuitem` children, the other popovers are
@@ -314,6 +315,18 @@ run ahead of whatever serves the zone.
   the top bar, to clear. While a filter is on, each lane's count reads matches / total
   ("2 / 22"). The filter belongs to the tab and isn't saved. On an
   encrypted board each tag is its own JWE like every other field.
+- **The tag filter.** The `# Tags` combo box in the top bar (`src/client/TagFilter.tsx`) takes
+  cards off the board instead of fading them, like a WHERE clause: pick one tag or several and
+  a card that doesn't match isn't drawn. Press `f` to open it, type to narrow the list, arrows
+  to move, Enter to tick, Escape to close. Tags are listed A to Z with how many cards carry
+  each. `match any` shows a card with at least one of the picked tags (the default) and
+  `match all` only a card with every one of them (`matchesTags` in `src/shared.ts`). "All
+  tags" or Clear brings every card back. Lane counts read shown / total while it's on, a lane
+  with cards but none shown says so, and the lane menu's Clear and Delete still count every
+  card in the lane. It works together with the click-a-tag fade, belongs to the tab, and isn't
+  saved. A picked tag that leaves the board drops out of the filter. A board with no tags
+  doesn't draw the box. Dragging works on what's shown: a card dropped on another lands next
+  to it in the lane's full order.
 - **Tags typed in a title.** `splitTitleTags` in `src/shared.ts` pulls trailing `#tags` off a
   title a person types for a new card. It reads only the end of the title, one word at a time,
   and stops at the first word that isn't a tag, so a title meant literally stays as typed. A
@@ -2328,7 +2341,7 @@ board, so one person gets the same board every time. `ALLOWED_EMAILS` still appl
 
 Locally, put the same four values in `.dev.vars` (see `.dev.vars.example`).
 
-Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
+Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `f` tag filter · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
 card, arrows to move it · `Enter` edit a card (then `Enter` or `e` on the notes to edit them) · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
 creates one card per line.
 

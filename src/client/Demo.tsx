@@ -26,6 +26,7 @@ import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { SearchBox } from "./Search";
+import { TagFilter, useTagWhere } from "./TagFilter";
 import { ThemePicker } from "./ThemePicker";
 import { readCachedTheme } from "./themes";
 import { useTitle } from "./title";
@@ -139,6 +140,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [where, setWhere] = useTagWhere(board);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -337,6 +339,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
+          <TagFilter board={board} where={where} onChange={setWhere} />
           <div className="stats" aria-label="Summary">
             <span><b>{open.length}</b> open</span>
             {dueToday > 0 && <span className="due-today"><b>{dueToday}</b> due today</span>}
@@ -408,7 +411,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
         <BoardView
           board={board} actions={actions} flash={flash}
-          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))} where={where}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={setNewCardLane}
           onOpen={(c: Card) => setEditing(c.id)}

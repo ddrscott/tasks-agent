@@ -403,6 +403,14 @@ function withTags(c: Card, tags: string[]): Card {
 
 export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
 
+/** The tag filter's pick (client/TagFilter.tsx): which tags, and whether a card needs every one of them or any one. */
+export type TagWhere = { tags: string[]; all: boolean };
+/** True when the tag filter lets this card show. No tags picked lets every card through. */
+export function matchesTags(c: Card, where: TagWhere): boolean {
+  if (!where.tags.length) return true;
+  return where.all ? where.tags.every((t) => hasTag(c, t)) : where.tags.some((t) => hasTag(c, t));
+}
+
 /** The tag that marks a card as an agent's work. */
 export const AGENT_TAG = "agent";
 /** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */

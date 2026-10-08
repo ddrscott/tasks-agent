@@ -30,6 +30,7 @@ import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
+import { TagFilter, useTagWhere } from "./TagFilter";
 import { MemberChat } from "./MemberChat";
 import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { ThemePicker } from "./ThemePicker";
@@ -218,6 +219,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const [editing, setEditing] = useState<string | null>(null);
   /** Show only cards with this tag; the rest fade back. Per tab, not saved. */
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [where, setWhere] = useTagWhere(board);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -791,6 +793,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
           <BoardSwitcher boards={boards} access={access} onSwitch={onSwitch} onOpen={onBoards} />
+          <TagFilter board={board} where={where} onChange={setWhere} />
           {board.sealed && !sharedBoard && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
               <IconLock /><span className="hide-sm label">encrypted</span>
@@ -889,7 +892,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         )}
         <BoardView
           board={board} actions={actions} flash={flash} mode={mode}
-          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))} where={where}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={setNewCardLane} frozen={frozen}
           onOpen={(c: Card) => setEditing(c.id)}

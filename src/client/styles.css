@@ -1709,3 +1709,36 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
   .card-facts { grid-template-columns: 1fr 1fr; }
   .login-card.invite-card { padding: 22px 18px; }
 }
+
+/* // TAG_FILTER: the combo box in the top bar that takes cards without the picked tags off the board (TagFilter.tsx). */
+.tag-filter { flex: none; min-width: 0; }
+.tag-filter-btn { gap: 6px; max-width: 260px; }
+.tag-filter-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.tag-filter-mark { font: 600 14px var(--font-mono); color: var(--accent); }
+.tag-filter-name { font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-filter-n { font: 600 11px var(--font-mono); min-width: 18px; padding: 1px 4px; text-align: center; background: var(--accent); color: var(--accent-ink); }
+.tag-filter > .popover { left: 0; right: auto; }
+.tag-combo { width: 320px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; }
+.tag-combo-find { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.tag-combo-find svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.tag-combo-find input { flex: 1; min-width: 0; border: 0; outline: none; background: none; font-size: 13px; }
+.tag-combo-list { display: flex; flex-direction: column; padding: 6px; max-height: min(360px, calc(100dvh - 220px)); overflow-y: auto; overscroll-behavior: contain; }
+.tag-combo-list button { flex: none; display: flex; align-items: center; gap: 8px; text-align: left; padding: 7px 10px; background: none; border: var(--border-w) solid transparent; border-radius: var(--radius-sm); font-size: 13px; }
+.tag-combo-list button[data-active="true"] { background: var(--surface-2); }
+.tag-combo-list button[aria-selected="true"] { border-color: var(--accent); }
+.tag-combo-list button svg { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.tag-combo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.tag-combo-count { font: 11px var(--font-mono); color: var(--muted); }
+.tag-combo-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font: 12px var(--font-mono); color: var(--muted); }
+.tag-combo-match { display: flex; align-items: center; gap: 6px; }
+.tag-combo-foot button { padding: 4px 9px; background: none; border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px var(--font-mono); color: var(--muted); }
+.tag-combo-foot button:hover:not(:disabled) { border-color: var(--accent); }
+.tag-combo-foot button[aria-checked="true"] { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
+.tag-combo-foot button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 560px) {
+  /* Like the questions list: on a phone it spans the screen, and the field is 16px so iOS doesn't zoom. */
+  .tag-filter > .popover { position: fixed; top: 62px; left: 16px; right: 16px; }
+  .tag-combo { width: auto; max-width: none; }
+  .tag-combo-find input { font-size: 16px; }
+  .tag-combo-list button { padding: 11px 10px; font-size: 14px; }
+}

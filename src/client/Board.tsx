@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { doneLaneId, faceLine, LANE_ROLES, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy } from "../shared";
+import { doneLaneId, faceLine, LANE_ROLES, matchesTags, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type TagWhere } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
@@ -40,6 +40,8 @@ type Props = {
   /** Cards without this tag fade back. */
   tagFilter: string | null;
   onTag(tag: string): void;
+  /** The tag filter in the top bar (TagFilter.tsx). Cards it doesn't match aren't drawn at all. */
+  where?: TagWhere;
   /** Open the full New card dialog for a lane. */
   onNew(laneId: string): void;
   quickAddLane: string | null;
@@ -315,7 +317,10 @@ function LaneView(props: Props & {
   const [armed, setArmed] = useState<"clear" | "delete" | null>(null);
   useEffect(() => { if (!menu) setArmed(null); }, [menu]);
   const adding = props.quickAddLane === lane.id;
-  const matching = props.tagFilter ? cards.filter((c) => hasTag(c, props.tagFilter!)).length : cards.length;
+  // The tag filter takes cards out of the lane; `cards` stays the whole lane, for the count and the menu.
+  const where = props.where?.tags.length ? props.where : null;
+  const shown = where ? cards.filter((c) => matchesTags(c, where)) : cards;
+  const matching = props.tagFilter ? shown.filter((c) => hasTag(c, props.tagFilter!)).length : shown.length;
 
   function commitRename(value: string) {
     if (!renaming) return;
@@ -360,9 +365,9 @@ function LaneView(props: Props & {
         ) : (
           <button className="lane-name" title="Rename" onClick={() => setRenaming(true)}>{lane.name}</button>
         )}
-        {/* Filtered-out cards only fade, so the count says how many match, out of how many. */}
-        {props.tagFilter ? (
-          <span className="lane-count" title={`${matching} of ${cards.length} tagged #${props.tagFilter}`}>{matching} / {cards.length}</span>
+        {/* While a filter is on, the count says how many match, out of how many. */}
+        {props.tagFilter || where ? (
+          <span className="lane-count" title={`${matching} of ${cards.length} match ${[...(where?.tags ?? []), ...(props.tagFilter ? [props.tagFilter] : [])].map((t) => `#${t}`).join(", ")}`}>{matching} / {cards.length}</span>
         ) : (
           <span className="lane-count">{cards.length}</span>
         )}
@@ -433,9 +438,9 @@ function LaneView(props: Props & {
         )}
       </header>
 
-      <SortableContext id={lane.id} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext id={lane.id} items={shown.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="cards" ref={setNodeRef}>
-          {cards.map((c) => (
+          {shown.map((c) => (
             <SortableCard
               key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle}
               // No check for a viewer, and none for a writer on a card whose question is still open: the server refuses both.
@@ -445,6 +450,7 @@ function LaneView(props: Props & {
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
+          {shown.length === 0 && cards.length > 0 && !adding && <div className="lane-empty">No cards match the tag filter</div>}
           {cards.length === 0 && !adding && (
             <div className="lane-empty">{!canCards ? "No cards" : props.index === 0 ? (owns ? "Nothing here yet. Add a card, or ask the assistant." : "Nothing here yet. Add a card.") : "Drag cards here"}</div>
           )}
