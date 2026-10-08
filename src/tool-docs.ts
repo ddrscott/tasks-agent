@@ -75,7 +75,7 @@ export const TOOL_DOCS = {
       "shows one button per option in the app; the owner answers with a tap. Use this instead of writing a question into " +
       "the notes, and when you can't go on with a card: say what you need. The answer shows in get_board as ANSWERED. Keep the question to " +
       "one line, make the options complete actions, and put the reasoning in the card's notes. Pass session_id, the one you claimed the card with: " +
-      "the board then shows your session as needs input, with the question, until the owner answers. Keep your claim on the card while you wait, " +
+      "the card stays yours while it waits, and if nobody held it, asking claims it for you. Keep your claim on the card while you wait, " +
       "move on to other work, and call wait_for_answer when none is left.",
     about: "Ask you a multiple-choice question on a card. You answer with one tap.",
   },
@@ -83,20 +83,20 @@ export const TOOL_DOCS = {
     description:
       "Wait for the owner to answer questions you asked with ask_ceo. Pass the ids of the cards you asked on. It holds for up to 30 seconds " +
       "(seconds changes that) and returns as soon as one is answered, with that card in full. If nothing is answered in that time it says so: " +
-      "call it again to keep waiting. Each call counts as hearing from your session, so the board doesn't mark you stale and your claims hold while you wait; " +
+      "call it again to keep waiting. Each call counts as hearing from your session, so your claims hold while you wait; " +
       "pass session_id to be sure. Use this instead of sleeping or calling get_board over and over.",
     about: "Wait for your answer. It holds for up to 30 seconds and returns the moment you answer one of the agent's questions.",
   },
   claim_card: {
     description:
       "Claim a card for your session before you work on it, so two agents never take the same one. " +
-      "Pass agent, machine, and project too: the board shows them on the card and in the Sessions list, and leaves them off without them. " +
+      "Pass agent too, what you are: get_board names it beside the card for the other agents. " +
       "Refused while another live session holds the card; that answer names the holder. " +
       "A claim lapses 15 minutes after its session was last heard from, and calling this again renews yours.",
     about: "Claim a card for one agent session, so two agents never take the same one.",
   },
   release_card: {
-    description: "Give up your claim on a card, when you finish it or stop working on it. Don't release a card you asked a question on: it's waiting on the owner, and releasing it takes your session off the card. Only the session holding the claim can release it.",
+    description: "Give up your claim on a card, when you finish it or stop working on it. Don't release a card you asked a question on: it's waiting on the owner, and releasing it lets another agent take it. Only the session holding the claim can release it.",
     about: "Give a claimed card back.",
   },
 } satisfies Record<string, ToolDoc>;

@@ -32,7 +32,6 @@ import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { MemberChat } from "./MemberChat";
 import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
-import { PresenceContext, SessionsButton, usePresence } from "./Sessions";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
@@ -50,7 +49,7 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [page, setPage] = useState<Page>(pageFromPath);
 
-  // `hash` names a section of the page, like "#sessions" on Connect, which scrolls to it once it's drawn.
+  // `hash` names a section of the page, like "#events" on Connect, which scrolls to it once it's drawn.
   const go = useCallback((p: Page, hash = "") => {
     history.pushState(null, "", (p === "board" ? `${BASE}/` : `${BASE}/${p}`) + hash);
     setPage(p);
@@ -223,7 +222,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [asksOpen, setAsksOpen] = useState(false);
   const [encOpen, setEncOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
@@ -499,10 +497,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
     }
   }, []);
   agentRef.current = agent;
-
-  // Claude Code sessions reporting in, and the cards they hold. An encrypted board keeps none.
-  // A member never sees them: claims and Sessions are the owner's.
-  const presence = usePresence(!member && !!raw && !raw.sealed);
 
   // Assistant usage and plan, for the meter in the chat and the upgrade prompts.
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -815,7 +809,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           <span className="spacer" />
           <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
           <div className="actions">
-            {/* Undo, questions, Sessions, and the cloud assistant are the owner's. On someone else's board they aren't drawn. */}
+            {/* Undo, questions, and the cloud assistant are the owner's. On someone else's board they aren't drawn. */}
             {!member && (
             <div className="btn-pair">
               <button className="btn" onClick={() => void undo()} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"} aria-label="Undo">
@@ -826,13 +820,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
               </button>
             </div>
             )}
-            {!member && <AsksButton cards={board.cards} presence={presence} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />}
-            {!member && !board.sealed && (
-              <SessionsButton
-                presence={presence} open={sessionsOpen} setOpen={setSessionsOpen} onConnect={onConnect}
-                cardTitle={(id) => board.cards.find((c) => c.id === id)?.title ?? null}
-              />
-            )}
+            {!member && <AsksButton cards={board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />}
             <ThemePicker current={member ? localTheme : board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => { if (member) setLocalTheme(t as typeof localTheme); else void agent.stub.setTheme(t); }} />
             {canWrite && <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
               <IconChat /><span className="label">Assistant</span>
@@ -899,7 +887,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
             <span className="member-line-text"><b>{banner.lead}</b> {banner.rest}</span>
           </aside>
         )}
-        <PresenceContext.Provider value={presence}>
         <BoardView
           board={board} actions={actions} flash={flash} mode={mode}
           tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
@@ -913,7 +900,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           }}
           toast={say}
         />
-        </PresenceContext.Provider>
         <Footer />
       </div>
 
@@ -931,8 +917,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} frozen={frozen} />
       )}
       {editingCard && (
-        // The editor shows the session that claimed the card, so it reads the same list the board does.
-        <PresenceContext.Provider value={presence}>
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
           mode={mode} board={sharedBoard ?? undefined} lapsed={access?.reason === "plan_lapsed"}
@@ -967,7 +951,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
           }}
           onClose={() => setEditing(null)}
         />
-        </PresenceContext.Provider>
       )}
 
       {/* Your own board only, like Members: a shared board's encryption is its owner's. */}

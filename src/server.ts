@@ -9,14 +9,12 @@ import { BOARD_ID, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from ".
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
-import { reportFrom } from "./presence";
 import { buildSetup } from "./setup";
 import { handleSso } from "./sso";
 import { handleTokens, tokenUser } from "./tokens";
 import { handleAdmin } from "./users";
-// The installer and the two scripts it puts on a machine, as text (// SESSIONS).
+// The installer and the script it puts on a machine, as text (// AGENT_EVENTS).
 import eventsScript from "../scripts/tasks-events.mjs?raw";
-import presenceScript from "../scripts/tasks-presence.mjs?raw";
 import setupScript from "../scripts/tasks-setup.mjs?raw";
 
 export { TodoAgent } from "./agent";
@@ -105,10 +103,9 @@ const NO_ORIGIN_CHECK = new Set(["/api/stripe/webhook"]);
 
 /**
  * The only addresses that answer a WebSocket upgrade: the board (`/agent`, your own or one
- * shared with you), the Sessions list (`/presence`), and the agent event feed (`/events`).
- * Exact paths, nothing under them.
+ * shared with you) and the agent event feed (`/events`). Exact paths, nothing under them.
  */
-const SOCKET_PATHS: ReadonlySet<string> = new Set([`${BASE}/agent`, `${BASE}/presence`, `${BASE}/events`]);
+const SOCKET_PATHS: ReadonlySet<string> = new Set([`${BASE}/agent`, `${BASE}/events`]);
 
 /**
  * An upgrade to anywhere else is refused here, before the OAuth provider, the asset layer, or
@@ -138,7 +135,7 @@ const app: ExportedHandler<Env> = {
       // a cross-origin page can't read what a GET returns anyway.
       const writes = req.method !== "GET" && req.method !== "HEAD";
       if (writes && !NO_ORIGIN_CHECK.has(sub) && fromElsewhere(req)) return forbidden();
-      if (sub === "/api/presence" && req.method === "POST") return handlePresenceReport(req, env);
+      if (sub === "/api/presence" && req.method === "POST") return handleTokenCheck(req, env);
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handleAdmin(req, env, sub)) ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
@@ -173,21 +170,10 @@ const app: ExportedHandler<Env> = {
     // The live feed of your #agent card changes (events.ts), for an agent session on your machine.
     if (sub === "/events") return handleEvents(req, env);
 
-    // The browser's live list of Claude Code sessions and card claims (presence.ts).
-    if (sub === "/presence") {
-      if (fromElsewhere(req)) return forbidden();
-      const user = await currentUser(req, env);
-      if (!user) return new Response("Sign in first", { status: 401 });
-      const headers = new Headers(req.headers);
-      headers.delete("Cookie");
-      headers.set("x-user", user.id);
-      return env.Presence.get(env.Presence.idFromName(user.id)).fetch(new Request(req.url, { headers }));
-    }
-
-    // The one-command Sessions setup: `curl … /tasks/setup.mjs | TASKS_TOKEN=… node --input-type=module -`.
+    // The one-command event feed setup: `curl … /tasks/setup.mjs | TASKS_TOKEN=… node --input-type=module -`.
     // Public and the same for everyone. The token travels in the caller's environment, never in this URL.
     if (sub === "/setup.mjs") {
-      const body = buildSetup(setupScript, { "tasks-presence.mjs": presenceScript, "tasks-events.mjs": eventsScript }, new URL(req.url).origin);
+      const body = buildSetup(setupScript, { "tasks-events.mjs": eventsScript }, new URL(req.url).origin);
       return new Response(body, { headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
 
@@ -262,33 +248,21 @@ function relay(board: WebSocket): Response {
   return new Response(null, { status: 101, webSocket: browser });
 }
 
-/** The most a hook may send. Real payloads are a few hundred bytes; a Write's tool_input can be big, and it's thrown away. */
-const PRESENCE_MAX_BYTES = 256 * 1024;
-
 /**
- * A Claude Code session reporting in (presence.ts). It takes a personal access token, never a
- * cookie, and the body is the hook's own JSON. The machine name comes from the
- * X-Tasks-Machine header (or ?machine=), since Claude Code doesn't send one.
+ * Says whether a personal access token is good, and nothing else: 401 when it isn't, `200 {}`
+ * when it is. The installer (scripts/tasks-setup.mjs) asks before it writes anything.
  *
- * Every answer is a 200 with an empty object unless the token is wrong. A hook is never a
- * reason to slow a session down or show it an error, so bad input is dropped quietly.
+ * It lives at /api/presence because that's where Claude Code hooks used to report each session
+ * (the Sessions feature, since removed). Machines still have those hooks installed, running the
+ * old tasks-presence.mjs or posting here as hooks of type "http", on every tool call. They get
+ * the answer they always got for a report that stored nothing, so no session slows down or
+ * shows an error. The body is never read and nothing is kept. Running the installer again takes
+ * the hooks out.
  */
-async function handlePresenceReport(req: Request, env: Env): Promise<Response> {
+async function handleTokenCheck(req: Request, env: Env): Promise<Response> {
   const user = await tokenUser(req, env);
   if (!user) return Response.json({ error: "Send a personal access token (Connect an agent → Tokens)." }, { status: 401 });
-  const noop = (note: string) => new Response("{}", { headers: { "Content-Type": "application/json", "X-Tasks-Presence": note } });
-  if (Number(req.headers.get("Content-Length") ?? 0) > PRESENCE_MAX_BYTES) return noop("too-big");
-  const raw = await req.text().catch(() => "");
-  if (raw.length > PRESENCE_MAX_BYTES) return noop("too-big");
-  let body: unknown;
-  try { body = JSON.parse(raw); } catch { return noop("not-json"); }
-  const q = new URL(req.url).searchParams;
-  const b = (body ?? {}) as Record<string, unknown>;
-  const pick = (header: string, key: string) => req.headers.get(header) ?? q.get(key) ?? (typeof b[key] === "string" ? (b[key] as string) : null);
-  const report = reportFrom(body, { machine: pick("X-Tasks-Machine", "machine"), agent: pick("X-Tasks-Agent", "agent"), link: pick("X-Tasks-Link", "link") });
-  if (!report) return noop("no-session");
-  const presence = env.Presence.get(env.Presence.idFromName(user.id));
-  return noop(await presence.report(user.id, report));
+  return new Response("{}", { headers: { "Content-Type": "application/json", "X-Tasks-Presence": "retired" } });
 }
 
 /**

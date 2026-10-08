@@ -10,7 +10,6 @@ import { DiscardBar, useDiscardGuard } from "./Discard";
 import { MODAL, useModal } from "./modal";
 import { Markdown, toggleTask } from "./Markdown";
 import { NotesFullButton } from "./NotesFull";
-import { CardSession } from "./Sessions";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
 import type { Vault } from "./vault";
@@ -323,7 +322,6 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={guard.requestClose}><IconClose /></button>
         </div>
         <TitleInput value={title} onChange={(v) => { setTitle(v); if (error) setError(""); }} onEnter={save} />
-        <CardSession cardId={card.id} />
         {/* Save and close first, like answering a question: the link leaves the board. */}
         <NoAgentLine card={card} before={save} />
         {lanes.length > 1 && (

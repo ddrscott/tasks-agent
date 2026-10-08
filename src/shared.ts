@@ -416,8 +416,8 @@ export const forAgent = (c: Card) => hasTag(c, AGENT_TAG) || hasTag(c, GAUNTLET_
 //
 // The board remembers the first time an outside agent reached it over MCP (mcp.ts). Until then
 // the app says so: a line above the lanes, and a chip on each card that's waiting for an agent
-// (src/client/AgentNudge.tsx). Session hooks and the event feed don't count: neither can read
-// or change a card, so a board that only has those still has nothing to pick its cards up.
+// (src/client/AgentNudge.tsx). The event feed doesn't count: it can't read or change a card,
+// so a board that only has that still has nothing to pick its cards up.
 
 /** Record that an agent reached the board. The first time wins; an encrypted board is closed to agents, so it records nothing. */
 export function markAgentSeen(b: Board, at: string): Board {

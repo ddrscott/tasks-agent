@@ -547,11 +547,8 @@ input.lane-name { background: var(--bg); border-color: var(--accent); outline: n
 .asks section + section { padding-top: 14px; border-top: var(--border-w) solid var(--line); }
 .asks-card { align-self: flex-start; max-width: 100%; background: none; border: 0; padding: 0; text-align: left; font: 12px var(--font-mono); color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .asks-card:hover { color: var(--accent-text); }
-/* A session stopped at a prompt, in the same list: its project where a question has its card. */
-.asks-project { margin: 0; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
 .dialog-body > .ask { padding: 12px; background: var(--bg); border: var(--border-w) solid var(--accent); border-radius: var(--radius-sm); }
 
-.card-presence { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font: 11px/1.4 var(--font-mono); min-width: 0; }
 /* The agent's STATUS line from the notes: plain mono text, two lines at most. The whole line is in its title. */
 .card-status { margin-top: 6px; font: 11px/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -841,37 +838,6 @@ a.att-name:hover { color: var(--accent-text); }
 .theme-opt b { font-size: 12px; font-weight: 600; }
 .theme-opt small { font-size: 11px; color: var(--muted); margin-top: -4px; }
 
-/* // SESSIONS: Claude Code sessions reporting in. House style on every theme: mono, and an
-   orange $ on the rows that are live. */
-.sess-btn { position: relative; }
-.sess-count { font: 600 11px/1 var(--font-mono); padding: 3px 5px; background: var(--surface-2); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
-.sessions { width: 400px; max-width: calc(100vw - 32px); max-height: min(70dvh, 620px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
-.sessions section { display: flex; flex-direction: column; gap: 6px; }
-.sessions ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.sess-empty { margin: 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
-.sess-empty code { font: 12px var(--font-mono); color: var(--ink); }
-.sess-empty a, .sess-foot a { color: var(--accent-text); text-underline-offset: 3px; }
-.sess-foot { margin: 0; padding-top: 10px; border-top: var(--border-w) solid var(--line); font: 12px var(--font-mono); color: var(--muted); }
-.sess-project { margin: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font: 600 13px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
-.sess-project span { font-weight: 400; font-size: 11px; color: var(--muted); }
-.sess-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg); border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); font: 12px/1.45 var(--font-mono); min-width: 0; }
-.sess-row.stale { opacity: .6; }
-/* The same row in the card editor, for the session that claimed the card. */
-.card-session { list-style: none; margin: 0; padding: 0; flex: none; }
-.sess-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.sess-state { flex: none; display: inline-flex; gap: 6px; font-weight: 600; color: var(--ink); }
-.sess-mark { color: var(--accent); }
-.sess-state.is-needs-input { color: var(--accent-text); }
-.sess-state.is-idle, .sess-state.is-stale { color: var(--muted); font-weight: 400; }
-.sess-state.is-idle .sess-mark, .sess-state.is-stale .sess-mark { color: var(--muted); }
-.sess-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.sess-seen { flex: none; color: var(--muted); }
-.sess-last, .sess-card { color: var(--ink); overflow-wrap: anywhere; }
-.sess-card { color: var(--muted); }
-.sess-links { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.sess-links a, .sess-resume { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.sess-links a:hover, .sess-resume:hover { color: var(--accent-text); }
-.sess-id { color: var(--muted); margin-left: auto; }
 
 .menu { min-width: 220px; max-width: min(300px, calc(100vw - 32px)); padding: 6px; display: flex; flex-direction: column; }
 /* A lane's menu is the long one. On a short screen it scrolls instead of running off the bottom. */
@@ -968,19 +934,18 @@ a.att-name:hover { color: var(--accent-text); }
 .landing .login-card { width: 100%; padding: 20px; gap: 12px; animation: none; scroll-margin-top: 16px; }
 .landing .login-card p { font-size: 13px; }
 
-/* The picture. Real lanes, cards, and session rows inside a frame; nothing in it takes a click. */
+/* The picture. Real lanes and cards inside a frame; nothing in it takes a click. */
 .shot { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .shot-frame { border: var(--border-w) solid var(--line); border-radius: var(--radius-sm); background: var(--bg); box-shadow: var(--shadow-lift); overflow: hidden; }
 .shot-inner { user-select: none; }
 .shot .topbar { --bar-pad: 14px; padding: 10px var(--bar-pad); gap: 8px; }
 .shot .wordmark { font-size: 18px; }
 .shot .btn { height: 30px; cursor: default; }
-.shot-body { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.2fr) minmax(0, 1.25fr); gap: 12px; align-items: start; padding: 14px; }
+.shot-body { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) minmax(0, .9fr); gap: 12px; align-items: start; padding: 14px; }
 .shot .lane { max-width: none; }
 .shot .cards { overflow: visible; }
 .shot .card { cursor: default; }
 .shot .lane-name { cursor: default; }
-.shot .sessions { width: auto; max-width: none; max-height: none; overflow: visible; padding: 12px; background: var(--surface); border: var(--border-w) solid var(--line); border-radius: var(--radius); }
 .shot figcaption { font: 11px/1.5 var(--font-mono); color: var(--muted); }
 .shot figcaption a, .landing-note a { color: var(--accent-text); text-underline-offset: 3px; }
 
@@ -1061,9 +1026,9 @@ a.att-name:hover { color: var(--accent-text); }
   .landing-points { grid-template-columns: minmax(0, 1fr); gap: 22px; }
   .landing-steps { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .shot-body { grid-template-columns: minmax(0, 1fr); padding: 12px; }
-  /* A phone gets a slice of the picture: the top bar's counts and the lane with the question and
-     the claimed card. The Sessions list would push the sign-in form two screens down. */
-  .shot .sessions { display: none; }
+  /* A phone gets a slice of the picture: the top bar's count and the lane with the question.
+     Done as well would push the sign-in form a screen further down. */
+  .shot-body > .lane:last-child { display: none; }
   .shot .asks-btn .label { display: none; }
   .proof-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .plans { grid-template-columns: minmax(0, 1fr); }
@@ -1205,7 +1170,7 @@ a.att-name:hover { color: var(--accent-text); }
 
 .client-panel li .snippet, .connect-notes li .snippet { margin-top: 8px; }
 .step-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-/* Linked to by #sessions, #working, and #tools; the sticky bar would cover the heading otherwise. */
+/* Linked to by #events, #working, and #tools; the sticky bar would cover the heading otherwise. */
 .connect-step, .connect-tools { scroll-margin-top: 72px; }
 .connect-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
 .connect-notes li { min-width: 0; }
@@ -1261,15 +1226,15 @@ a.att-name:hover { color: var(--accent-text); }
 }
 
 @media (max-width: 560px) {
-  /* The sessions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
+  /* The questions list hangs off a button in the middle of the bar, so on a phone it spans the screen instead. */
   /* What's new takes the whole screen on a phone, over the top bar and the floating Ask button. The X in its corner closes it. */
   .popover:has(> .changes) { position: fixed; inset: 0; z-index: 60; border: 0; border-radius: 0; box-shadow: none; }
   .changes { width: auto; max-width: none; height: 100%; max-height: none; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); font-size: 15px; }
   .changes-top { padding-top: max(10px, env(safe-area-inset-top)); }
-  .popover:has(> .sessions), .popover:has(> .asks) { position: fixed; top: 62px; left: 16px; right: 16px; }
-  .sessions, .asks { width: auto; max-width: none; }
-  .asks-btn, .sess-btn { padding: 0 8px; }
-  /* Room for the questions and sessions buttons beside the rest of the bar on a phone. */
+  .popover:has(> .asks) { position: fixed; top: 62px; left: 16px; right: 16px; }
+  .asks { width: auto; max-width: none; }
+  .asks-btn { padding: 0 8px; }
+  /* Room for the questions button beside the rest of the bar on a phone. */
   .topbar { gap: 6px; --bar-pad: 12px; }
   .topbar .actions { gap: 4px; }
   /* A tag filter chip doesn't fit beside the buttons, so it gets a row of its own under them. */
@@ -1338,8 +1303,7 @@ a.att-name:hover { color: var(--accent-text); }
   .notes-edit { padding: 8px 0 8px 12px; margin: -8px 0; }
   .btn.notes-full-btn { width: 40px; height: 40px; margin: -8px -10px -8px -6px; }
   .move-row { display: flex; }
-  .card-session .sess-resume, .card-session .sess-links a { padding: 12px 0; margin: -6px 0; }
-  .asks-btn, .sess-btn { min-width: 40px; justify-content: center; }
+  .asks-btn { min-width: 40px; justify-content: center; }
   /* Shortcut hints are for keyboards. */
   .quick-add .hint, .add-lane-form .hint, .menu kbd, .search kbd { display: none; }
   /* Under 16px, iOS zooms the page when a field takes focus. */
@@ -1608,7 +1572,7 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
 .board-switch-caret { font-size: 10px; color: var(--muted); }
 .board-switch > .popover { left: 0; right: auto; }
 /* The last step of the top bar's fit (topbarFit.ts): on a phone, an owner who shares a board and is
-   on someone else's has the switcher, a question, and Sessions in one row, and the account button
+   on someone else's has the switcher and a question in one row, and the account button
    would fall off the end. The wordmark gives up its place; screen readers still get the heading. */
 .topbar[data-tight~="mark"]:has(.board-switch) .wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .board-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); max-height: min(70dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }

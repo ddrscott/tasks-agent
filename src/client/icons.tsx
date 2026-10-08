@@ -9,7 +9,6 @@ export const IconRedo = svg(<><path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 
 export const IconPalette = svg(<><circle cx="13.5" cy="6.5" r="1.2" /><circle cx="17.5" cy="10.5" r="1.2" /><circle cx="8.5" cy="7.5" r="1.2" /><circle cx="6.5" cy="12.5" r="1.2" /><path d="M12 2a10 10 0 1 0 0 20c1 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.8-1.7 1.7-1.7h2A5.6 5.6 0 0 0 22 11c0-5-4.5-9-10-9z" /></>);
 export const IconChat = svg(<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />);
 export const IconUser = svg(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>);
-export const IconSessions = svg(<><rect x="3" y="4" width="18" height="16" rx="1" /><path d="m7 10 3 2.5L7 15M13 15h4" /></>);
 export const IconDots = svg(<><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>);
 export const IconClose = svg(<path d="M18 6 6 18M6 6l12 12" />);
 export const IconCalendar = svg(<><rect x="3" y="4" width="18" height="18" rx="1" /><path d="M16 2v4M8 2v4M3 10h18" /></>);
