@@ -1,0 +1,46 @@
+name: Deploy
+
+# A push to main goes to production: checks, then D1 migrations, then the Worker.
+# README: // DEPLOY.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, in push order. A running deploy is never cancelled halfway through
+# its migrations.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The checks that need no dev server. check:members and the live half of check:claims
+      # want one, so they stay a local run.
+      - run: npm run typecheck
+      - name: Checks
+        run: |
+          for c in markdown sort lanes events nudge setup tags claims launch; do
+            npm run -s "check:$c"
+          done
+
+      # Migrate before deploy: the migrations only add tables and columns, so the old Worker
+      # runs on top of them, and the new one fails without them.
+      - run: npm run db:migrate:remote
+      - run: npm run deploy

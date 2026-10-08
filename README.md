@@ -2532,6 +2532,22 @@ feature changes, check `docs/launch/` the same way you'd check the landing page.
 
 ## // DEPLOY
 
+**A push to `main` deploys.** `.github/workflows/deploy.yml` runs `npm run typecheck` and the
+checks that need no dev server, then the D1 migrations, then the deploy, and stops at the first
+one that fails. Deploys run one at a time, in push order. `gh run watch` follows the one in
+flight, and `gh workflow run deploy.yml` runs it again without a push.
+
+- It doesn't run `check:members` or the live half of `check:claims`, which need a dev server.
+  Run those before you push.
+- It signs in with two repo secrets: `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_API_TOKEN`, the
+  Cloudflare API token named `tasks-agent GitHub Actions deploy`. The token can edit Workers
+  scripts, D1, KV, and R2 on the account, read Workers AI and account settings, and edit Worker
+  routes on the askscottpierce.com zone. A new kind of binding may need another permission
+  added to it.
+- It never touches the Worker's own secrets (below). Those are still set by hand.
+
+The same thing by hand:
+
 ```sh
 npm run db:migrate:remote    # FIRST, whenever migrations/ changed
 npm run deploy               # vite build && wrangler deploy
