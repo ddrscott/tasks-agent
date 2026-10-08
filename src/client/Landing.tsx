@@ -289,7 +289,7 @@ const DOING: Card[] = [
       askedAt: at(120_000),
     },
   }),
-  card("s5", "Move the sessions table to D1", { tags: ["agent"] }),
+  card("s5", "Move the orders table to D1", { tags: ["agent"] }),
 ];
 
 const DONE: Card[] = [

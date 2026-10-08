@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Makes the Product Hunt gallery: six 1270x760 images in docs/launch/gallery/, each one a crop
+// Makes the Product Hunt gallery: five 1270x760 images in docs/launch/gallery/, each one a crop
 // of the running app set on a dark canvas with a `// KICKER` and a headline. Run it with
 // `npm run shots` while a dev server (or the live site) is up.
 //
-//   node scripts/shots.mjs [base-url] [--only 03,06] [--scale 1|2]
+//   node scripts/shots.mjs [base-url] [--only 03,05] [--scale 1|2]
 //
 // base-url defaults to http://localhost:5190 (TASKS_SHOTS_URL also sets it). It drives the
 // Chrome in /Applications over the DevTools protocol with Node's own WebSocket, so there's
@@ -11,9 +11,9 @@
 // Chrome is headless and gets a throwaway profile in the temp folder (--user-data-dir), so it
 // never touches the Chrome you're signed in to.
 //
-// 01 to 04 and 06 are the signed-out demo board. 05 is the quick start's command on a new account's
+// 01 to 03 and 05 are the signed-out demo board. 04 is the quick start's command on a new account's
 // board: the script signs up with a made-up address and the code a dev server shows on screen,
-// so 05 only comes from a dev server (DEV_LOGIN_CODES=1), never from the live site.
+// so 04 only comes from a dev server (DEV_LOGIN_CODES=1), never from the live site.
 //
 // Every shot waits for the thing it's a picture of and exits 1 with the reason when that
 // thing isn't there, so a change to the demo or a page shows up as a failed run, not as a
@@ -48,7 +48,7 @@ const scheme = "dark";   // the canvas is dark, so the app is too
 const only = flag("only", "");
 const scale = Number(flag("scale", "2"));
 if (args.includes("--help") || args.includes("-h")) {
-  console.log("usage: node scripts/shots.mjs [base-url] [--only 03,06] [--scale 1|2]");
+  console.log("usage: node scripts/shots.mjs [base-url] [--only 03,05] [--scale 1|2]");
   process.exit(0);
 }
 // Either the origin or the app's own address works: http://localhost:5190 or …/tasks/.
@@ -448,24 +448,13 @@ const shots = {
     return composed("02", {
       layout: "side",
       kicker: "NEEDS_YOU", headline: "Everything waiting\non you, in one list.",
-      sub: "Every open question, and every Claude Code session stopped at a prompt. One tap answers.",
-      art,
-    });
-  },
-
-  // “What are my agents doing”: only the Sessions list.
-  async "03-sessions"() {
-    const art = await listShot(".sess-btn", ".sessions", () => waitFor("at least two projects in the Sessions list", () => document.querySelectorAll(".sessions .sess-project").length >= 2));
-    return composed("03", {
-      layout: "side",
-      kicker: "SESSIONS", headline: "What every session is doing, by project.",
-      sub: "Claude Code sessions on any machine: working, waiting on you, or idle, and the last thing each one did.",
+      sub: "Every open question from your agents, oldest first. One tap answers.",
       art,
     });
   },
 
   // One open card, from its top down to the end of a notes row. The cut is the canvas's edge.
-  async "04-card"() {
+  async "03-card"() {
     // A tall screen, so the dialog lays out all of its notes and nothing is scrolled.
     const vp = { width: W, height: 1500 };
     await viewport(vp);
@@ -476,7 +465,6 @@ const shots = {
     await waitFor("the open card's notes rendered as markdown (.dialog-body .md)", () => !!document.querySelector(".dialog-body .md"));
     await waitFor("a STATUS line in the open card's notes", () => /STATUS:/.test(document.querySelector(".dialog-body .md")?.textContent ?? ""));
     await waitFor("a checklist in the open card's notes", () => document.querySelectorAll('.dialog-body .md input[type="checkbox"]').length >= 2);
-    await waitFor("the claiming session's row in the open card (Copy resume command)", () => !!document.querySelector(".dialog-body .sess-resume"));
     await isolate(["dialog.card-dialog"]);
     await inPage(() => {
       document.activeElement?.blur?.();
@@ -504,16 +492,16 @@ const shots = {
     if (at.checks < 2) die(`only ${at.checks} checklist rows of the open card's notes fit above the cut; the picture is meant to show the checklist.`);
     const rect = even({ x: at.x, y: at.y, width: at.width, height: Math.round(at.cut - at.y) });
     const c = await crop(rect, zoom, vp);
-    return composed("04", {
+    return composed("03", {
       layout: "side", bleed: true,
       kicker: "CARD", headline: "Each card says where it stands.",
-      sub: "The session that claimed it, the question it asked, and a STATUS line and checklist the agent keeps current.",
+      sub: "The question the agent asked, and notes with a STATUS line and a checklist it keeps current.",
       art: bareImg(c),
     });
   },
 
   // The command the quick start copies, on a new account's board with the sample card added.
-  async "05-quick-start"() {
+  async "04-quick-start"() {
     let vp = { width: 1180, height: 900 };
     await viewport(vp);
     await signIn();
@@ -588,7 +576,7 @@ const shots = {
     await isolate([cmd]);
     const c = await crop(await boxAround([cmd]), zoom, vp);
     await send("Network.clearBrowserCookies");
-    return composed("05", {
+    return composed("04", {
       layout: "top",
       kicker: "START_HERE", headline: "Four steps to a working agent.",
       sub: "Sign in, add a sample card, copy this command, paste it in a terminal.",
@@ -597,7 +585,7 @@ const shots = {
   },
 
   // The “need you” list on a phone, where an answer is one tap.
-  async "06-phone"() {
+  async "05-phone"() {
     const vp = { ...PHONE, mobile: true };
     await viewport(vp);
     await demo();
@@ -614,7 +602,7 @@ const shots = {
     const listBottom = await inPage(() => document.querySelector(".popover:has(> .asks)").getBoundingClientRect().bottom);
     if (listBottom > shown - 16) die(`the “need you” list ends at ${Math.round(listBottom)}px on the phone, below the ${shown}px the picture shows.`);
     const c = await crop(even({ x: 0, y: 0, width: PHONE.width, height: shown + 2 }), zoom, vp);
-    return composed("06", {
+    return composed("05", {
       layout: "side", bleed: true,
       kicker: "ON_YOUR_PHONE", headline: "Answer from your phone in one tap.",
       sub: "It's a web page, so there's nothing to install. The same list of what's waiting on you.",
@@ -654,7 +642,7 @@ async function signIn() {
     const card = document.querySelector('input[autocomplete="one-time-code"]').closest("form").parentElement;
     return card.textContent.match(/(?<!\d)\d{6}(?!\d)/)?.[0] ?? "";
   });
-  if (!code) die(`${base} doesn't show sign-in codes on screen, so the script can't sign in for the quick-start picture. Shoot this one from a dev server: npm run shots -- http://localhost:5190 --only 05`);
+  if (!code) die(`${base} doesn't show sign-in codes on screen, so the script can't sign in for the quick-start picture. Shoot this one from a dev server: npm run shots -- http://localhost:5190 --only 04`);
   await inPage(() => { document.querySelector('input[autocomplete="one-time-code"]').focus(); return true; });
   await send("Input.insertText", { text: code });
   const go = await mark("the code form's button", () => {

@@ -45,11 +45,8 @@
   .opt.rec { border-color: #9a4a12; }
   .opt.rec i { color: var(--accent-text); }
   .opt em { margin-left: auto; padding: 3px 7px; border: 2px solid var(--accent); font: 600 14px/1 var(--mono); font-style: normal; letter-spacing: .06em; color: var(--accent-text); }
-  .sess { display: flex; align-items: baseline; gap: 11px; margin-top: 15px; font: 400 18px/1 var(--mono); color: var(--muted); white-space: nowrap; }
-  .sess .state { font-weight: 600; color: var(--ink); }
-  .sess .state b { color: var(--accent); font-weight: 600; }
-  .sess .state.needs { color: var(--accent-text); }
-  .sess .seen { margin-left: auto; }
+  /* The agent's STATUS line, the way a card's face shows it. */
+  .status { margin-top: 12px; font: 400 18px/1.4 var(--mono); color: var(--muted); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -57,7 +54,7 @@
     <div class="wordmark">tasks<span>.</span></div>
     <div class="kicker"><b>//</b> FOR_AI_CODING_AGENTS</div>
     <h1>The task board your agents work from.</h1>
-    <p class="sub">They ask. You answer in one tap.<br>You see every session.</p>
+    <p class="sub">They ask. You answer in one tap.<br>Two never take the same card.</p>
     <div class="url"><b>$</b> askscottpierce.com/tasks</div>
   </div>
   <div class="board">
@@ -68,11 +65,10 @@
         <div class="q"><b>?</b>Ship behind a flag, or to everyone?</div>
         <div class="opt rec"><i>1</i>Behind a flag<em>REC</em></div>
         <div class="opt"><i>2</i>Everyone now</div>
-        <div class="sess"><span class="state needs"><b>$</b> needs input</span><span>claude · macbook</span><span class="seen">4s ago</span></div>
       </div>
       <div class="card">
         <div class="title">Fix the flaky checkout test</div>
-        <div class="sess"><span class="state"><b>$</b> working</span><span>claude · buildbox</span><span class="seen">12s ago</span></div>
+        <div class="status">working — rerunning it 200 times</div>
       </div>
       <div class="card">
         <div class="title">Write the 0.2 release notes</div>
