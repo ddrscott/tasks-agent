@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 - A tag filter in the top bar: pick one tag or several and the board shows only the cards that match, with the rest taken off the board instead of faded. Press `f` to open it, type to find a tag, and choose whether a card needs any of the picked tags or all of them
 - The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
@@ -225,6 +227,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Encrypted boards refuse plaintext from every path — chat, uploads, MCP, and stale tabs — and turning encryption off or changing the passphrase needs a key proof
 - Cookie-bearing requests from other origins are refused, including sibling subdomains
 
-[Unreleased]: https://github.com/ddrscott/tasks-agent/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ddrscott/tasks-agent/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ddrscott/tasks-agent/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ddrscott/tasks-agent/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ddrscott/tasks-agent/releases/tag/v0.1.0
