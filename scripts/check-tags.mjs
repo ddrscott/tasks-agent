@@ -14,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-tags");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { splitTitleTags, addCard, cleanTag, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
+const { splitTitleTags, addCard, cleanTag, matchesTags, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -25,6 +25,13 @@ function check(name, got, want) {
 }
 const split = (text, title, tags, have) => check(JSON.stringify(text), splitTitleTags(text, have), { title, tags });
 const literal = (text) => split(text, text, []);
+
+console.log("# the tag filter (matchesTags) keeps a card or takes it off the board");
+const both = { tags: ["shop-api", "agent"] }, one = { tags: ["agent"] }, none = {};
+check("no tags picked shows every card", [both, none].map((c) => matchesTags(c, { tags: [], all: true })), [true, true]);
+check("any: one picked tag is enough", [both, one, none].map((c) => matchesTags(c, { tags: ["shop-api", "agent"], all: false })), [true, true, false]);
+check("all: every picked tag has to be there", [both, one, none].map((c) => matchesTags(c, { tags: ["shop-api", "agent"], all: true })), [true, false, false]);
+
 
 console.log("# trailing tags come off the title");
 split("Write a haiku #agent", "Write a haiku", ["agent"]);

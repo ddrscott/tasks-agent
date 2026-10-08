@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- A tag filter in the top bar: pick one tag or several and the board shows only the cards that match, with the rest taken off the board instead of faded. Press `f` to open it, type to find a tag, and choose whether a card needs any of the picked tags or all of them
 - The lane menu has `This lane is`: To do, Doing, Done. Tap one to make that lane the one new cards land in, the one work in progress sits in, or the one that means finished
 - Agents see which lanes are the to do, doing, and done lanes in `get_board`
 - The server side of team boards: a Pro owner can invite people to their board by email as a viewer or a writer, with a single-use link that expires in 7 days, and can revoke, resend, change a role, or remove someone
