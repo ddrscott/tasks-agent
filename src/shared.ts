@@ -411,6 +411,29 @@ export function matchesTags(c: Card, where: TagWhere): boolean {
   return where.all ? where.tags.every((t) => hasTag(c, t)) : where.tags.some((t) => hasTag(c, t));
 }
 
+/**
+ * The tag filters as they sit in the address, so a filtered board can be linked to:
+ * `?tags=agent,shop-api` is the tag filter's pick, `&match=all` when a card needs every one of
+ * them, and `&fade=agent` is the tag clicked on a card. Anything that isn't a tag is dropped.
+ */
+export type TagQuery = { where: TagWhere; fade: string | null };
+export function tagQueryFrom(search: string): TagQuery {
+  const q = new URLSearchParams(search);
+  const tags = [...new Set((q.get("tags") ?? "").split(",").map(cleanTag).filter(Boolean))];
+  return { where: { tags, all: q.get("match") === "all" }, fade: cleanTag(q.get("fade") ?? "") || null };
+}
+/** `search` with the filters written into it and every other parameter left alone. "" when nothing is left. */
+export function tagQueryInto(search: string, { where, fade }: TagQuery): string {
+  const q = new URLSearchParams(search);
+  const put = (k: string, v: string) => { if (v) q.set(k, v); else q.delete(k); };
+  put("tags", where.tags.join(","));
+  put("match", where.all ? "all" : "");
+  put("fade", fade ?? "");
+  // A comma is fine in a query as it is, and `tags=agent,shop-api` is the link a person can read.
+  const s = q.toString().replace(/%2C/g, ",");
+  return s ? `?${s}` : "";
+}
+
 /** The tag that marks a card as an agent's work. */
 export const AGENT_TAG = "agent";
 /** Cards for a gauntlet agent (~/.claude/agents/gauntlet.md). They ride the same feed without #agent, so a lead never takes one. */

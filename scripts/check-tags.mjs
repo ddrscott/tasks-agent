@@ -14,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-tags");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { splitTitleTags, addCard, cleanTag, matchesTags, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
+const { splitTitleTags, addCard, cleanTag, matchesTags, tagQueryFrom, tagQueryInto, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -31,6 +31,17 @@ const both = { tags: ["shop-api", "agent"] }, one = { tags: ["agent"] }, none = 
 check("no tags picked shows every card", [both, none].map((c) => matchesTags(c, { tags: [], all: true })), [true, true]);
 check("any: one picked tag is enough", [both, one, none].map((c) => matchesTags(c, { tags: ["shop-api", "agent"], all: false })), [true, true, false]);
 check("all: every picked tag has to be there", [both, one, none].map((c) => matchesTags(c, { tags: ["shop-api", "agent"], all: true })), [true, false, false]);
+
+console.log("# the tag filters in the address (tagQueryFrom, tagQueryInto)");
+const off = { where: { tags: [], all: false }, fade: null };
+check("no query is no filter", tagQueryFrom(""), off);
+check("tags, match, and fade are read", tagQueryFrom("?tags=agent,shop-api&match=all&fade=bug"), { where: { tags: ["agent", "shop-api"], all: true }, fade: "bug" });
+check("an encoded comma reads the same", tagQueryFrom("?tags=agent%2Cshop-api").where.tags, ["agent", "shop-api"]);
+check("what isn't a tag is dropped", tagQueryFrom("?tags=%23Agent,,agent,%3Cb%3E!&match=every&fade=%20"), { where: { tags: ["agent", "b"], all: false }, fade: null });
+check("written so a person can read it", tagQueryInto("", { where: { tags: ["agent", "shop-api"], all: true }, fade: "bug" }), "?tags=agent,shop-api&match=all&fade=bug");
+check("other parameters stay", tagQueryInto("?board=u_1&tags=old", { where: { tags: ["agent"], all: false }, fade: null }), "?board=u_1&tags=agent");
+check("clearing leaves a bare address", tagQueryInto("?tags=agent&match=all&fade=bug", off), "");
+check("there and back", tagQueryFrom(tagQueryInto("?board=u_1", { where: { tags: ["été", "v2"], all: true }, fade: "shop_api" })), { where: { tags: ["été", "v2"], all: true }, fade: "shop_api" });
 
 
 console.log("# trailing tags come off the title");

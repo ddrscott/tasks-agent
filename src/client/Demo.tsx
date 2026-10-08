@@ -26,7 +26,7 @@ import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { SearchBox } from "./Search";
-import { TagFilter, useTagWhere } from "./TagFilter";
+import { TagFilter, useTagFilters } from "./TagFilter";
 import { ThemePicker } from "./ThemePicker";
 import { readCachedTheme } from "./themes";
 import { useTitle } from "./title";
@@ -139,8 +139,8 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [where, setWhere] = useTagWhere(board);
+  // `tagFilter` is the tag clicked on a card: the rest fade back. `where` is the top bar's filter. Both live in the address.
+  const { where, setWhere, fade: tagFilter, setFade: setTagFilter } = useTagFilters(board);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -411,7 +411,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
         <BoardView
           board={board} actions={actions} flash={flash}
-          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))} where={where}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter(tagFilter === t ? null : t)} where={where}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={setNewCardLane}
           onOpen={(c: Card) => setEditing(c.id)}

@@ -313,8 +313,8 @@ run ahead of whatever serves the zone.
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
   Click a tag on a card to fade out every card without it; click again, or the chip in
   the top bar, to clear. While a filter is on, each lane's count reads matches / total
-  ("2 / 22"). The filter belongs to the tab and isn't saved. On an
-  encrypted board each tag is its own JWE like every other field.
+  ("2 / 22"). The clicked tag is in the address as `?fade=agent` (see the tag filter, next).
+  On an encrypted board each tag is its own JWE like every other field.
 - **The tag filter.** The `# Tags` combo box in the top bar (`src/client/TagFilter.tsx`) takes
   cards off the board instead of fading them, like a WHERE clause: pick one tag or several and
   a card that doesn't match isn't drawn. Press `f` to open it, type to narrow the list, arrows
@@ -323,10 +323,18 @@ run ahead of whatever serves the zone.
   `match all` only a card with every one of them (`matchesTags` in `src/shared.ts`). "All
   tags" or Clear brings every card back. Lane counts read shown / total while it's on, a lane
   with cards but none shown says so, and the lane menu's Clear and Delete still count every
-  card in the lane. It works together with the click-a-tag fade, belongs to the tab, and isn't
-  saved. A picked tag that leaves the board drops out of the filter. A board with no tags
-  doesn't draw the box. Dragging works on what's shown: a card dropped on another lands next
+  card in the lane. It works together with the click-a-tag fade. A picked tag that leaves the
+  board drops out of the filter. A board with no tags doesn't draw the box. Dragging works on what's shown: a card dropped on another lands next
   to it in the lane's full order.
+- **Filters in the address.** Both tag filters live in the query string, so a filtered board
+  can be linked to and a reload keeps it: `/tasks/?tags=agent,shop-api` is the tag filter's
+  pick, `&match=all` is added when a card needs every tag, and `&fade=agent` is the tag
+  clicked on a card. They sit beside `?board=<id>` on a shared board and work on
+  `/tasks/demo` too. `tagQueryFrom` and `tagQueryInto` in `src/shared.ts` read and write them
+  (`npm run check:tags`), and `useTagFilters` in `TagFilter.tsx` holds the state. A change
+  replaces the address instead of adding to history, so Back still leaves the board and
+  doesn't walk back through every tick. Switching boards drops the filters, since the next
+  board has its own tags. Nothing is saved anywhere else: the address is the whole of it.
 - **Tags typed in a title.** `splitTitleTags` in `src/shared.ts` pulls trailing `#tags` off a
   title a person types for a new card. It reads only the end of the title, one word at a time,
   and stops at the first word that isn't a tag, so a title meant literally stays as typed. A
