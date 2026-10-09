@@ -4,7 +4,7 @@
 // page's HTML both come from that row.
 
 /** `/tasks/` itself is the board, or the landing page when signed out. These are the rest. */
-export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite", "admin", "all", "pages"] as const;
+export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite", "admin", "all", "pages", "sheets"] as const;
 export type Page = "board" | (typeof PAGES)[number];
 
 /** The page a path names, or null when there's no such page. `base` is "/tasks". */
@@ -59,6 +59,8 @@ export const PAGE_META = {
   all: { name: "All boards", description: "Every board you can reach, on one screen: your cards from every board, grouped by To do, Doing, and Done." },
   // A board's pages and files (// PAGES). Signed in only; `?board=` and `?path=` say which.
   pages: { name: "Pages", description: "A board's pages and files: Markdown you and your agents write, read, and edit together, with every earlier version kept." },
+  // A board's worksheets (// WORKSHEETS). Signed in only; `?board=` and `?sheet=` say which.
+  sheets: { name: "Worksheets", description: "A board's worksheets: typed tables you edit in a grid and your agents read, write, and query with SQL." },
   terms: { name: "Terms", description: "The terms of service for Tasks, the task board your AI coding agents work over MCP." },
   notFound: { name: "Not found", description: "There's no page at this address." },
 } as const satisfies Record<Page | "notFound", { name: string; description: string }>;

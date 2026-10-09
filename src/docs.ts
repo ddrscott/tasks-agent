@@ -23,6 +23,7 @@ import { ownedBoard } from "./boards";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
 import { countIndexed, dropBoard, dropEntries, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors } from "./search-all";
+import { sheetFromCsv, Sheets, type QueryResult, type Row as SheetRow, type SheetInfo } from "./sheets";
 
 const MB = 1024 * 1024;
 /** The most text a page holds; longer content is a file, stored as bytes. */
@@ -291,6 +292,27 @@ export class Docs extends DurableObject<Env> {
   allPages(): { path: string; text: string }[] {
     return this.sql.exec<{ path: string; text: string }>("SELECT path, text FROM pages ORDER BY path").toArray();
   }
+
+  // ---------- worksheets (sheets.ts): typed tables in this same SQLite, so a query can join them ----------
+
+  private _sheets?: Sheets;
+  private get sheets(): Sheets {
+    return (this._sheets ??= new Sheets(this.ctx.storage));
+  }
+  sheetList(): SheetInfo[] { return this.sheets.list(); }
+  sheetGet(key: string): SheetInfo | null { return this.sheets.get(key); }
+  sheetCreate(name: unknown, columns: unknown, by: string): SheetInfo { return this.sheets.create(name, columns, by); }
+  sheetImport(name: unknown, csv: unknown, by: string): { sheet: SheetInfo; rows: number } { return sheetFromCsv(this.sheets, name, csv, by); }
+  sheetRename(key: string, name: unknown, by: string): SheetInfo { return this.sheets.rename(key, name, by); }
+  sheetRemove(key: string, by: string): SheetInfo { return this.sheets.remove(key, by); }
+  sheetAddColumn(key: string, name: unknown, type: unknown, by: string): SheetInfo { return this.sheets.addColumn(key, name, type, by); }
+  sheetChangeColumn(key: string, col: string, change: { name?: unknown; pos?: unknown }, by: string): SheetInfo { return this.sheets.changeColumn(key, col, change, by); }
+  sheetDropColumn(key: string, col: string, by: string): SheetInfo { return this.sheets.dropColumn(key, col, by); }
+  sheetRows(key: string, opts: { limit?: number; offset?: number; sort?: string; dir?: string } = {}): { sheet: SheetInfo; rows: SheetRow[]; total: number } { return this.sheets.rows(key, opts); }
+  sheetInsert(key: string, rows: unknown, by: string): { sheet: SheetInfo; ids: number[] } { return this.sheets.insert(key, rows, by); }
+  sheetUpdate(key: string, updates: unknown, by: string): { sheet: SheetInfo; changed: number } { return this.sheets.update(key, updates, by); }
+  sheetDeleteRows(key: string, ids: unknown, by: string): { sheet: SheetInfo; deleted: number } { return this.sheets.deleteRows(key, ids, by); }
+  sheetQuery(sql: unknown, limit?: unknown): QueryResult { return this.sheets.query(sql, limit); }
 }
 
 // ---------- the HTTP API ----------
@@ -300,7 +322,7 @@ const fail = (status: number, code: string, error: string, extra: Record<string,
 const notFound = () => fail(404, "not_found", "No such board.");
 
 /** Whose files, and may the caller write them. Null for no way in. The same answers attachments give (attachments.ts). */
-async function where(req: Request, env: Env, user: User, boardKey: string | null): Promise<{ board: string; write: boolean; email: string; member: boolean } | Response | null> {
+export async function fileAccess(env: Env, user: User, boardKey: string | null): Promise<{ board: string; write: boolean; email: string; member: boolean } | Response | null> {
   const board = boardKey ?? user.id;
   if (!BOARD_ID.test(board)) return null;
   if (board === user.id || (await ownedBoard(env, user, board))) return { board, write: true, email: user.email, member: false };
@@ -358,7 +380,7 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
   if (path === "/api/files/move" && req.method === "POST") {
     const raw = await req.json<unknown>().catch(() => null);
     const body = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
-    const w = await where(req, env, user, typeof body.board === "string" ? body.board : null);
+    const w = await fileAccess(env, user, typeof body.board === "string" ? body.board : null);
     if (!w) return notFound();
     if (w instanceof Response) return w;
     if (!w.write) return readOnly();
@@ -378,7 +400,7 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
     return json({ file: r.info });
   }
 
-  const w = await where(req, env, user, url.searchParams.get("board"));
+  const w = await fileAccess(env, user, url.searchParams.get("board"));
   if (!w) return notFound();
   if (w instanceof Response) return w;
   const docs = docsOf(env, w.board);

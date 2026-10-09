@@ -20,6 +20,7 @@ import { askState, fenceLines, fileMember, fileNote, oneLine } from "./shared";
 import { findOwnedBoard, ownedBoards, type BoardRef } from "./boards";
 import { sharedBoards, type SharedBoard } from "./members";
 import { ensureIndexed, reachable, searchAll } from "./search-all";
+import { COLUMN_NAME_MAX, COLUMN_TYPES, COLUMNS_MAX, markdownTable, QUERY_ROWS_DEFAULT, QUERY_ROWS_MAX, ROWS_PER_CALL, SHEET_NAME_MAX, sheetErrorText, toCsv, type ColumnType, type SheetInfo } from "./sheets";
 import { cleanPath, PAGE_MAX_BYTES, type FileInfo } from "./docs";
 import type { TodoAgent } from "./agent";
 import type { Presence } from "./presence";
@@ -50,7 +51,7 @@ const NOT_YOURS = (s: SharedBoard) => `This board is ${s.ownerEmail}'s, shared w
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page", "search"] as const;
+const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page", "search", "list_sheets", "read_sheet", "create_sheet", "add_column", "write_rows", "update_rows", "delete_rows", "query_sheet"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -623,6 +624,170 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         return text(describeHits((await agent.search(rest)) as SearchResult));
       } catch (e) {
         return text((e as Error).message, true);
+      }
+    });
+
+    // Worksheets (sheets.ts, // WORKSHEETS): typed tables on a board, read and written by name, and queried with SQL.
+    const SHEET_ARG = z.string().min(1).max(60).describe("The worksheet, by name or id. list_sheets names them");
+    const sheetLine = (s: SheetInfo) => `- ${s.name} (id ${s.id}): ${s.rows} ${s.rows === 1 ? "row" : "rows"}; columns ${s.columns.map((c) => `${c.name} (${c.type})`).join(", ")}; changed ${s.updatedAt} by ${s.updatedBy}`;
+    const sheetFail = (e: unknown) => text(sheetErrorText(e), true);
+
+    server.registerTool("list_sheets", {
+      title: "List worksheets",
+      description: doc("list_sheets"),
+      inputSchema: z.object({ board: BOARD_ARG }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { board?: string }) => {
+      const here = await at(input?.board);
+      if (!here) return noBoard(input.board!);
+      const sheets = await docsOf(here).sheetList();
+      if (!sheets.length) return text(`${here.board.name} has no worksheets yet. create_sheet makes one.`);
+      return text(`${here.board.name}: ${sheets.length} ${sheets.length === 1 ? "worksheet" : "worksheets"}\n${sheets.map(sheetLine).join("\n")}\nquery_sheet runs SQL over them, each worksheet a table named as listed (quote names with spaces: "Sales 2026").`);
+    });
+
+    server.registerTool("read_sheet", {
+      title: "Read worksheet",
+      description: doc("read_sheet"),
+      inputSchema: z.object({
+        sheet: SHEET_ARG,
+        limit: z.number().int().min(1).max(ROWS_PER_CALL).optional().describe("Most rows to return, default 100. Use query_sheet to aggregate instead of reading everything"),
+        offset: z.number().int().min(0).optional().describe("Rows to skip, for the next page"),
+        sort: z.string().max(40).optional().describe("A column to sort by"),
+        desc: z.boolean().optional().describe("Sort descending"),
+        format: z.enum(["markdown", "csv"]).optional().describe("markdown (default) or csv"),
+        board: BOARD_ARG,
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { sheet: string; limit?: number; offset?: number; sort?: string; desc?: boolean; format?: "markdown" | "csv"; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      try {
+        const { sheet, rows, total } = await docsOf(here).sheetRows(input.sheet, { limit: input.limit ?? 100, offset: input.offset, sort: input.sort, dir: input.desc ? "desc" : "asc" });
+        const names = ["_id", ...sheet.columns.map((c) => c.name)];
+        const grid = rows.map((r) => names.map((n) => r[n] ?? null));
+        const head = `${sheet.name}: rows ${(input.offset ?? 0) + 1}–${(input.offset ?? 0) + rows.length} of ${total}. Columns: ${sheet.columns.map((c) => `${c.name} (${c.type})`).join(", ")}. _id is the row id for update_rows and delete_rows.`;
+        if (!rows.length) return text(`${sheet.name} has no rows${input.offset ? " there" : ""}. Columns: ${sheet.columns.map((c) => `${c.name} (${c.type})`).join(", ")}.`);
+        return text(`${head}\n${input.format === "csv" ? toCsv(names, grid) : markdownTable(names, grid)}`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("create_sheet", {
+      title: "Create worksheet",
+      description: doc("create_sheet"),
+      inputSchema: z.object({
+        name: z.string().min(1).max(SHEET_NAME_MAX).describe("The worksheet's name, like Sales 2026"),
+        columns: z.array(z.object({ name: z.string().min(1).max(COLUMN_NAME_MAX), type: z.enum(COLUMN_TYPES).optional().describe("text (default), number, date, checkbox, or link") })).min(1).max(COLUMNS_MAX).describe("The columns, in order"),
+        rows: z.array(z.record(z.string(), z.unknown())).max(ROWS_PER_CALL).optional().describe("Rows to add right away, each keyed by column name"),
+        board: BOARD_ARG,
+      }),
+    }, async (input: { name: string; columns: { name: string; type?: ColumnType }[]; rows?: Record<string, unknown>[]; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const no = mayWrite(here);
+      if (no) return no;
+      try {
+        const docs = docsOf(here);
+        const sheet = await docs.sheetCreate(input.name, input.columns, user.email);
+        const added = input.rows?.length ? (await docs.sheetInsert(sheet.id, input.rows, user.email)).ids.length : 0;
+        return text(`Created worksheet ${sheet.name} (id ${sheet.id}) on ${here.board.name} with columns ${sheet.columns.map((c) => `${c.name} (${c.type})`).join(", ")}${added ? `, and ${added} ${added === 1 ? "row" : "rows"}` : ""}.`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("add_column", {
+      title: "Add column",
+      description: doc("add_column"),
+      inputSchema: z.object({ sheet: SHEET_ARG, name: z.string().min(1).max(COLUMN_NAME_MAX), type: z.enum(COLUMN_TYPES).optional().describe("text (default), number, date, checkbox, or link"), board: BOARD_ARG }),
+    }, async (input: { sheet: string; name: string; type?: ColumnType; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const no = mayWrite(here);
+      if (no) return no;
+      try {
+        const sheet = await docsOf(here).sheetAddColumn(input.sheet, input.name, input.type ?? "text", user.email);
+        return text(`Added column ${input.name} (${input.type ?? "text"}) to ${sheet.name}. Columns now: ${sheet.columns.map((c) => c.name).join(", ")}.`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("write_rows", {
+      title: "Add rows",
+      description: doc("write_rows"),
+      inputSchema: z.object({ sheet: SHEET_ARG, rows: z.array(z.record(z.string(), z.unknown())).min(1).max(ROWS_PER_CALL).describe("The rows to add, each an object keyed by column name"), board: BOARD_ARG }),
+    }, async (input: { sheet: string; rows: Record<string, unknown>[]; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const no = mayWrite(here);
+      if (no) return no;
+      try {
+        const { sheet, ids } = await docsOf(here).sheetInsert(input.sheet, input.rows, user.email);
+        return text(`Added ${ids.length} ${ids.length === 1 ? "row" : "rows"} to ${sheet.name} (now ${sheet.rows}). Row ids: ${ids.join(", ")}.`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("update_rows", {
+      title: "Update rows",
+      description: doc("update_rows"),
+      inputSchema: z.object({
+        sheet: SHEET_ARG,
+        updates: z.array(z.object({ id: z.number().int().describe("The row's _id"), cells: z.record(z.string(), z.unknown()).describe("The cells to change, keyed by column name") })).min(1).max(ROWS_PER_CALL),
+        board: BOARD_ARG,
+      }),
+    }, async (input: { sheet: string; updates: { id: number; cells: Record<string, unknown> }[]; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const no = mayWrite(here);
+      if (no) return no;
+      try {
+        const { sheet, changed } = await docsOf(here).sheetUpdate(input.sheet, input.updates, user.email);
+        return text(`Updated ${changed} ${changed === 1 ? "row" : "rows"} on ${sheet.name}.`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("delete_rows", {
+      title: "Delete rows",
+      description: doc("delete_rows"),
+      inputSchema: z.object({ sheet: SHEET_ARG, ids: z.array(z.number().int()).min(1).max(ROWS_PER_CALL).describe("The rows' _ids"), board: BOARD_ARG }),
+      annotations: { destructiveHint: true },
+    }, async (input: { sheet: string; ids: number[]; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const no = mayWrite(here);
+      if (no) return no;
+      try {
+        const { sheet, deleted } = await docsOf(here).sheetDeleteRows(input.sheet, input.ids, user.email);
+        return text(`Deleted ${deleted} ${deleted === 1 ? "row" : "rows"} from ${sheet.name} (now ${sheet.rows}).`);
+      } catch (e) {
+        return sheetFail(e);
+      }
+    });
+
+    server.registerTool("query_sheet", {
+      title: "Query worksheets with SQL",
+      description: doc("query_sheet"),
+      inputSchema: z.object({
+        sql: z.string().min(1).max(20_000).describe('One SELECT. Each worksheet is a table named as list_sheets shows it, quoted when it has spaces: SELECT region, SUM(amount) FROM "Sales 2026" GROUP BY region'),
+        limit: z.number().int().min(1).max(QUERY_ROWS_MAX).optional().describe(`Most rows to return, default ${QUERY_ROWS_DEFAULT}`),
+        board: BOARD_ARG,
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { sql: string; limit?: number; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      try {
+        const r = await docsOf(here).sheetQuery(input.sql, input.limit);
+        if (!r.rows.length) return text("No rows.");
+        return text(`${r.rows.length} ${r.rows.length === 1 ? "row" : "rows"}${r.truncated ? ` (cut at ${r.rows.length}; narrow the query or raise limit)` : ""}\n${markdownTable(r.columns, r.rows)}`);
+      } catch (e) {
+        return sheetFail(e);
       }
     });
 

@@ -67,6 +67,48 @@ export const TOOL_DOCS = {
     about: "Delete a page or file.",
     destructive: true,
   },
+  list_sheets: {
+    description:
+      "List a board's worksheets: typed tables (text, number, date, checkbox, link columns) that people edit in a grid and you read, write, and query. " +
+      "Each is named with its id, row count, and columns. Use query_sheet to aggregate or join them with SQL instead of reading every row.",
+    about: "List a board's worksheets with their columns and row counts.",
+  },
+  read_sheet: {
+    description:
+      "Read a worksheet's rows as a markdown table (or CSV), a page at a time, optionally sorted by a column. Every row has an _id, which update_rows and delete_rows take. " +
+      "For totals, filters, or joins, query_sheet is cheaper than reading everything.",
+    about: "Read a worksheet's rows, a page at a time.",
+  },
+  create_sheet: {
+    description:
+      "Make a worksheet with named, typed columns (text, number, date, checkbox, link), and rows to start with if you have them. " +
+      "Names can have spaces; quote them in SQL. A viewer on a shared board can't.",
+    about: "Make a worksheet with typed columns.",
+  },
+  add_column: {
+    description: "Add a column to a worksheet. Existing rows get an empty cell there.",
+    about: "Add a column to a worksheet.",
+  },
+  write_rows: {
+    description:
+      "Add rows to a worksheet, each an object keyed by column name. Values are checked against the column's type (a number column refuses words; dates are YYYY-MM-DD; checkboxes take true/false). " +
+      "The new rows' ids come back. Up to 1000 rows a call.",
+    about: "Add rows to a worksheet.",
+  },
+  update_rows: {
+    description: "Change cells on rows you name by _id (read_sheet or query_sheet shows it). Only the cells you send change. A row id that doesn't exist refuses the whole call.",
+    about: "Change cells on worksheet rows by id.",
+  },
+  delete_rows: {
+    description: "Delete worksheet rows by _id. The change is logged with what the rows held.",
+    about: "Delete worksheet rows by id.",
+  },
+  query_sheet: {
+    description:
+      "Run one read-only SQL SELECT over a board's worksheets (SQLite). Each worksheet is a table named as list_sheets shows it; quote names with spaces (\"Sales 2026\"). " +
+      "Columns are named as listed; _id, _at, and _by hold each row's id and who changed it last. Aggregate, filter, and join here instead of reading every row. Nothing it runs can change the data.",
+    about: "Run a read-only SQL SELECT over a board's worksheets.",
+  },
   search: {
     description:
       "Search everything you can reach at once: cards and pages on every board you own and every board shared with you, by keywords and by meaning. " +

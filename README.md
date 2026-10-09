@@ -29,6 +29,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Boards | Many per account: a registry in D1 (`boards`, `src/boards.ts`), one `TodoAgent` per board named by the board's id; the first board keeps the user's id (`// BOARDS`) |
 | Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
 | Pages and files | A `Docs` Durable Object per board (`src/docs.ts`): text pages with revisions in its SQLite, other files in R2 under `<board id>/files/<path>` (`// PAGES`) |
+| Worksheets | Typed tables as real SQLite tables in the board's `Docs` object (`src/sheets.ts`), edited in a grid and queried with read-only SQL over MCP (`// WORKSHEETS`) |
 | Search | Across boards: an FTS5 table in D1 (`search_fts`) for keywords, Vectorize (`VECTORS`, optional) for meaning (`src/search-all.ts`, `// SEARCH`); per board, FTS5 and a vector scan in the board's own SQLite (`src/search.ts`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
@@ -654,7 +655,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), the worksheet tools `list_sheets`, `read_sheet`, `create_sheet`, `add_column`, `write_rows`, `update_rows`, `delete_rows`, and `query_sheet` (`// WORKSHEETS`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -1191,6 +1192,54 @@ and a board that isn't yours answers like one that doesn't exist.
 - `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
   revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
   tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).
+
+## // WORKSHEETS
+
+A worksheet is a table with typed columns on a board: the thing a team would otherwise keep
+in a Google Sheet, kept where the cards and pages are, and where agents can get at it with
+SQL. `src/sheets.ts` holds the store and the REST API; `src/client/Sheets.tsx` is the grid;
+the MCP tools are in `src/mcp.ts`.
+
+- **Storage.** A worksheet is a real SQLite table in the board's `Docs` Durable Object
+  (the same object that holds the pages), named by the sheet's name, with a column per
+  typed column and three of its own: `_id`, `_at`, `_by`, so every row says who changed it
+  last and when. The catalog (`sheets`, `sheet_cols`) is the source for names, types, and
+  column order. Renaming a sheet or a column is an `ALTER TABLE`, so SQL written against the
+  new name works at once. Sheet names can't be the object's own tables (`pages`, `files`,
+  `log`, …), so a sheet's table can't collide with them.
+- **Types.** `text`, `number`, `date` (YYYY-MM-DD), `checkbox` (0/1), `link`. A value is
+  coerced on the way in (`coerce`): `"1,200"` is a number, `"yes"` is a checked box, a date
+  in another spelling becomes YYYY-MM-DD, and a word in a number column is refused naming
+  the column. Column names are matched case aside, by name or id.
+- **Changes.** `insert`, `update`, and `deleteRows` each run in one transaction: a row id
+  that doesn't exist, or a bad value, refuses the whole call and writes nothing. Every change
+  is logged (`sheet_log`, 5000 entries per sheet) with what it replaced, for attribution now
+  and undo later.
+- **Query.** `query` runs one SELECT (`WITH … SELECT` is fine) over the board's worksheets.
+  It has to start with SELECT or WITH, hold no semicolon, and name no write statement; and
+  it runs inside `transactionSync` that is always rolled back, so even a statement that got
+  past the checks and wrote changes nothing. Rows are cut at `limit` (default 200, max 2000)
+  and the result says so. The object's own tables are visible to it (`pages`, `files`), which
+  is the same data the caller can read anyway.
+- **CSV.** `parseCsv` and `toCsv` are RFC 4180 (quotes, doubled quotes, newlines in quotes).
+  Import makes a sheet from the header row with types inferred from the values (`inferType`);
+  export writes the columns in order.
+- **Access.** The same check pages use (`fileAccess` in `docs.ts`): the owner and writers
+  write, viewers read and query, anyone else gets a 404.
+- **The grid.** Cells edit in place (click, type, Enter or Tab; Escape to leave it), save one
+  at a time, and the grid reloads from the server after each so what's shown is what's stored.
+  A new row is the bottom line; Enter adds it. Column headers sort; the `⋯` menu renames,
+  moves, or deletes a column; `+ column` adds one. The filter box narrows what's shown
+  without a round trip. The SQL button opens a query box (⌘Enter runs it), the same call
+  agents make with `query_sheet`.
+- **Over MCP.** `list_sheets`, `read_sheet` (markdown table or CSV, a page at a time, `_id`
+  first), `create_sheet` (columns and optional first rows), `add_column`, `write_rows`,
+  `update_rows` (by `_id`), `delete_rows`, and `query_sheet`. Sheets are named by name or id.
+  On a shared board a writer's agent writes and a viewer's reads, the same as pages.
+- **Limits.** 60 columns, 50 000 rows, 1000 rows per call, 10 KB per cell, names of 60 (sheet)
+  and 40 (column) characters with no quotes.
+- Not yet: computed columns, formulas in cells, undo from the grid (the log is there), XLSX,
+  and worksheet rows in search.
 
 ## // TEAM_BOARDS
 

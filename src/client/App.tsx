@@ -30,6 +30,7 @@ import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, Sh
 import { BoardDialog } from "./BoardDialog";
 import { AllBoards } from "./AllBoards";
 import { Pages } from "./Pages";
+import { Sheets } from "./Sheets";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskMeContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
@@ -76,6 +77,12 @@ export function App() {
     setPage("pages");
     scrollTo(0, 0);
   }, []);
+  /** A board's worksheets (// WORKSHEETS). */
+  const goSheets = useCallback((board: string | null) => {
+    history.pushState(null, "", `${BASE}/sheets${board ? `?board=${board}` : ""}`);
+    setPage("sheets");
+    scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     const onPop = () => setPage(pageFromPath());
@@ -113,7 +120,9 @@ export function App() {
   if (page === "all") return <AllBoardsHost me={me} goBoard={goBoard} />;
   // A board's pages and files (// PAGES).
   if (page === "pages") return <PagesHost me={me} goBoard={goBoard} />;
-  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} onAll={() => go("all")} onPages={goPages} />;
+  // A board's worksheets (// WORKSHEETS).
+  if (page === "sheets") return <SheetsHost me={me} goBoard={goBoard} />;
+  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} onAll={() => go("all")} onPages={goPages} onSheets={goSheets} />;
 }
 
 /** The Pages screen for the board in the address (Pages.tsx), with the board list for its name. */
@@ -124,6 +133,16 @@ function PagesHost({ me, goBoard }: { me: Me; goBoard(board: string | null): voi
     fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
   }, []);
   return <Pages me={me} board={board} boards={boards} onBoard={() => goBoard(board)} />;
+}
+
+/** The Worksheets screen for the board in the address (Sheets.tsx). */
+function SheetsHost({ me, goBoard }: { me: Me; goBoard(board: string | null): void }) {
+  const board = boardFromUrl(me.id);
+  const [boards, setBoards] = useState<Boards | null>(null);
+  useEffect(() => {
+    fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
+  }, []);
+  return <Sheets me={me} board={board} boards={boards} onBoard={() => goBoard(board)} />;
 }
 
 /** The All boards page with its board list (AllBoards.tsx). New board… goes to the first board, where the dialog lives. */
@@ -150,7 +169,7 @@ function takeFlash(): string | null {
  * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
  * saying so, and nothing keeps knocking on a board that won't open.
  */
-function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null, path?: string): void }) {
+function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null): void }) {
   const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
   const [access, setAccess] = useState<MemberAccess | null>(null);
   /** The board in the address when it's another board of yours (// BOARDS): opened as its owner, not as a member. */
@@ -227,7 +246,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: 
     <Workspace
       // A different board is a different connection and a clean slate: nothing from one leaks into the next.
       key={boardId ?? "own"}
-      me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin} onAll={onAll} onPages={onPages}
+      me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin} onAll={onAll} onPages={onPages} onSheets={onSheets}
       shared={boardId && access?.board === boardId ? access : null} own={boardId && own === boardId ? own : null}
       boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
       notice={notice} onNoticeShown={() => setNotice(null)}
@@ -237,7 +256,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: 
 }
 
 type WorkspaceProps = {
-  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null, path?: string): void;
+  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null): void;
   /** Open the admin page. The menu only offers it to an admin, and only on their own board. */
   onAdmin(): void;
   /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
@@ -258,7 +277,7 @@ type WorkspaceProps = {
   onKeptDone(): void;
 };
 
-function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, shared, own, boards, onSwitch, onLost, onBoards, notice, onNoticeShown, kept, onKeptDone }: WorkspaceProps) {
+function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets, shared, own, boards, onSwitch, onLost, onBoards, notice, onNoticeShown, kept, onKeptDone }: WorkspaceProps) {
   useTitle("Board");
   // Everything below asks `mode`, never the URL or a guess: "owner" on your own board, and on a
   // shared one whatever the server last said (the preflight, then `tasks_access` on the socket).
@@ -968,6 +987,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, shared, 
                         {/* On someone else's board the menu holds what's yours, and the way out. */}
                         <button role="menuitem" onClick={() => { setMenuOpen(false); onSwitch(null); }}>Go to my board</button>
                         <button role="menuitem" onClick={() => { setMenuOpen(false); onPages(sharedBoard); }}>Pages and files</button>
+                        <button role="menuitem" onClick={() => { setMenuOpen(false); onSheets(sharedBoard); }}>Worksheets</button>
                         {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>}
                         {canWrite && <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>}
                         <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
@@ -982,6 +1002,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, shared, 
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onPages(own); }}>Pages and files</button>
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); onSheets(own); }}>Worksheets</button>
                     {!sharedBoard && <button role="menuitem" onClick={() => { setMenuOpen(false); setMembersOpen(true); }}>Members<SharedNote userId={ownId} /></button>}
                     {/* Boards of your own (// BOARDS). The first can't be renamed or archived; any other can, from itself. */}
                     <div className="menu-label h">BOARDS</div>
