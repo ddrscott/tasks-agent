@@ -1284,7 +1284,11 @@ the MCP tools are in `src/mcp.ts`.
   `row`, ref `<sheet id>/<row id>`), its first text cell as the title and every cell in the
   body, written after each insert, update, delete, and rename. A hit opens the sheet with
   that row pointed at. Rows carry no vectors.
-- Not yet: computed columns, formulas in cells, undo from the grid (the log is there), XLSX.
+- **Undo.** `POST /api/sheets/<id>/undo` (the grid's Undo button) takes back the latest row
+  change from the log: an added row is removed, an edited row gets its old cells, a deleted
+  row comes back with its id. The undo is logged naming what it undid, so the next undo
+  takes back the change before that. Column and sheet changes aren't undone.
+- Not yet: computed columns, formulas in cells, XLSX.
 
 ## // TEAM_BOARDS
 

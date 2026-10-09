@@ -339,6 +339,14 @@ export class Docs extends DurableObject<Env> {
     return r;
   }
   sheetQuery(sql: unknown, limit?: unknown): QueryResult { return this.sheets.query(sql, limit); }
+  sheetUndo(key: string, by: string): { sheet: SheetInfo; undone: { action: string; rowId: number | null } } | null {
+    const r = this.sheets.undo(key, by);
+    if (r && this.board && r.undone.rowId !== null) {
+      const ref = `${r.sheet.id}/${r.undone.rowId}`;
+      this.ctx.waitUntil((r.undone.action === "insert" ? dropEntries(this.env, this.board, "row", [ref]) : this.indexRows(r.sheet.id, [r.undone.rowId])).catch((e: Error) => console.warn("indexing an undone row failed", e.message)));
+    }
+    return r;
+  }
 
   /** Rows in the cross-board search (search-all.ts, kind `row`): ref `<sheet id>/<row id>`, the first text cell as the title, every cell in the body. Keyword only; rows carry no vectors. */
   private rowEntries(sheet: SheetInfo, rows: SheetRow[]): Entry[] {

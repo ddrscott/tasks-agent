@@ -383,6 +383,40 @@ export class Sheets {
     return { sheet: this.info(s), deleted };
   }
 
+  /**
+   * Take back the latest row change on a sheet (insert, update, or delete) from the log: an
+   * inserted row is deleted, an updated row gets its old cells, a deleted row comes back with
+   * its id. The undo is logged too, naming the entry it undid, so a second undo takes back the
+   * change before that one. Column and sheet changes aren't undone here. Null when nothing is left.
+   */
+  undo(key: string, by: string): { sheet: SheetInfo; undone: { action: string; rowId: number | null } } | null {
+    const s = this.need(key);
+    type Log = { seq: number; row_id: number | null; action: string; before: string | null; after: string | null };
+    const entries = this.sql.exec<Log>("SELECT seq, row_id, action, before, after FROM sheet_log WHERE sheet_id = ? ORDER BY seq DESC LIMIT 200", s.id).toArray();
+    const undone = new Set(entries.filter((e) => e.action.startsWith("undo:")).map((e) => Number(e.action.slice(5))));
+    const target = entries.find((e) => ["insert", "update", "delete"].includes(e.action) && !undone.has(e.seq));
+    if (!target) return null;
+    const cols = this.cols(s.id);
+    const at = now();
+    this.storage.transactionSync(() => {
+      const row = (json: string | null) => (json ? (JSON.parse(json) as Record<string, Cell>) : {});
+      if (target.action === "insert" && target.row_id !== null) {
+        this.sql.exec(`DELETE FROM ${ident(s.name)} WHERE _id = ?`, target.row_id);
+      } else if (target.action === "update" && target.row_id !== null) {
+        const was = row(target.before);
+        const names = Object.keys(was).filter((n) => cols.some((c) => c.name === n));
+        if (names.length) this.sql.exec(`UPDATE ${ident(s.name)} SET _at = ?, _by = ?${names.map((n) => `, ${ident(n)} = ?`).join("")} WHERE _id = ?`, at, by, ...names.map((n) => was[n] ?? null), target.row_id);
+      } else if (target.action === "delete" && target.row_id !== null) {
+        const was = row(target.before);
+        const names = cols.map((c) => c.name).filter((n) => n in was);
+        this.sql.exec(`INSERT OR REPLACE INTO ${ident(s.name)} (_id, _at, _by${names.map((n) => `, ${ident(n)}`).join("")}) VALUES (?, ?, ?${names.map(() => ", ?").join("")})`, target.row_id, at, by, ...names.map((n) => was[n] ?? null));
+      }
+      this.logIt(s.id, target.row_id, `undo:${target.seq}`, target.after === null ? undefined : JSON.parse(target.after), target.before === null ? undefined : JSON.parse(target.before), by);
+      this.touch(s.id, by);
+    });
+    return { sheet: this.info(s), undone: { action: target.action, rowId: target.row_id } };
+  }
+
   /** The cells of one row, by column name, each coerced to its type. Keys that aren't columns are refused by name. */
   private cells(cols: Column[], raw: unknown): Map<string, Cell> {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new SheetError("bad_value", "A row is an object keyed by column name.");
@@ -556,6 +590,10 @@ export async function handleSheets(req: Request, env: Env, path: string): Promis
     if (!w.write) return readOnly();
     if (sub === "" && req.method === "DELETE") return json({ sheet: await docs.sheetRemove(key, by), deleted: true });
     if (sub === "rename" && req.method === "POST") return json({ sheet: await docs.sheetRename(key, body.name, by) });
+    if (sub === "undo" && req.method === "POST") {
+      const r = await docs.sheetUndo(key, by);
+      return r ? json(r) : fail(404, "nothing", "Nothing to undo on this worksheet.");
+    }
     if (sub === "rows") {
       if (req.method === "POST") return json(await docs.sheetInsert(key, body.rows, by), 201);
       if (req.method === "PATCH") return json(await docs.sheetUpdate(key, body.updates, by));

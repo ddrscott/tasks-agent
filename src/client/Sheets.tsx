@@ -180,6 +180,15 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
     await refresh();
   }, [sheet, renaming, call, say, refresh]);
 
+  const undo = useCallback(async () => {
+    if (!sheet) return;
+    const r = await call("POST", `/api/sheets/${encodeURIComponent(sheet.id)}/undo`, {});
+    if (!r.ok) { say("error", String(r.data?.error ?? "Nothing to undo.")); return; }
+    const u = (r.data as { undone: { action: string; rowId: number | null } }).undone;
+    say("ok", u.action === "insert" ? `Took back the added row.` : u.action === "delete" ? `Brought row ${u.rowId} back.` : `Put row ${u.rowId} back as it was.`);
+    await refresh();
+  }, [sheet, call, say, refresh]);
+
   const remove = useCallback(async () => {
     if (!sheet) return;
     const r = await call("DELETE", `/api/sheets/${encodeURIComponent(sheet.id)}${q(id)}`);
@@ -370,6 +379,7 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
                   <span className="pages-meta">{total} {total === 1 ? "row" : "rows"} · changed by {sheet.updatedBy === me.email ? "you" : sheet.updatedBy}, {when(sheet.updatedAt)}</span>
                   <span className="spacer" />
                   <input className="field sheet-filter" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter rows" aria-label="Filter rows" />
+                  {canWrite && <button className="btn" onClick={() => void undo()} title="Take back the last row change on this worksheet">Undo</button>}
                   {canWrite && renaming === null && <button className="btn" onClick={() => setRenaming(sheet.name)}>Rename</button>}
                   <a className="btn" href={api(`/api/sheets/${encodeURIComponent(sheet.id)}/export${q(id)}`)} download>Export CSV</a>
                   {canWrite && (

@@ -400,6 +400,13 @@ ok("a writer adds a row, stamped as theirs", mIns.status === 201 && (await call(
 ok("a stranger gets 404", (await call(stranger, "GET", `/api/sheets?board=${B}`)).status === 404);
 const del = await call(owner, "DELETE", `/api/sheets/${SH}/rows`, { board: B, ids: [R2] });
 ok("DELETE rows", del.status === 200 && del.data.deleted === 1 && del.data.sheet.rows === 2, del.data);
+const u1 = await call(owner, "POST", `/api/sheets/${SH}/undo`, { board: B });
+ok("undo brings back the deleted row with its id", u1.status === 200 && u1.data.undone?.action === "delete" && u1.data.undone.rowId === R2 && (await call(owner, "GET", `/api/sheets/${SH}?board=${B}`)).data.rows.some((r) => r._id === R2 && r.Region === "West"), u1.data);
+const u2 = await call(owner, "POST", `/api/sheets/${SH}/undo`, { board: B });
+ok("undo again takes back the row the writer added", u2.status === 200 && u2.data.undone?.action === "insert" && !(await call(owner, "GET", `/api/sheets/${SH}?board=${B}`)).data.rows.some((r) => r.Region === "North"), u2.data);
+const u3 = await call(owner, "POST", `/api/sheets/${SH}/undo`, { board: B });
+ok("and again puts the edited cell back", u3.status === 200 && u3.data.undone?.action === "update" && (await call(owner, "GET", `/api/sheets/${SH}?board=${B}`)).data.rows.find((r) => r._id === R1)?.Amount === 1200, u3.data);
+ok("a viewer can't undo", (await call(stranger, "POST", `/api/sheets/${SH}/undo`, { board: B })).status === 404);
 const impDel = await call(owner, "DELETE", `/api/sheets/${imp.data.sheet.id}?board=${B}`);
 ok("DELETE a worksheet", impDel.status === 200 && impDel.data.deleted === true && (await call(owner, "GET", `/api/sheets/${imp.data.sheet.id}?board=${B}`)).status === 404, impDel.data);
 
