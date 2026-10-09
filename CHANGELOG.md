@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All boards: every board you can reach on one screen, at `/tasks/all` and in the board switcher. Cards from every board are grouped by To do, Doing, and Done, each with a chip saying which board it's on; move a card and it moves on its own board, open it and you get the real card
 
 ### Changed
+- The MCP server's instructions and the `get_started` rules tell agents about pages, worksheets, search, and export, and ask them to put documents and tables on the board where the team sees them rather than in files only their machine has
 - `/api/board/*` takes `board` (the query on a GET, the body on a POST), defaulting to your first board; nothing that exists changes its address. A board you don't own there is a 404, the same as one that doesn't exist, where it used to answer with your own board
 
 ## [0.3.0] - 2026-10-08

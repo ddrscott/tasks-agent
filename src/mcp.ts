@@ -62,7 +62,9 @@ const INSTRUCTIONS = `These are the user's task boards, each laid out as kanban 
 lanes, cards, and card ids (every board at once, or one with board), or search_cards to find specific cards on a big board, then use the other
 tools to change it. list_boards names the boards, the user's own and the ones shared with them; every tool takes board to say which one it means.
 On a board shared with the user, the user is a member: read it, and change cards if they're a writer. Its agent cards, claims, and questions are its owner's.
-A board also has pages (Markdown and other text files) and files: list_pages, read_page, write_page, edit_page, and delete_page work them, with an etag so two writers never overwrite each other. get_board shows only the start of each card's notes and the names of its files:
+A board also has pages (Markdown and other text files) and files: list_pages, read_page, write_page, edit_page, and delete_page work them, with an etag so two writers never overwrite each other; export_page gives a page as HTML, Word, or PDF.
+It has worksheets, typed tables: list_sheets, read_sheet, create_sheet, add_column, write_rows, update_rows, delete_rows, and query_sheet, which runs a read-only SQL SELECT over them, so total, filter, and join there instead of reading every row.
+search looks across cards and pages on every board the user can reach at once; search_cards is one board with lane and tag filters. get_board shows only the start of each card's notes and the names of its files:
 call get_card for the full notes and to see attached images. get_board marks the
 done lane, wherever it sits: move a card there when the user finished it rather than deleting it. Dates
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
