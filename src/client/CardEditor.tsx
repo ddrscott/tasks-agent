@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
-import { isOwnerTag, ownerTagLike, ownerTagTyped } from "../member-rules";
+import { isAgentCard, isOwnerTag, ownerTagLike, ownerTagTyped } from "../member-rules";
 import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, ChangedWhileOpen, changer, CLAIM_HOLD_MS, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, WhoContext, type Mode } from "./member";
 import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
@@ -146,6 +146,11 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   // A writer can't finish or delete a card while its question is open: that would end the
   // agent's wait, which is the owner's call. Those controls aren't offered, and a line says why.
   const owner = useContext(AskOwnerContext);
+  // An agent card assigned to this writer (// ASSIGNEE): the notes, lane, and question are
+  // theirs; the title, due date, tags, files, and assignee stay the owner's, so those fields are
+  // greyed out here rather than refused on save.
+  const myEmail = useContext(AskMeContext);
+  const mineOnly = mode === "writer" && isAgentCard(card) && !!myEmail && card.assignee === myEmail;
   const held = mode === "writer" && !!card.ask;
   const doneLane = doneLaneId(lanes);
   const heldLane = (id: string) => held && id === doneLane && card.laneId !== doneLane;
@@ -329,9 +334,14 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           <h2 className="h">CARD</h2>
           <button type="button" className="btn ghost icon dialog-x" aria-label="Close without saving" title="Close without saving (Esc)" onClick={guard.requestClose}><IconClose /></button>
         </div>
-        <TitleInput value={title} onChange={(v) => { setTitle(v); if (error) setError(""); }} onEnter={save} />
+        <TitleInput value={title} onChange={(v) => { setTitle(v); if (error) setError(""); }} onEnter={save} disabled={mineOnly} />
         {/* Save and close first, like answering a question: the link leaves the board. */}
         <NoAgentLine card={card} before={save} />
+        {mineOnly && (
+          <p className="held-note tag-lock">
+            <span>This card is assigned to you: its notes, lane, and question are yours to work. The title, due date, tags, files, and who it's assigned to are {owner ?? "the board's owner"}'s.</span>
+          </p>
+        )}
         {lanes.length > 1 && (
           <div className="move-row" role="group" aria-label="Move to lane">
             <span className="move-label">Move to</span>
@@ -398,19 +408,19 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           </label>
           <label>
             Due
-            <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+            <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} disabled={mineOnly} />
           </label>
           {assignable.length > 0 && (
             <label>
               Assign to
-              <select className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)} title="Whose agents work this card. They can write its STATUS, move it, and ask and answer on it.">
+              <select className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={mineOnly} title="Whose agents work this card. They can write its STATUS, move it, and ask and answer on it.">
                 <option value="">Nobody</option>
                 {assignable.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </label>
           )}
         </div>
-        <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} />
+        <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} disabled={mineOnly} />
         {locked.length > 0 && (
           <p className="held-note tag-lock">
             {locked.map((t) => <span key={t} className="chip tag">#{t}</span>)}

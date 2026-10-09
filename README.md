@@ -1105,8 +1105,9 @@ line agents read says `(assigned to dana@example.com)`; `get_card` says it under
   allows it only on their card). The working rules say it in one sentence (rule 1).
 - **In the app**: on someone else's board the Ask block is live on a card assigned to you
   (`AskMeContext` in `Ask.tsx`), "need you" counts those cards, and the card opens for editing
-  instead of read only (`agentHeld(mode, card, me)`). The editor doesn't yet grey out the fields
-  the assignee can't change; the server's sentence says which.
+  instead of read only (`agentHeld(mode, card, me)`), with the title, due date, tags, and
+  assignee greyed out and a line saying they're the owner's (`mineOnly` in `CardEditor.tsx`);
+  the server's sentence still backs that up on save.
 - Not yet: the member's event feed carrying cards assigned to them on other people's boards.
   `wait_for_answer` covers the answer; the feed would cover new assignments.
 - `npm run check:boards` has the whole loop: assign, claim, STATUS, a retitle refused, move,
@@ -1120,8 +1121,8 @@ line agents read says `(assigned to dana@example.com)`; `get_card` says it under
   accepted, every MCP tool reaching it by name and by card id, and a file landing under its
   prefix.
 
-Not yet, each a card on the Tasks board: a member's agents working a shared board over MCP,
-pages and files, worksheets, search across boards, export.
+The rest of the pivot has its own sections: `// PAGES`, `// WORKSHEETS`, `// SEARCH`,
+`// EXPORT`; a member's agents on a shared board are under `// BOARDS`.
 
 ## // ALL_BOARDS
 
@@ -1186,10 +1187,11 @@ and a board that isn't yours answers like one that doesn't exist.
   refused if it appears zero or more than one times, with the count), and `delete_page`, each
   taking `board` like every other tool, and running as a member on a board shared with you (a
   viewer's agent reads, a writer's writes).
-- **Not yet**: search across pages (`// SEARCH` covers cards only, card `crnp9` has the plan),
-  export (card `c6mh0`), a page linking to a card and back, and live updates while two people
-  have the same page open (the save catches the conflict; nothing pushes the other person's
-  change yet).
+- **Live**: the screen asks for changes after its cursor every five seconds while visible
+  (`since=`), reloads the list and an open page that isn't being edited, and tells an editor
+  mid-edit who changed the page under them rather than overwriting their draft. The save
+  still catches a conflict with the etag.
+- **Not yet**: a page linking to a card and back, and a socket instead of polling.
 - `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
   revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
   tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).

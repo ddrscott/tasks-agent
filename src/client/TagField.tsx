@@ -13,6 +13,8 @@ type Props = {
   onEnter(): void;
   /** Example tags shown in the empty field. A member's leaves out `agent`, which is the owner's. */
   placeholder?: string;
+  /** Greyed out and not editable: the tags are someone else's. */
+  disabled?: boolean;
 };
 
 const MAX_SHOWN = 12;
@@ -32,7 +34,7 @@ export function suggest(value: string, known: string[]): string[] {
   return [...open.filter((t) => t.startsWith(typing)), ...open.filter((t) => !t.startsWith(typing) && t.includes(typing))].slice(0, MAX_SHOWN);
 }
 
-export function TagField({ value, onChange, known, onEnter, placeholder = "agent client" }: Props) {
+export function TagField({ value, onChange, known, onEnter, placeholder = "agent client", disabled }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const options = suggest(value, known);
 
@@ -55,7 +57,7 @@ export function TagField({ value, onChange, known, onEnter, placeholder = "agent
         </div>
       )}
       <input
-        id="tags-input" ref={input} className="field mono" value={value} placeholder={placeholder}
+        id="tags-input" ref={input} className="field mono" value={value} placeholder={placeholder} disabled={disabled}
         spellCheck={false} autoCapitalize="off" autoCorrect="off" autoComplete="off" enterKeyHint="done"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
