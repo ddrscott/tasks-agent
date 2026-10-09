@@ -30,7 +30,7 @@ import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
-import { TagFilter, useTagWhere } from "./TagFilter";
+import { TagFilter, useTagFilters } from "./TagFilter";
 import { MemberChat } from "./MemberChat";
 import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { ThemePicker } from "./ThemePicker";
@@ -217,9 +217,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
   const [editing, setEditing] = useState<string | null>(null);
-  /** Show only cards with this tag; the rest fade back. Per tab, not saved. */
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [where, setWhere] = useTagWhere(board);
+  // `tagFilter` is the tag clicked on a card: the rest fade back. `where` is the top bar's filter. Both live in the address.
+  const { where, setWhere, fade: tagFilter, setFade: setTagFilter } = useTagFilters(board);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -511,7 +510,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
     const q = new URLSearchParams(location.search);
     const b = q.get("billing");
     if (!b) return;
-    history.replaceState(null, "", location.pathname);
+    q.delete("billing");
+    history.replaceState(null, "", location.pathname + (q.size ? `?${q}` : ""));
     if (b === "success") {
       say("Thanks for going Pro. Your higher limit is on.");
       const t = setTimeout(refreshUsage, 4000);
@@ -892,7 +892,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         )}
         <BoardView
           board={board} actions={actions} flash={flash} mode={mode}
-          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))} where={where}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter(tagFilter === t ? null : t)} where={where}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={setNewCardLane} frozen={frozen}
           onOpen={(c: Card) => setEditing(c.id)}

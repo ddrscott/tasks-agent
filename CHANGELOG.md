@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The tag filters are in the address, like `/tasks/?tags=agent,shop-api&match=all`, so you can bookmark or share a link to a filtered board and a reload keeps the filter
+
 ## [0.3.0] - 2026-10-08
 
 ### Added
