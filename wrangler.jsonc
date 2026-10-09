@@ -53,6 +53,9 @@
   //   npx wrangler vectorize create-metadata-index tasks-search --property-name=kind --type=string
   // then uncomment. Vectorize has no local emulation, so `remote: true` points local dev at the real index.
   // "vectorize": [{ "binding": "VECTORS", "index_name": "tasks-search", "remote": true }],
+  // PDF exports of pages (src/export.ts, // EXPORT) render through Browser Rendering. Off until
+  // wanted; without it the HTML export prints to PDF from the browser. Uncomment to turn on.
+  // "browser": { "binding": "BROWSER", "remote": true },
   "durable_objects": {
     "bindings": [
       { "name": "TodoAgent", "class_name": "TodoAgent" },

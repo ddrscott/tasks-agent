@@ -15,4 +15,7 @@ interface Env {
   // it's commented out in wrangler.jsonc until the index exists on the account (// SEARCH in
   // the README), and without it searches are keyword-only and say so.
   VECTORS?: VectorizeIndex;
+  // Browser Rendering, for PDF exports of pages (src/export.ts). Optional the same way:
+  // commented out in wrangler.jsonc until it's wanted; without it, PDF asks you to print the HTML.
+  BROWSER?: Fetcher;
 }

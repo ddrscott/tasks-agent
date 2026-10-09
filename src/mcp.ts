@@ -22,6 +22,7 @@ import { sharedBoards, type SharedBoard } from "./members";
 import { ensureIndexed, reachable, searchAll } from "./search-all";
 import { COLUMN_NAME_MAX, COLUMN_TYPES, COLUMNS_MAX, markdownTable, QUERY_ROWS_DEFAULT, QUERY_ROWS_MAX, ROWS_PER_CALL, SHEET_NAME_MAX, sheetErrorText, toCsv, type ColumnType, type SheetInfo } from "./sheets";
 import { cleanPath, PAGE_MAX_BYTES, type FileInfo } from "./docs";
+import { pageHtml } from "./export";
 import type { TodoAgent } from "./agent";
 import type { Presence } from "./presence";
 
@@ -51,7 +52,7 @@ const NOT_YOURS = (s: SharedBoard) => `This board is ${s.ownerEmail}'s, shared w
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page", "search", "list_sheets", "read_sheet", "create_sheet", "add_column", "write_rows", "update_rows", "delete_rows", "query_sheet"] as const;
+const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page", "export_page", "search", "list_sheets", "read_sheet", "create_sheet", "add_column", "write_rows", "update_rows", "delete_rows", "query_sheet"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -625,6 +626,25 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       } catch (e) {
         return text((e as Error).message, true);
       }
+    });
+
+    // A page in another format (export.ts, // EXPORT). HTML comes back as text; the binary formats as a link to open signed in.
+    server.registerTool("export_page", {
+      title: "Export page",
+      description: doc("export_page"),
+      inputSchema: z.object({ path: PATH_ARG, format: z.enum(["html", "docx", "pdf"]).describe("html (the document comes back as text), docx (Word), or pdf"), board: BOARD_ARG }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { path: string; format: "html" | "docx" | "pdf"; board?: string }) => {
+      const here = await at(input.board);
+      if (!here) return noBoard(input.board!);
+      const path = cleanPath(input.path);
+      if (!path) return badPath();
+      const page = await docsOf(here).readPage(path);
+      if (!page) return refusedPage({ code: "missing", info: null });
+      if (input.format === "html") return text(pageHtml(path, page.text, { board: here.board.name, by: page.info.updatedBy, at: page.info.updatedAt }));
+      const link = `${new URL(req.url).origin}/tasks/api/files/${path.split("/").map(encodeURIComponent).join("/")}?board=${here.board.id}&format=${input.format}`;
+      if (input.format === "pdf" && !env.BROWSER) return text(`PDF export isn't set up on this server. The HTML export prints to PDF from a browser: ${link.replace("format=pdf", "format=html&inline=1")} (open it signed in, then print).`, true);
+      return text(`${input.format === "docx" ? "Word document" : "PDF"} of ${path}: ${link}\nOpen it in a browser signed in as ${user.email}, or fetch it with that session's cookie. It's made fresh each time from the page as it is now.`);
     });
 
     // Worksheets (sheets.ts, // WORKSHEETS): typed tables on a board, read and written by name, and queried with SQL.

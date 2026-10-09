@@ -67,6 +67,12 @@ export const TOOL_DOCS = {
     about: "Delete a page or file.",
     destructive: true,
   },
+  export_page: {
+    description:
+      "A page in another format: html gives you the whole standalone HTML document as text (the app's own renderer, nothing loaded from elsewhere); docx and pdf give a link that makes the file fresh when opened by someone signed in. " +
+      "Use it when a page has to leave the board: send it, print it, hand it to Word.",
+    about: "Get a page as HTML, or a link to it as Word or PDF.",
+  },
   list_sheets: {
     description:
       "List a board's worksheets: typed tables (text, number, date, checkbox, link columns) that people edit in a grid and you read, write, and query. " +

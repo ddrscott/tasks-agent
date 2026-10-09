@@ -212,6 +212,7 @@ export function Pages({ me, board, boards, onBoard }: Props) {
           <button className="btn" onClick={onBoard} title="Back to the board">← {name}</button>
           <span className="pages-crumb">pages</span>
           <span className="spacer" />
+          {files && files.some((f) => f.page) && <a className="btn" href={api(`/api/files${q(id, "&format=zip")}`)} download title="Every page, as written, in one zip">Download all</a>}
           {canWrite && <button className="btn" onClick={() => upload.current?.click()}>Upload files</button>}
           <input ref={upload} type="file" multiple hidden onChange={(e) => { void uploadFiles(e.target.files); e.target.value = ""; }} />
         </header>
@@ -264,6 +265,16 @@ export function Pages({ me, board, boards, onBoard }: Props) {
                     </button>
                   )}
                   <a className="btn" href={api(`/api/files/${loaded.info.path.split("/").map(encodeURIComponent).join("/")}${q(id, "&download=1")}`)} download>Download</a>
+                  {isMd && !editing && (
+                    <span className="pages-export" aria-label="Export">
+                      <a className="btn" href={api(`/api/files/${loaded.info.path.split("/").map(encodeURIComponent).join("/")}${q(id, "&format=html")}`)} download title="The page as a standalone HTML document">HTML</a>
+                      <a className="btn" href={api(`/api/files/${loaded.info.path.split("/").map(encodeURIComponent).join("/")}${q(id, "&format=docx")}`)} download title="The page as a Word document">Word</a>
+                      <button className="btn" title="Open the page as a document and print it, or save it as a PDF" onClick={() => {
+                        const w = window.open(api(`/api/files/${loaded.info.path.split("/").map(encodeURIComponent).join("/")}${q(id, "&format=html&inline=1")}`), "_blank");
+                        w?.addEventListener("load", () => w.print());
+                      }}>Print / PDF</button>
+                    </span>
+                  )}
                 </div>
                 {note && <p className={`pages-note ${note.kind}`} role="status">{note.text}{note.reload && <> <button className="btn" onClick={() => location.reload()}>Reload</button></>}</p>}
                 {viewingRev && (

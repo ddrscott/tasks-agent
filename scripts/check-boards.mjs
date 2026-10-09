@@ -322,6 +322,36 @@ ok("a member's agent searches the shared board too", !ms5.isError && ms5.text.in
 const ms6 = await mcp(T, "search", { query: "zzzqqq" });
 ok("nothing matching says so", !ms6.isError && ms6.text.startsWith("Nothing matches"), ms6);
 
+// Exports (// EXPORT): a page as HTML, Word, PDF; a folder as a zip; the MCP tool.
+const xp = await call(owner, "PUT", `/api/files/docs/export.md?board=${B}`, md("# Export me\n\nSome **bold** text and a [link](https://example.com).\n\n- one\n- [x] two\n\n```js\nlet x = 1;\n```\n"), { "Content-Type": "text/markdown", "Content-Length": String(md("# Export me\n\nSome **bold** text and a [link](https://example.com).\n\n- one\n- [x] two\n\n```js\nlet x = 1;\n```\n").length) });
+ok("a page to export", xp.status === 201, xp.data);
+const xh = await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=html`, { headers: { Cookie: owner.cookie } });
+const xhText = await xh.text();
+ok("format=html is a standalone document from the app's renderer, as a download", xh.status === 200 && xh.headers.get("Content-Type")?.startsWith("text/html") && xh.headers.get("Content-Disposition")?.startsWith("attachment") && xhText.startsWith("<!doctype html>") && xhText.includes("<title>Export me</title>") && xhText.includes("<strong>bold</strong>") && xhText.includes('href="https://example.com/"') && xhText.includes("<pre><code>let x = 1;"), xhText.slice(0, 200));
+ok("with a policy that allows no script", xh.headers.get("Content-Security-Policy")?.includes("default-src 'none'") === true);
+const xhi = await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=html&inline=1`, { headers: { Cookie: owner.cookie } });
+ok("inline=1 serves it to look at (the Print button)", xhi.status === 200 && xhi.headers.get("Content-Disposition")?.startsWith("inline") === true);
+const xd = await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=docx`, { headers: { Cookie: owner.cookie } });
+const xdBytes = new Uint8Array(await xd.arrayBuffer());
+ok("format=docx is a Word document (a zip with word/document.xml)", xd.status === 200 && xd.headers.get("Content-Type")?.includes("wordprocessingml") && xdBytes[0] === 0x50 && xdBytes[1] === 0x4b && new TextDecoder("latin1").decode(xdBytes).includes("word/document.xml"), xd.headers.get("Content-Type"));
+const xpdf = await call(owner, "GET", `/api/files/docs/export.md?board=${B}&format=pdf`);
+ok("format=pdf without the browser binding says to print the HTML (501 no_pdf)", xpdf.status === 501 && xpdf.data?.code === "no_pdf", xpdf.data);
+ok("a format nobody has is a 400", (await call(owner, "GET", `/api/files/docs/export.md?board=${B}&format=odt`)).status === 400);
+const xz = await fetch(`${BASE}/tasks/api/files?board=${B}&format=zip&prefix=docs`, { headers: { Cookie: owner.cookie } });
+const xzBytes = new Uint8Array(await xz.arrayBuffer());
+ok("a folder as a zip of its pages", xz.status === 200 && xz.headers.get("Content-Type") === "application/zip" && xzBytes[0] === 0x50 && new TextDecoder("latin1").decode(xzBytes).includes("docs/export.md"), xz.status);
+const xzh = await fetch(`${BASE}/tasks/api/files?board=${B}&format=zip&prefix=docs&as=html`, { headers: { Cookie: owner.cookie } });
+ok("or as HTML files", xzh.status === 200 && new TextDecoder("latin1").decode(new Uint8Array(await xzh.arrayBuffer())).includes("docs/export.html"));
+ok("a member reads exports too", (await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=html`, { headers: { Cookie: member.cookie } })).status === 200);
+ok("a stranger doesn't", (await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=html`, { headers: { Cookie: stranger.cookie } })).status === 404);
+const mx = await mcp(T, "export_page", { board: "Shop API", path: "docs/export.md", format: "html" });
+ok("MCP export_page html returns the document", !mx.isError && mx.text.startsWith("<!doctype html>") && mx.text.includes("<strong>bold</strong>"), mx);
+const mxd = await mcp(T, "export_page", { board: "Shop API", path: "docs/export.md", format: "docx" });
+ok("MCP export_page docx returns a link to fetch signed in", !mxd.isError && mxd.text.includes(`/tasks/api/files/docs/export.md?board=${B}&format=docx`), mxd);
+const mxp = await mcp(T, "export_page", { board: "Shop API", path: "docs/export.md", format: "pdf" });
+ok("MCP export_page pdf without the binding points at the HTML", mxp.isError && mxp.text.includes("format=html"), mxp);
+ok("MCP export_page on a page that isn't there", (await mcp(T, "export_page", { board: "Shop API", path: "docs/nope.md", format: "html" })).isError);
+
 // Worksheets (// WORKSHEETS): typed tables over REST, then over MCP, then read-only SQL.
 const sh = await call(owner, "POST", "/api/sheets", { board: B, name: "Sales 2026", columns: [{ name: "Region" }, { name: "Amount", type: "number" }, { name: "When", type: "date" }, { name: "Paid", type: "checkbox" }] });
 ok("POST /api/sheets makes a worksheet with typed columns (201)", sh.status === 201 && /^s[a-z0-9]{5}$/.test(sh.data.sheet?.id ?? "") && sh.data.sheet.columns.length === 4 && sh.data.sheet.columns[1].type === "number", sh.data);

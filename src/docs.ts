@@ -19,7 +19,8 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { currentUser, type User } from "./auth";
-import { ownedBoard } from "./boards";
+import { boardById, ownedBoard } from "./boards";
+import { EXPORT_FORMATS, EXPORT_TYPES, pageDocx, pageHtml, pagePdf, pagesZip, pageTitle, type ExportFormat } from "./export";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
 import { countIndexed, dropBoard, dropEntries, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors } from "./search-all";
@@ -370,6 +371,28 @@ function refusal(r: { ok: false; code: string; info: FileInfo | null }): Respons
   }
 }
 
+/**
+ * A page in another format (export.ts). HTML is served inline when asked (`inline=1`, for the
+ * app's Print button, which opens it and calls print) and as a download otherwise; it's our
+ * renderer's output, with no script, under a policy that allows none. PDF needs the browser
+ * binding and says so without it.
+ */
+async function exportPage(env: Env, w: { board: string; email: string }, path: string, page: { info: FileInfo; text: string }, format: ExportFormat, inline: boolean): Promise<Response> {
+  const base = path.split("/").pop()!.replace(/\.[a-z0-9]+$/i, "").replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
+  const ownerName = (await ownedBoard(env, { id: w.board, email: w.email }, w.board))?.name ?? (await boardById(env, w.board))?.name ?? "Tasks";
+  const html = pageHtml(path, page.text, { board: ownerName, by: page.info.updatedBy, at: page.info.updatedAt });
+  const headers = (type: string, ext: string, dispo: "inline" | "attachment") => ({
+    "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    "Content-Disposition": `${dispo}; filename="${base}.${ext}"; filename*=UTF-8''${encodeURIComponent(`${pageTitle(path, page.text)}.${ext}`)}`,
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:",
+  });
+  if (format === "html") return new Response(html, { headers: headers(EXPORT_TYPES.html, "html", inline ? "inline" : "attachment") });
+  if (format === "docx") return new Response(pageDocx(path, page.text) as BodyInit, { headers: headers(EXPORT_TYPES.docx, "docx", "attachment") });
+  const pdf = await pagePdf(env, html);
+  if (!pdf) return fail(501, "no_pdf", "PDF export isn't set up on this server. Open the HTML export and print it to PDF; the Print button does that.");
+  return new Response(pdf as BodyInit, { headers: headers(EXPORT_TYPES.pdf, "pdf", inline ? "inline" : "attachment") });
+}
+
 /** /api/files routes. Session only: agents read and write pages over MCP (mcp.ts). */
 export async function handleFiles(req: Request, env: Env, path: string): Promise<Response | null> {
   if (path !== "/api/files" && !path.startsWith("/api/files/")) return null;
@@ -410,6 +433,14 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
     const since = Number(url.searchParams.get("since"));
     if (Number.isFinite(since) && url.searchParams.has("since")) return json({ changes: await docs.changes(since) });
     const prefix = cleanPath(url.searchParams.get("prefix") ?? "") ?? "";
+    // A folder's pages as a zip (// EXPORT): the Markdown as written, or each page as HTML.
+    if (url.searchParams.get("format") === "zip") {
+      const as = url.searchParams.get("as") === "html" ? "html" : "md";
+      const pages = (await docs.allPages()).filter((p) => !prefix || p.path === prefix || p.path.startsWith(`${prefix}/`));
+      if (!pages.length) return refusal({ ok: false, code: "missing", info: null });
+      const name = `${(prefix || "pages").replace(/[^\w.-]+/g, "_")}.zip`;
+      return new Response(pagesZip(pages, as) as BodyInit, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
+    }
     return json(await docs.list(prefix));
   }
 
@@ -433,6 +464,12 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
     if (info.page) {
       const page = await docs.readPage(file);
       if (!page) return refusal({ ok: false, code: "missing", info: null });
+      // An export (export.ts, // EXPORT): the page as HTML, a Word document, or a PDF.
+      const format = url.searchParams.get("format");
+      if (format) {
+        if (!EXPORT_FORMATS.includes(format as ExportFormat)) return fail(400, "bad_format", `format is one of ${EXPORT_FORMATS.join(", ")}.`);
+        return exportPage(env, w, file, page, format as ExportFormat, url.searchParams.get("inline") === "1");
+      }
       if ((req.headers.get("Accept") ?? "").includes("application/json")) return json({ file: page.info, text: page.text }, 200, { ETag: page.info.etag });
       return new Response(page.text, { headers: { "Content-Type": `${info.type}; charset=utf-8`, ETag: info.etag, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox" } });
     }

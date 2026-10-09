@@ -29,6 +29,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Boards | Many per account: a registry in D1 (`boards`, `src/boards.ts`), one `TodoAgent` per board named by the board's id; the first board keeps the user's id (`// BOARDS`) |
 | Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
 | Pages and files | A `Docs` Durable Object per board (`src/docs.ts`): text pages with revisions in its SQLite, other files in R2 under `<board id>/files/<path>` (`// PAGES`) |
+| Exports | A page as HTML (the app's renderer, server-side), Word (`src/export.ts` writes WordprocessingML; zipped with `fflate`), or PDF (Browser Rendering, optional); a folder as a zip (`// EXPORT`) |
 | Worksheets | Typed tables as real SQLite tables in the board's `Docs` object (`src/sheets.ts`), edited in a grid and queried with read-only SQL over MCP (`// WORKSHEETS`) |
 | Search | Across boards: an FTS5 table in D1 (`search_fts`) for keywords, Vectorize (`VECTORS`, optional) for meaning (`src/search-all.ts`, `// SEARCH`); per board, FTS5 and a vector scan in the board's own SQLite (`src/search.ts`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
@@ -655,7 +656,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), the worksheet tools `list_sheets`, `read_sheet`, `create_sheet`, `add_column`, `write_rows`, `update_rows`, `delete_rows`, and `query_sheet` (`// WORKSHEETS`), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), `export_page` (`// EXPORT`), the worksheet tools `list_sheets`, `read_sheet`, `create_sheet`, `add_column`, `write_rows`, `update_rows`, `delete_rows`, and `query_sheet` (`// WORKSHEETS`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -1192,6 +1193,39 @@ and a board that isn't yours answers like one that doesn't exist.
 - `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
   revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
   tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).
+
+## // EXPORT
+
+A page leaves the board as a standalone HTML document, a Word document, or a PDF; a folder
+of pages leaves as a zip. `src/export.ts` makes them; `docs.ts` serves them on the page's own
+address with `?format=`.
+
+- **One renderer.** The HTML export renders the same `Markdown` component the app draws
+  pages with (`src/client/Markdown.tsx`) to static markup with `react-dom/server`, wrapped in
+  a document with its own light, print-ready styles and nothing loaded from anywhere (no
+  fonts, no scripts). The renderer maps `#` to `h3.md-h1` and so on, because card notes sit
+  under a card title; the export's CSS sizes them as a document's headings. React escapes
+  everything, and `safeHref` keeps links to http(s), so the document holds no script of
+  anyone's; it's served under `default-src 'none'` all the same.
+- **Word.** `pageDocx` walks the same component's element tree (not its HTML) and writes
+  WordprocessingML by hand: headings as `Heading1`–`6`, paragraphs, lists as bulleted or
+  numbered paragraphs with hanging indents, code blocks as a `Code` style in JetBrains Mono,
+  quotes as a `Quote` style with an orange left rule, checkboxes as ☐/☒, links as real
+  hyperlinks (relationships), bold, italic, strikethrough, inline code. The package is six
+  XML parts zipped with `fflate`, which keeps the 17 MB `docx` library out of the Worker.
+- **PDF.** `pagePdf` renders the HTML export through Browser Rendering when the Worker has
+  the `BROWSER` binding (commented out in `wrangler.jsonc`; `@cloudflare/puppeteer` drives
+  it). Without it, `format=pdf` is a 501 `no_pdf` that says to print the HTML, and the app's
+  **Print / PDF** button does exactly that: opens the HTML export inline (`inline=1`) and
+  calls `print()` on it, which saves as PDF in any browser.
+- **Zip.** `GET /api/files?board=&prefix=<folder>&format=zip` is every page under the folder
+  as written (`as=html` wraps each in the HTML export instead). Files that aren't pages stay
+  in R2; download them one at a time.
+- **In the app.** On a Markdown page: HTML, Word, and Print / PDF beside Download; **Download
+  all** in the header is the zip. Over MCP, `export_page` returns the HTML as text, or a link
+  for docx and pdf that makes the file fresh for whoever opens it signed in: the agent's token
+  isn't a browser session, and a binary over MCP would be base64 nobody wants.
+- **Access.** The same as reading the page: owner, writer, viewer; a stranger gets a 404.
 
 ## // WORKSHEETS
 
@@ -2843,6 +2877,10 @@ then uncomment the `vectorize` binding in `wrangler.jsonc` and deploy. Until the
 keyword-only and says so. Boards index their cards and pages the first time anyone searches
 after the deploy (`// SEARCH`, **A board that hasn't written yet**); vectors fill in as cards
 and pages change, or all at once for a board when its object next starts.
+
+**PDF export is off until you turn on Browser Rendering.** Uncomment the `browser` binding in
+`wrangler.jsonc` and deploy; until then, the Print / PDF button prints the HTML export, and
+`format=pdf` says so (`// EXPORT`).
 
 Before that, four migrations went out with team boards and the admin page, in
 this order: `0005_users.sql` (the admin page's `users` table), then `0006_team_boards.sql`,
