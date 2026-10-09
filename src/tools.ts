@@ -32,6 +32,7 @@ const define = <S extends z.ZodType>(name: McpToolName, t: Omit<BoardTool<S>, "d
 };
 
 const TAGS_HINT = "Short labels like agent or client, lower case, no #. Only when the user or your own instructions call for one.";
+const ASSIGNEE_HINT = "Email of the person whose agents work this card: a member of a shared board. Their agents can claim it, write its STATUS, move it, and ask on it; they can answer its questions.";
 
 export const BOARD_TOOLS = {
   add_cards: define("add_cards", {
@@ -43,12 +44,13 @@ export const BOARD_TOOLS = {
         notes: z.string().optional(),
         due: z.string().optional().describe("YYYY-MM-DD, only if the user gave a date"),
         tags: z.array(z.string()).optional().describe(TAGS_HINT),
+        assignee: z.string().optional().describe(ASSIGNEE_HINT),
       })).min(1),
     }),
     apply: (b, { cards }) => {
       const ids: string[] = [];
       const board = cards.reduce((acc, c) => {
-        const r = ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due, tags: c.tags });
+        const r = ops.addCard(acc, { title: c.title, laneId: c.lane, notes: c.notes, due: c.due, tags: c.tags, assignee: c.assignee });
         ids.push(r.card.id);
         return r.board;
       }, b);
@@ -74,6 +76,7 @@ export const BOARD_TOOLS = {
       notes: z.string().optional(),
       due: z.string().nullable().optional().describe("YYYY-MM-DD or null"),
       tags: z.array(z.string()).optional().describe(TAGS_HINT),
+      assignee: z.string().nullable().optional().describe(`${ASSIGNEE_HINT} null clears it`),
     }),
     apply: (b, { id, ...patch }) => ({
       board: ops.updateCard(b, id, patch),

@@ -7,6 +7,7 @@ import { handleMcp, MCP_PATH } from "./mcp";
 import { access, handleMembers, spendBoardCall } from "./members";
 import { BOARD_ID, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { handleBoards, ownedBoard } from "./boards";
+import { handleFiles } from "./docs";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -21,6 +22,7 @@ import setupScript from "../scripts/tasks-setup.mjs?raw";
 export { TodoAgent } from "./agent";
 export { TaskEvents } from "./events";
 export { Presence } from "./presence";
+export { Docs } from "./docs";
 
 // Everything lives under this path on askscottpierce.com. The Worker answers all of it except
 // the hashed build output in /tasks/assets and the Needle model files, which the asset layer
@@ -140,7 +142,7 @@ const app: ExportedHandler<Env> = {
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handleAdmin(req, env, sub)) ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
-        ?? (await handleBoards(req, env, sub)) ?? (await handleMembers(req, env, sub))
+        ?? (await handleBoards(req, env, sub)) ?? (await handleFiles(req, env, sub)) ?? (await handleMembers(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 

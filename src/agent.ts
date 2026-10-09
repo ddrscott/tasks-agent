@@ -221,13 +221,14 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   private guard(before: Board, after: Board) {
     const c = callers.getStore();
-    if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after);
+    if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after, c.email ?? undefined);
   }
 
-  /** A member never moves a work order, wherever it's going (memberMoveError). The two ways to move a card both ask. */
+  /** A member never moves a work order, wherever it's going (memberMoveError), unless it's assigned to them. The two ways to move a card both ask. */
   private memberMayMove(ids: string[]) {
-    if (callers.getStore()?.kind !== "member") return;
-    const no = memberMoveError(this.state, ids);
+    const c = callers.getStore();
+    if (c?.kind !== "member") return;
+    const no = memberMoveError(this.state, ids, c.email ?? undefined);
     if (no) throw new Error(no);
   }
 
@@ -999,6 +1000,28 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
   }
 
+  /**
+   * A member's agent asking on a card assigned to them, over MCP (mcp.ts): the question goes
+   * on as that member, under the write guard, which allows it only on their card (// ASSIGNEE).
+   */
+  askCeoAs(who: { id: string; email: string }, input: { id: string; question: string; options: string[]; recommended?: number }): Promise<ToolOutcome> {
+    if (this.encrypting) return Promise.resolve({ ok: false, summary: "This board is being encrypted right now, and an encrypted board can't hold questions. Nothing was asked." });
+    return this.asUser(who, "agent", () => {
+      try {
+        const board = this.mutate("Agent asked a question", (b) => ops.askCard(b, input.id, input), undefined, "agent");
+        const card = board.cards.find((c) => c.id === input.id)!;
+        return { ok: true, summary: ops.oneLine(`Asked on "${card.title}" [${card.id}]: ${card.ask!.question}`), board: ops.describeBoard(board, NEEDS_CEO_TAG, this.ownerEmail()) };
+      } catch (e) {
+        return { ok: false, summary: plainError(plainFailure(e)) };
+      }
+    });
+  }
+
+  /** Who a card is assigned to, for the MCP server's rule on shared boards (// ASSIGNEE). Null for no card or nobody. */
+  assigneeOf(id: string): string | null {
+    return this.state.cards.find((c) => c.id === id)?.assignee ?? null;
+  }
+
   @callable()
   moveCard(id: string, laneId: string, index: number) {
     this.memberMayMove([id]);
@@ -1172,7 +1195,10 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
         ids = r.ids;
         return r.board;
       }, group, actor);
-      const owner = callers.getStore()?.email ?? this.ownerEmail();
+      // Whose words are whose is judged against the board's owner, not the caller: a member's
+      // agent (runToolAs) runs this too, and naming them here marked the owner's cards as a member's.
+      const c = callers.getStore();
+      const owner = this.ownerEmail() ?? (c?.kind === "owner" ? c.email : null);
       const a = args as { id?: string; ids?: string[] };
       const named = actor === "agent" && !before.sealed ? [...new Set([...(typeof a.id === "string" ? [a.id] : []), ...(Array.isArray(a.ids) ? a.ids : [])])] : [];
       const member = named.flatMap((id) => {

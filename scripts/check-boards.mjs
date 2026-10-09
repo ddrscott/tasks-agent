@@ -7,6 +7,7 @@
 
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import WebSocket from "ws";
 
 const BASE = (process.argv[2] ?? "http://localhost:5231").replace(/\/+$/, "");
 const root = new URL("..", import.meta.url).pathname;
@@ -51,6 +52,31 @@ async function mcp(token, name, args = {}) {
   try { data = JSON.parse(payload); } catch { /* leave it */ }
   const text = (data?.result?.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
   return { status: r.status, isError: !!data?.result?.isError || !!data?.error, text: text || raw.slice(0, 300) };
+}
+
+/** The board socket as the app opens it, for the one thing MCP can't do: answer a question (answerAsk). */
+async function sock(who, board) {
+  const url = `${BASE.replace(/^http/, "ws")}/tasks/agent?_pk=${randomBytes(6).toString("hex")}${board ? `&board=${board}` : ""}`;
+  const ws = new WebSocket(url, { headers: { Cookie: who.cookie }, handshakeTimeout: 15_000 });
+  const frames = [];
+  let wake = [];
+  ws.on("message", (d) => { try { frames.push(JSON.parse(d.toString())); } catch { /* not json */ } const w = wake; wake = []; for (const f of w) f(); });
+  await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
+  return {
+    async rpc(method, args) {
+      const id = randomBytes(6).toString("hex");
+      const from = frames.length;
+      ws.send(JSON.stringify({ type: "rpc", id, method, args }));
+      const end = Date.now() + 8000;
+      for (;;) {
+        const hit = frames.slice(from).find((f) => f.type === "rpc" && f.id === id);
+        if (hit) return hit;
+        if (Date.now() > end) return { success: false, error: "no reply" };
+        await Promise.race([new Promise((r) => wake.push(r)), new Promise((r) => setTimeout(r, 200))]);
+      }
+    },
+    close() { try { ws.close(); } catch { /* gone */ } },
+  };
 }
 
 const owner = await account("owner");
@@ -162,12 +188,111 @@ const mlane = await mcp(M, "add_lane", { board: "Shop API", name: "Theirs" });
 ok("or add a lane", mlane.isError, mlane);
 const mcard = await mcp(M, "get_card", { id });
 ok("a member's agent reads a card by id with no board named", !mcard.isError && mcard.text.includes("Boards smoke card 2"), mcard);
+// Pages and files on a board (// PAGES): the REST API, then the page tools over MCP.
+const md = (t) => new TextEncoder().encode(t);
+const p1 = await call(owner, "PUT", `/api/files/docs/plan.md?board=${B}`, md("# Plan\n\nHello there"), { "Content-Type": "text/markdown", "Content-Length": "19" });
+ok("PUT makes a page (201, page: true, an ETag)", p1.status === 201 && p1.data.file?.page === true && p1.data.file.path === "docs/plan.md" && !!p1.headers.get("ETag"), p1.data);
+const E1 = p1.headers.get("ETag");
+const plist = await call(owner, "GET", `/api/files?board=${B}`);
+ok("GET lists it", plist.status === 200 && plist.data.files?.some((f) => f.path === "docs/plan.md"), plist.data);
+const pget = await call(owner, "GET", `/api/files/docs/plan.md?board=${B}`, undefined, { Accept: "application/json" });
+ok("GET reads it as JSON with the text", pget.status === 200 && pget.data.text === "# Plan\n\nHello there" && pget.data.file.etag === E1, pget.data);
+const praw = await call(owner, "GET", `/api/files/docs/plan.md?board=${B}`);
+ok("and as text/markdown", praw.status === 200 && praw.headers.get("Content-Type")?.startsWith("text/markdown") && praw.text.startsWith("# Plan"), praw.text);
+const pstale = await call(owner, "PUT", `/api/files/docs/plan.md?board=${B}`, md("# Plan v2"), { "Content-Type": "text/markdown", "Content-Length": "9", "If-Match": "deadbeef" });
+ok("PUT with a stale etag is a 412 conflict", pstale.status === 412 && pstale.data.code === "conflict", pstale.data);
+const pnew = await call(owner, "PUT", `/api/files/docs/plan.md?board=${B}`, md("# Plan v2"), { "Content-Type": "text/markdown", "Content-Length": "9", "If-None-Match": "*" });
+ok("PUT create-only on an existing page is a 412 exists", pnew.status === 412 && pnew.data.code === "exists", pnew.data);
+const pok = await call(owner, "PUT", `/api/files/docs/plan.md?board=${B}`, md("# Plan v2"), { "Content-Type": "text/markdown", "Content-Length": "9", "If-Match": E1 });
+ok("PUT with the right etag replaces it", pok.status === 200 && pok.data.file.etag !== E1, pok.data);
+const prev = await call(owner, "GET", `/api/files/docs/plan.md/revisions?board=${B}`);
+ok("the earlier version is kept", prev.status === 200 && prev.data.revisions?.length === 1 && prev.data.revisions[0].etag === E1, prev.data);
+const pold = await call(owner, "GET", `/api/files/docs/plan.md/revisions?board=${B}&rev=${E1}`);
+ok("and can be read back", pold.status === 200 && pold.data.text === "# Plan\n\nHello there", pold.data);
+const pbad = await call(owner, "PUT", `/api/files/..%2Fetc%2Fpasswd?board=${B}`, md("x"), { "Content-Type": "text/plain", "Content-Length": "1" });
+ok("a path with .. is refused", pbad.status === 400 && pbad.data.code === "bad_path", pbad.data);
+const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const pbin = await call(owner, "PUT", `/api/files/img/dot.png?board=${B}`, png, { "Content-Type": "image/png", "Content-Length": String(png.length) });
+ok("a binary file lands as a file, not a page", pbin.status === 201 && pbin.data.file.page === false && pbin.data.file.type === "image/png", pbin.data);
+const pbinGet = await fetch(`${BASE}/tasks/api/files/img/dot.png?board=${B}`, { headers: { Cookie: owner.cookie } });
+ok("and comes back byte for byte", pbinGet.status === 200 && new Uint8Array(await pbinGet.arrayBuffer()).join() === png.join() && pbinGet.headers.get("Content-Type") === "image/png");
+const pmember = await call(member, "PUT", `/api/files/docs/from-member.md?board=${B}`, md("hi"), { "Content-Type": "text/markdown", "Content-Length": "2" });
+ok("a writer makes a page on the shared board", pmember.status === 201 && pmember.data.file.updatedBy === member.email, pmember.data);
+const pstranger = await call(member, "GET", `/api/files/docs/plan.md`);
+ok("with no board it's the member's own board, which has no such page", pstranger.status === 404, pstranger.data);
+const pmove = await call(owner, "POST", "/api/files/move", { board: B, from: "docs/plan.md", to: "docs/plan-final.md" });
+ok("move", pmove.status === 200 && pmove.data.file.path === "docs/plan-final.md" && (await call(owner, "GET", `/api/files/docs/plan.md?board=${B}`)).status === 404, pmove.data);
+const pdel = await call(owner, "DELETE", `/api/files/img/dot.png?board=${B}`);
+ok("delete", pdel.status === 200 && pdel.data.deleted === true && (await call(owner, "GET", `/api/files/img/dot.png?board=${B}`)).status === 404, pdel.data);
+
+const w1 = await mcp(T, "write_page", { board: "Shop API", path: "notes/a.md", text: "# A\n\nalpha beta" });
+ok("MCP write_page creates a page", !w1.isError && w1.text.startsWith("Created notes/a.md"), w1);
+const l1 = await mcp(T, "list_pages", { board: "Shop API" });
+ok("MCP list_pages lists it with who changed it", !l1.isError && l1.text.includes("notes/a.md (page, text/markdown") && l1.text.includes(owner.email), l1);
+const r1 = await mcp(T, "read_page", { board: "Shop API", path: "notes/a.md" });
+const Ep = /etag ([0-9a-f]+)/.exec(r1.text)?.[1];
+ok("MCP read_page gives the text and an etag", !r1.isError && r1.text.includes("alpha beta") && !!Ep, r1);
+const e1 = await mcp(T, "edit_page", { board: "Shop API", path: "notes/a.md", find: "beta", replace: "gamma", etag: Ep });
+ok("MCP edit_page replaces one passage", !e1.isError && e1.text.startsWith("Edited"), e1);
+const e2 = await mcp(T, "edit_page", { board: "Shop API", path: "notes/a.md", find: "gamma", replace: "delta", etag: Ep });
+ok("with a stale etag it's refused", e2.isError && e2.text.includes("changed since you read it"), e2);
+const e3 = await mcp(T, "edit_page", { board: "Shop API", path: "notes/a.md", find: "zzz", replace: "y" });
+ok("text that isn't there is refused in words", e3.isError && e3.text.includes("isn't in the page"), e3);
+const e4 = await mcp(T, "edit_page", { board: "Shop API", path: "notes/a.md", find: "a", replace: "b" });
+ok("text that's there more than once is refused with the count", e4.isError && /appears \d+ times/.test(e4.text), e4);
+const r2 = await mcp(T, "read_page", { board: "Shop API", path: "notes/a.md" });
+ok("the edit landed", r2.text.includes("alpha gamma"), r2);
+const mw = await mcp(M, "write_page", { board: "Shop API", path: "notes/member.md", text: "mine" });
+ok("a writer's agent writes a page on the shared board", !mw.isError && mw.text.startsWith("Created"), mw);
+const pd1 = await mcp(T, "delete_page", { board: "Shop API", path: "notes/a.md" });
+ok("MCP delete_page", !pd1.isError && pd1.text.startsWith("Deleted notes/a.md") && (await mcp(T, "read_page", { board: "Shop API", path: "notes/a.md" })).isError, pd1);
+
+// A card assigned to the member is theirs to work: claim, STATUS, move, ask, answer (// ASSIGNEE).
+const assign = await mcp(T, "update_card", { id, tags: ["agent"], assignee: member.email });
+ok("the owner tags a card for agents and assigns it to the member", !assign.isError, assign);
+const aboard = await mcp(M, "get_board", { board: B });
+ok("the member's agent sees the assignment on the card line", aboard.text.includes(`(assigned to ${member.email})`), aboard);
+const aclaim = await mcp(M, "claim_card", { id, session_id: "tasks-member01", agent: "smoke" });
+ok("the member's agent claims it", !aclaim.isError && aclaim.text.includes("Claimed"), aclaim);
+const astatus = await mcp(M, "update_card", { id, notes: "STATUS: on it" });
+ok("writes its STATUS line", !astatus.isError, astatus);
+const atitle = await mcp(M, "update_card", { id, title: "Renamed by the member" });
+ok("but can't retitle it", atitle.isError && atitle.text.includes("assigned to you"), atitle);
+const amove = await mcp(M, "move_cards", { ids: [id], lane: "Doing" });
+ok("moves it to Doing", !amove.isError, amove);
+const aask = await mcp(M, "ask_ceo", { id, question: "Ship it?", options: ["Yes", "No"], recommended: 1, session_id: "tasks-member01" });
+ok("asks a question on it", !aask.isError && aask.text.includes("Asked on"), aask);
+const await1 = await mcp(M, "wait_for_answer", { ids: [id], seconds: 1, session_id: "tasks-member01" });
+ok("and waits", !await1.isError && await1.text.includes("Nothing is answered yet"), await1);
+const os = await sock(owner, B);
+const oans = await os.rpc("answerAsk", [id, { choice: 0 }]);
+ok("the owner answers from the app", oans.success === true, oans);
+const awaited = await mcp(M, "wait_for_answer", { ids: [id], seconds: 2, session_id: "tasks-member01" });
+ok("and the member's agent hears it", !awaited.isError && awaited.text.includes("ANSWERED"), awaited);
+const aask2 = await mcp(M, "ask_ceo", { id, question: "And now?", options: ["Go", "Stop"], session_id: "tasks-member01" });
+const ms = await sock(member, B);
+const mans = await ms.rpc("answerAsk", [id, { choice: 1 }]);
+ok("the member answers their own card's question from the app", !aask2.isError && mans.success === true, { aask2, mans });
+const other = await mcp(T, "add_cards", { board: "Shop API", cards: [{ title: "Owner's own work order", tags: ["agent"] }] });
+const oid = /ids, in the order given: (c[a-z0-9]{4})/.exec(other.text)?.[1];
+const mans2 = await ms.rpc("updateCard", [oid, { notes: "mine now" }]);
+ok("but not another agent card", mans2.success === false && /agents/.test(mans2.error ?? ""), mans2);
+const unassign = await mcp(T, "update_card", { id, assignee: null });
+ok("the owner takes the assignment back", !unassign.isError, unassign);
+const aclaim2 = await mcp(M, "claim_card", { id, session_id: "tasks-member01", agent: "smoke" });
+ok("and the member's agent can't claim it anymore", aclaim2.isError && aclaim2.text.includes("the owner's"), aclaim2);
+os.close(); ms.close();
+
 const demote = await call(owner, "POST", "/api/board/members/role", { board: B, email: member.email, role: "viewer" });
 ok("the owner makes the member a viewer", demote.status === 200, demote.data);
 const vadd = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "Still trying" }] });
 ok("a viewer's agent changes nothing", vadd.isError && /view/i.test(vadd.text), vadd);
 const vread = await mcp(M, "get_board", { board: B });
 ok("but still reads", !vread.isError && vread.text.includes("Boards smoke card 2"), vread);
+const vw = await mcp(M, "write_page", { board: "Shop API", path: "notes/v.md", text: "no" });
+ok("a viewer's agent can't write a page", vw.isError && /view/.test(vw.text), vw);
+const vr = await mcp(M, "read_page", { board: "Shop API", path: "notes/member.md" });
+ok("but still reads one", !vr.isError && vr.text.includes("mine"), vr);
 const nope2 = await mcp(M, "get_board", { board: "My board" });
 ok("'My board' is the member's own first board, not the owner's", !nope2.isError && !nope2.text.includes("Boards smoke card 2"), nope2);
 

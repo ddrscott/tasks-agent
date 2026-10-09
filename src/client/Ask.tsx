@@ -18,6 +18,8 @@ export const AskContext = createContext<AnswerFn>(() => {});
  * line saying who answers. There's nothing to tap, because the server would refuse the tap.
  */
 export const AskOwnerContext = createContext<string | null>(null);
+/** The signed-in email. On someone else's board, a question on a card assigned to you is yours to answer (// ASSIGNEE). */
+export const AskMeContext = createContext<string | null>(null);
 
 // A card is draggable and opens on click, so its buttons keep those to themselves.
 const quiet = {
@@ -42,7 +44,10 @@ type BlockProps = {
 
 export function AskBlock({ card, compact, before }: BlockProps) {
   const answer = useContext(AskContext);
+  const me = useContext(AskMeContext);
+  // Someone else's board: the owner answers, unless this card is assigned to you.
   const owner = useContext(AskOwnerContext);
+  const theirs = owner && !(me && card.assignee === me) ? owner : null;
   const [other, setOther] = useState("");
   const ask = card.ask;
   const send = (input: { choice?: number; text?: string }) => { before?.(); answer(card.id, input); };
@@ -66,7 +71,7 @@ export function AskBlock({ card, compact, before }: BlockProps) {
   }, [armed]);
 
   if (!ask) return null;
-  if (owner) {
+  if (theirs) {
     return (
       <div className={`ask readonly${compact ? " compact" : ""}`}>
         <div className="ask-q"><span className="ask-mark" aria-hidden="true">?</span>{ask.question}</div>
@@ -79,7 +84,7 @@ export function AskBlock({ card, compact, before }: BlockProps) {
             </li>
           ))}
         </ol>
-        <p className="ask-owner">{compact ? `Waiting on ${owner}` : `Only ${owner}, the board's owner, can answer this. The answer shows up on the card when they do.`}</p>
+        <p className="ask-owner">{compact ? `Waiting on ${card.assignee ?? theirs}` : `Only ${theirs}, the board's owner${card.assignee ? `, or ${card.assignee}, whom it's assigned to,` : ""} can answer this. The answer shows up on the card when they do.`}</p>
       </div>
     );
   }

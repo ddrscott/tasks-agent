@@ -12,6 +12,7 @@ import type { TodoAgent } from "../agent";
 import { doneLaneId, laneRoles, roleOf, todoLaneId, type LaneRole } from "../lanes";
 import { plainError, plainText } from "../member-rules";
 import { clean, splitTitleTags, tidyTags, type Board, type Card, type Lane } from "../shared";
+import { AskContext, AskMeContext } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, type Actions } from "./Board";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { CardEditor } from "./CardEditor";
@@ -184,8 +185,17 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
   const openBoard = editing ? states[editing.board] : undefined;
   const openCount = shown.cards.filter((c) => c.laneId !== ROLE_LANE.done.id).length;
   const knownTags = useMemo(() => [...new Set(shown.cards.flatMap((c) => c.tags ?? []))], [shown.cards]);
+  // An answer goes to the board the card is on; the server says no where it isn't yours to answer.
+  const answerAsk = useCallback((v: string, input: { choice?: number; text?: string }) => {
+    const at = split(v);
+    const stub = at ? stubs.current.get(at.board) : undefined;
+    if (!at || !stub) return;
+    void stub.answerAsk(at.card, input).catch(refused);
+  }, [refused]);
 
   return (
+    <AskContext.Provider value={answerAsk}>
+    <AskMeContext.Provider value={me.email}>
     <CardChipContext.Provider value={chipFor}>
     <div className="app">
       {reaches.map((r) => <BoardSocket key={r.id} reach={r} onState={onState} onStub={onStub} />)}
@@ -226,6 +236,7 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
             if (patch.notes !== undefined) p.notes = patch.notes ? plainText(patch.notes).slice(0, 4000) : "";
             if (patch.due !== undefined) p.due = patch.due || null;
             if (patch.tags !== undefined) p.tags = tidyTags(patch.tags);
+            if (patch.assignee !== undefined) p.assignee = patch.assignee;
             void openStub.updateCard(open.id, p).catch(refused);
           }}
           onMove={(laneId) => void openStub.moveCard(open.id, laneId, Number.MAX_SAFE_INTEGER).catch(refused)}
@@ -253,5 +264,7 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
       )}
     </div>
     </CardChipContext.Provider>
+    </AskMeContext.Provider>
+    </AskContext.Provider>
   );
 }

@@ -55,6 +55,8 @@ export const MEMBER_CALLS: Readonly<Record<string, MemberRole>> = Object.freeze(
   deleteCard: "writer",
   removeAttachment: "writer",
   applyLocal: "writer",
+  // Only on a card assigned to them; the write guard holds the rest (// ASSIGNEE).
+  answerAsk: "writer",
 });
 
 /** The role a member needs for `method`, or null when it's the owner's alone. */
@@ -464,9 +466,27 @@ export const ownerTagError = (tag: string, typed?: string) =>
   `[owner_tag] ${typed && typed !== tag ? `#${typed.slice(0, 40)} reads as #${tag}. ` : ""}Only the board's owner can put #${tag} on a card or take it off. The owner's agents take their orders from that tag.`;
 export const AGENT_CARD = "[agent_card] That card is a work order for the owner's agents (it's tagged #agent or #gauntlet). Only the board's owner can change, move, or delete it.";
 
-/** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. */
-function memberCardError(p: Card | undefined, c: Card): string | null {
-  if (p && isAgentCard(p)) return AGENT_CARD;
+/**
+ * What the member a card is assigned to may do to it when it's an agent's work order
+ * (// ASSIGNEE): change the notes (the STATUS line), move it, and put a question on it or
+ * answer one (`ask`, `answer`, and `needs-ceo` coming and going with them). The title, the
+ * due date, the other tags, the files, and who it's assigned to stay the owner's. `by` and the
+ * timestamps are the board's own stamps.
+ */
+export const ASSIGNEE_ONLY = "[assignee_only] This card is assigned to you, so you can change its notes, move it, and ask and answer on it. Its title, due date, other tags, files, and assignee are the owner's.";
+function assigneeChangeError(p: Card, c: Card): string | null {
+  if (p.title !== c.title || p.due !== c.due || p.assignee !== c.assignee || !same(p.attachments, c.attachments)) return ASSIGNEE_ONLY;
+  const strip = (tags?: string[]) => (tags ?? []).filter((t) => t !== NEEDS_CEO_TAG);
+  if (!same(strip(p.tags), strip(c.tags))) return ASSIGNEE_ONLY;
+  return null;
+}
+
+/** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. `me` is the member's email, for a card assigned to them. */
+function memberCardError(p: Card | undefined, c: Card, me?: string): string | null {
+  if (p && isAgentCard(p)) {
+    if (!me || p.assignee !== me) return AGENT_CARD;
+    return assigneeChangeError(p, c) ?? cardTooBig(p, c);
+  }
   const tag = ownerTagChanged(p, c);
   if (tag) return ownerTagError(tag);
   // A title that holds one, or something that reads as one, says what it was read as, the same as a tag does.
@@ -484,9 +504,10 @@ function memberCardError(p: Card | undefined, c: Card): string | null {
  * a member moves, to another lane or inside its own. The write guard still holds the rest
  * (its lane, and its place among the other work orders) whatever was called.
  */
-export function memberMoveError(b: Board, ids: unknown): string | null {
+export function memberMoveError(b: Board, ids: unknown, me?: string): string | null {
   const moving = new Set(Array.isArray(ids) ? ids : [ids]);
-  return b.cards.some((c) => moving.has(c.id) && isAgentCard(c)) ? AGENT_CARD : null;
+  // A work order assigned to this member is theirs to move (// ASSIGNEE).
+  return b.cards.some((c) => moving.has(c.id) && isAgentCard(c) && !(me && c.assignee === me)) ? AGENT_CARD : null;
 }
 
 /** The most cards one `addCards` call takes: a pasted list. A longer paste goes in as several calls. */
@@ -554,7 +575,7 @@ function cardTooBig(p: Card | undefined, c: Card): string | null {
  * take back, and so do the tags that direct the owner's agents and the cards that carry them
  * (OWNER_TAGS above). It runs on every change a member makes, whatever path it took.
  */
-export function memberChangeError(before: Board, after: Board): string | null {
+export function memberChangeError(before: Board, after: Board, me?: string): string | null {
   const { cards: _b, ...restBefore } = before;
   const { cards: _a, ...restAfter } = after;
   if (!same(restBefore, restAfter)) return OWNER_ONLY;
@@ -564,15 +585,17 @@ export function memberChangeError(before: Board, after: Board): string | null {
   for (const c of after.cards) {
     const p: Card | undefined = was.get(c.id);
     // A card this change added or touched has to be one a member may make: not an agent's
-    // work order, no owner tag put on or taken off, and inside the limits. One it left alone
-    // is the owner's business.
+    // work order (unless it's assigned to them), no owner tag put on or taken off, and inside
+    // the limits. One it left alone is the owner's business.
     if (!p || !same(p, c)) {
-      const no = memberCardError(p, c);
+      const no = memberCardError(p, c, me);
       if (no) return no;
     }
     // A question is asked by an agent and answered by the owner. A member's change can't add,
-    // edit, answer, or clear one, and can't rewrite the last answer either.
-    if (!same(p?.ask, c.ask) || !same(p?.answer, c.answer)) return "Questions on a card are the board owner's to answer.";
+    // edit, answer, or clear one, and can't rewrite the last answer either. The member a card
+    // is assigned to is the exception: their agents ask on it, and they answer (// ASSIGNEE).
+    const mine = !!me && (c.assignee === me || p?.assignee === me);
+    if (!mine && (!same(p?.ask, c.ask) || !same(p?.answer, c.answer))) return "Questions on a card are the board owner's to answer.";
     // Finishing a card with its question still open ends the agent's wait, the same as taking the question back.
     if (c.ask && done && c.laneId === done && p?.laneId !== done) return "That card has a question waiting on the board's owner.";
   }
@@ -582,8 +605,9 @@ export function memberChangeError(before: Board, after: Board): string | null {
     if (p.ask) return "That card has a question waiting on the board's owner.";
   }
   // The order of the agents' cards is the order they're worked in ("take the top card"), so it
-  // has to come out the same. Moving any other card never changes it.
-  const queue = (b: Board) => b.cards.filter(isAgentCard).map((c) => c.id).join();
+  // has to come out the same. Moving any other card never changes it, and a work order assigned
+  // to this member is theirs to move, so it's left out of the comparison.
+  const queue = (b: Board) => b.cards.filter((c) => isAgentCard(c) && !(me && c.assignee === me)).map((c) => c.id).join();
   if (queue(before) !== queue(after)) return AGENT_CARD;
   if (after.cards.length > before.cards.length && after.cards.length > MEMBER_LIMITS.cards) {
     return BOARD_FULL_CARDS;
@@ -594,10 +618,10 @@ export function memberChangeError(before: Board, after: Board): string | null {
 }
 
 /** Throws unless a caller with this effective role may turn `before` into `after`. The owner may do anything. */
-export function assertMayChange(effective: Effective, reason: AccessReason, before: Board, after: Board): void {
+export function assertMayChange(effective: Effective, reason: AccessReason, before: Board, after: Board, me?: string): void {
   if (effective === "owner") return;
   if (effective !== "writer") throw new Error(reason === "plan_lapsed" ? READ_ONLY_LAPSED : READ_ONLY);
-  const why = memberChangeError(before, after);
+  const why = memberChangeError(before, after, me);
   if (why) throw new Error(why);
 }
 

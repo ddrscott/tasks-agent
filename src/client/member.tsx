@@ -126,7 +126,7 @@ export const ASK_HOLDS = (owner: string) => `This card has a question waiting on
 // ── The owner's agents' cards and tags (OWNER_TAGS in member-rules.ts) ─────────────────────
 
 /** A card a writer can read and not change: it's a work order for the owner's agents. */
-export const agentHeld = (mode: Mode | undefined, card: Card) => mode === "writer" && isAgentCard(card);
+export const agentHeld = (mode: Mode | undefined, card: Card, me?: string | null) => mode === "writer" && isAgentCard(card) && !(me && card.assignee === me);
 /** Said on such a card, in the open card. */
 export const AGENT_HOLDS = (owner: string) =>
   `This card is a work order for ${owner}'s agents (it's tagged #agent or #gauntlet), so only ${owner} can change, move, or delete it.`;

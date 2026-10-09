@@ -52,13 +52,16 @@
       // Event sockets for agent sessions (src/events.ts), one per user, kept apart from the board's.
       { "name": "TaskEvents", "class_name": "TaskEvents" },
       // Card claims (src/presence.ts), one per user. The name is from when it also held Claude Code sessions; boards have claims stored under it.
-      { "name": "Presence", "class_name": "Presence" }
+      { "name": "Presence", "class_name": "Presence" },
+      // Pages and files (src/docs.ts), one per board, named by the board's id (// PAGES).
+      { "name": "Docs", "class_name": "Docs" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TodoAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["TaskEvents"] },
-    { "tag": "v3", "new_sqlite_classes": ["Presence"] }
+    { "tag": "v3", "new_sqlite_classes": ["Presence"] },
+    { "tag": "v4", "new_sqlite_classes": ["Docs"] }
   ],
   "vars": {
     // Cheap Workers AI model with tool calling ($0.06 in / $0.40 out per M tokens).

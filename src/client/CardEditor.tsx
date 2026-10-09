@@ -1,7 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { isOwnerTag, ownerTagLike, ownerTagTyped } from "../member-rules";
-import { AskBlock, AskOwnerContext } from "./Ask";
+import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, ChangedWhileOpen, changer, CLAIM_HOLD_MS, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, WhoContext, type Mode } from "./member";
 import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
 import { NoAgentLine } from "./AgentNudge";
@@ -24,8 +24,10 @@ type Props = {
   vault: Vault | null;
   /** Set where files can't be stored (the demo board): shown in place of the attach controls. */
   filesNote?: string;
-  onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[] }): void;
+  onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[]; assignee?: string | null }): void;
   onMove(laneId: string): void;
+  /** Who a card can be assigned to (// ASSIGNEE): you and the board's members. Left out, the field isn't drawn unless the card already has one. */
+  people?: string[];
   /** A tap on a Move to button: move right away and say so, with Undo. */
   onMoveNow(laneId: string): void;
   onDelete(): void;
@@ -65,8 +67,9 @@ export function CardEditor(props: Props) {
   const drafts = useContext(DraftsContext);
   const key = `card:${props.card.id}`;
   useEffect(() => () => drafts?.report(key, null), [drafts, key]);
-  // An agent's work order is read only to a writer too (OWNER_TAGS in member-rules.ts).
-  return props.mode === "viewer" || agentHeld(props.mode, props.card)
+  // An agent's work order is read only to a writer too (OWNER_TAGS in member-rules.ts), unless it's assigned to them (// ASSIGNEE).
+  const me = useContext(AskMeContext);
+  return props.mode === "viewer" || agentHeld(props.mode, props.card, me)
     ? <CardView {...props} unsaved={draft.current} />
     : <CardEdit {...props} draft={draft} />;
 }
@@ -75,8 +78,9 @@ export function CardEditor(props: Props) {
 function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }: Props & { unsaved?: Draft | null }) {
   const ref = useRef<HTMLDialogElement>(null);
   const owner = useContext(AskOwnerContext);
+  const me = useContext(AskMeContext);
   // A writer lands here only on an agent's work order; a viewer lands here on every card.
-  const held = agentHeld(mode, card);
+  const held = agentHeld(mode, card, me);
   useModal(ref, {
     focus: (dialog) => dialog.focus(),
     fallback: () => document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(card.id)}"]`),
@@ -136,7 +140,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
  * ask "Discard changes?" first. Files are the exception: they upload and come off as you go,
  * and Undo covers a removal, so they don't count as edits.
  */
-function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft, onClaim }: Props & { draft: React.MutableRefObject<Draft | null> }) {
+function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, onMoveNow, onDelete, onRemoveAttachment, onToggleDone, isDone, onClose, mode, board, draft, onClaim, people }: Props & { draft: React.MutableRefObject<Draft | null> }) {
   const ref = useRef<HTMLDialogElement>(null);
   const drafts = useContext(DraftsContext);
   // A writer can't finish or delete a card while its question is open: that would end the
@@ -149,6 +153,9 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const [title, setTitle] = useState(draft.current?.title ?? card.title);
   const [notes, setNotes] = useState(draft.current?.notes ?? card.notes);
   const [due, setDue] = useState(card.due ?? "");
+  const [assignee, setAssignee] = useState(card.assignee ?? "");
+  // Who the card can go to: the people offered, plus whoever it's on now, so an old name still shows.
+  const assignable = [...new Set([...(people ?? []), ...(card.assignee ? [card.assignee] : [])])];
   // A trailing space says the last tag is finished, so the field suggests more tags instead of
   // treating that tag as half typed.
   // The owner's tags on the card (#needs-ceo on a card with a question, #ship-ok) aren't a
@@ -258,10 +265,11 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   /** What Save would change, compared with the card as it was opened. */
   function pending() {
     const { title: t, notes: n, due: d, tags: g, lane: l } = latest.current;
-    const patch: { title?: string; notes?: string; due?: string | null; tags?: string[] } = {};
+    const patch: { title?: string; notes?: string; due?: string | null; tags?: string[]; assignee?: string | null } = {};
     if (t.trim() && t.trim() !== card.title) patch.title = t;
     if (n !== card.notes) patch.notes = n;
     if ((d || null) !== card.due) patch.due = d || null;
+    if (assignee !== (card.assignee ?? "")) patch.assignee = assignee || null;
     const nextTags = [...new Set(g.split(/[\s,]+/).map(cleanTag).filter(Boolean))];
     if (nextTags.join(" ") !== own.join(" ")) patch.tags = [...locked, ...nextTags.filter((t) => !locked.includes(t))];
     return { patch, lane: l !== card.laneId ? l : null };
@@ -392,6 +400,15 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
             Due
             <input className="field" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
           </label>
+          {assignable.length > 0 && (
+            <label>
+              Assign to
+              <select className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)} title="Whose agents work this card. They can write its STATUS, move it, and ask and answer on it.">
+                <option value="">Nobody</option>
+                {assignable.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} />
         {locked.length > 0 && (

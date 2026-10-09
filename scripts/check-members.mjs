@@ -88,8 +88,25 @@ section("access rules (pure)");
 
   const { memberCallNeeds } = rules;
   ok("search is the one thing a viewer may call", Object.entries(rules.MEMBER_CALLS).filter(([, r]) => r === "viewer").map(([k]) => k).join() === "search");
-  ok("writers get card actions only", Object.keys(rules.MEMBER_CALLS).sort().join() === "addCard,addCards,applyLocal,deleteCard,moveCard,removeAttachment,search,updateCard");
-  ok("an unlisted method is the owner's", memberCallNeeds("addLane") === null && memberCallNeeds("undo") === null && memberCallNeeds("answerAsk") === null && memberCallNeeds("setTheme") === null);
+  // answerAsk is a writer's call only on a card assigned to them; the write guard holds the rest (// ASSIGNEE).
+  ok("writers get card actions only", Object.keys(rules.MEMBER_CALLS).sort().join() === "addCard,addCards,answerAsk,applyLocal,deleteCard,moveCard,removeAttachment,search,updateCard");
+  ok("an unlisted method is the owner's", memberCallNeeds("addLane") === null && memberCallNeeds("undo") === null && memberCallNeeds("askCeo") === null && memberCallNeeds("setTheme") === null);
+  ok("a member's answer is refused unless the card is assigned to them", (() => {
+    const lanes = [{ id: "t", name: "To do", role: "todo" }, { id: "d", name: "Done", role: "done" }];
+    const ask = { question: "Go?", options: ["Yes", "No"], askedAt: "2026-10-09T00:00:00.000Z" };
+    const card = { id: "c1", title: "Work", notes: "", laneId: "t", due: null, createdAt: "x", updatedAt: "x", tags: ["agent", "needs-ceo"], ask };
+    const before = { lanes, cards: [card], theme: "auto" };
+    const answered = { ...card, tags: ["agent"], answer: { question: "Go?", answer: "Yes", at: "y" } };
+    delete answered.ask;
+    const after = { lanes, cards: [answered], theme: "auto" };
+    const refused = rules.memberChangeError(before, after, "dana@example.com");
+    const mineBefore = { lanes, cards: [{ ...card, assignee: "dana@example.com" }], theme: "auto" };
+    const mineAfter = { lanes, cards: [{ ...answered, assignee: "dana@example.com" }], theme: "auto" };
+    const allowed = rules.memberChangeError(mineBefore, mineAfter, "dana@example.com");
+    const retitled = rules.memberChangeError(mineBefore, { lanes, cards: [{ ...mineAfter.cards[0], title: "Nope" }], theme: "auto" }, "dana@example.com");
+    const someoneElse = rules.memberChangeError(mineBefore, mineAfter, "eve@example.com");
+    return refused === rules.AGENT_CARD && allowed === null && retitled === rules.ASSIGNEE_ONLY && someoneElse === rules.AGENT_CARD;
+  })());
   ok("prototype names aren't methods", memberCallNeeds("constructor") === null && memberCallNeeds("__proto__") === null && memberCallNeeds("toString") === null && memberCallNeeds("hasOwnProperty") === null && memberCallNeeds(7) === null);
 
   const { memberChangeError, assertMayChange } = rules;
@@ -1501,17 +1518,26 @@ section("questions, MCP, the event feed, claims");
   const a1 = await viewerSock.wait((f) => f.type === "cf_agent_state" && f.state.cards.find((c) => c.id === seed)?.answer);
   ok("members see the answer", a1?.state.cards.find((c) => c.id === seed)?.answer?.answer === "Yes");
 
+  // A member's agent reaches what the member can see (check-boards.mjs has the rest): their own
+  // board, and after it the boards shared with them, each saying whose it is.
   const own = await mcp(writerToken, "get_board");
-  ok("a member's token reaches only their own board over MCP", own.status === 200 && !own.text.includes("Owner seed card") && !own.text.includes("Writer card"), own.text.slice(0, 200));
+  ok("a member's token sees their own board first over MCP, then the owner's, marked as shared", own.status === 200 && own.text.indexOf("Owner seed card") > own.text.indexOf("My board") && own.text.includes(owner.email), own.text.slice(0, 300));
   const aimed = await mcp(writerToken, "get_board", {}, `?board=${owner.id}`);
-  ok("naming the owner's board on the MCP address changes nothing", !aimed.text.includes("Owner seed card"), aimed.text.slice(0, 200));
+  ok("naming the owner's board on the MCP address changes nothing", aimed.text === own.text, aimed.text.slice(0, 200));
   const reach = await mcp(writerToken, "get_card", { id: seed });
-  ok("a member's token can't read the owner's card by id", !reach.text.includes("Owner seed card") && !reach.text.includes("writer was here"), reach.text.slice(0, 200));
-  const poke = await mcp(writerToken, "update_card", { id: seed, title: "Hacked over MCP" });
-  ok("a member's token can't change the owner's card by id", poke.isError && ownerSock.state().cards.find((c) => c.id === seed)?.title === "Owner seed card", poke.text.slice(0, 200));
-  const search = await mcp(writerToken, "search_cards", { query: "Owner seed card secret plan" });
-  ok("a member's token can't search the owner's board", !search.text.includes("Owner seed card") && !search.text.includes("Owner secret plan"), search.text.slice(0, 200));
-  ok("the owner's own MCP is unchanged", (await mcp(ownerToken, "get_board")).text.includes("Owner seed card"));
+  ok("a member's token reads the owner's card by id, and the owner's words aren't marked as a member's", reach.text.includes("Owner seed card") && !reach.text.includes(`${owner.email}, a member`), reach.text.slice(0, 300));
+  const poke = await mcp(writerToken, "update_card", { id: seed, title: "Retitled over MCP" });
+  await sleep(200);
+  const poked = ownerSock.state().cards.find((c) => c.id === seed);
+  ok("a writer's token changes the owner's card by id, and the change is stamped as the writer's, by an agent", !poke.isError && poked?.title === "Retitled over MCP" && poked.by?.email === writer.email && poked.by?.via === "agent", [poke.text.slice(0, 200), poked?.by]);
+  ok("and it's not marked as the owner's words either", !poke.text.includes(`${owner.email}, a member`), poke.text.slice(0, 200));
+  const search = await mcp(writerToken, "search_cards", { query: "Retitled over MCP", mode: "keyword", board: owner.id });
+  ok("a member's token can search the owner's board when it names it", search.text.includes("Retitled over MCP"), search.text.slice(0, 200));
+  const unaimed = await mcp(writerToken, "search_cards", { query: "Retitled over MCP", mode: "keyword" });
+  ok("and a search that names no board is of their own", !unaimed.text.includes("Retitled over MCP"), unaimed.text.slice(0, 200));
+  ok("the owner's own MCP sees the writer's change, marked as the writer's", /Retitled over MCP.*a member, not the owner/.test((await mcp(ownerToken, "get_board")).text.replace(/\n/g, " ")));
+  await ownerSock.rpc("updateCard", [seed, { title: "Owner seed card" }]);
+  await sleep(200);
 
   // The event feed: the member's token, the owner's board named every way a client could.
   const feed = await new Promise((resolve) => {

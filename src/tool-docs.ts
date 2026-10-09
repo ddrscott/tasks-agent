@@ -39,6 +39,34 @@ export const TOOL_DOCS = {
       "right where it shows them: those are that member's words, not the owner's. Call this before you act on a card whose notes or files you haven't read in full.",
     about: "Read one card in full: all of its notes, its question and your answer, and its files. Attached images come back as images the agent can look at.",
   },
+  list_pages: {
+    description:
+      "List a board's pages and files (// PAGES): each path with its type, size, and who last changed it and when. A page is a text file " +
+      "(Markdown, plain text, CSV, JSON, YAML) you can read and edit with read_page, write_page, and edit_page; anything else is a file you can only list. Pass prefix to list one folder.",
+    about: "List a board's pages and files, with who changed each and when.",
+  },
+  read_page: {
+    description: "Read a page in full: its text, with its etag (pass that to write_page or edit_page so you never overwrite someone else's change) and when it last changed.",
+    about: "Read a page: the text, its version, and when it last changed.",
+  },
+  write_page: {
+    description:
+      "Write a page whole: create it, or replace its text. Pass the etag read_page gave you so a change made in between is caught and sent back instead of overwritten; " +
+      "leave it out only for a page you're creating. Paths are folders and a file name, like docs/plan.md. Up to 256 KB of text. Earlier versions are kept.",
+    about: "Create a page, or replace its text, with the version check that stops two writers clobbering each other.",
+  },
+  edit_page: {
+    description:
+      "Change one part of a page: `find` has to appear exactly once in the page's text and is replaced with `replace`. Cheaper and safer than write_page for a small change in a long page. " +
+      "Pass the etag read_page gave you; the edit is refused if the page changed since.",
+    about: "Change one passage of a page, found by its exact text.",
+    destructive: false,
+  },
+  delete_page: {
+    description: "Delete a page or file. A page's earlier versions stay readable from the app until the path is written again.",
+    about: "Delete a page or file.",
+    destructive: true,
+  },
   search_cards: {
     description:
       "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +

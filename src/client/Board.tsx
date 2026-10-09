@@ -7,7 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { doneLaneId, faceLine, LANE_ROLES, matchesTags, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type TagWhere } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
-import { AskBlock, AskOwnerContext } from "./Ask";
+import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
@@ -307,6 +307,8 @@ function LaneView(props: Props & {
   lane: Lane; index: number; lanes: Lane[]; cards: Card[]; isDone: boolean; role: LaneRole | undefined; hasDone: boolean; highlight: boolean; onToggle(c: Card): void;
 }) {
   const { lane, cards, actions } = props;
+  // A work order assigned to the person looking is theirs to move and finish (// ASSIGNEE).
+  const me = useContext(AskMeContext);
   // Lanes are the owner's: a member sees the name, the count, and the sort, with nothing to press.
   const owns = (props.mode ?? "owner") === "owner";
   const canCards = props.mode !== "viewer";
@@ -446,8 +448,8 @@ function LaneView(props: Props & {
               key={c.id} card={c} isDone={props.isDone} flash={props.flash.has(c.id)} onOpen={props.onOpen} onToggle={props.onToggle}
               // No check for a viewer, and none for a writer on a card whose question is still open: the server refuses both.
               // An agent's work order doesn't lift or tick for a writer either, and says why on its face.
-              canToggle={props.hasDone && canCards && !agentHeld(props.mode, c) && (owns || props.isDone || !c.ask)} locked={!canCards || agentHeld(props.mode, c)}
-              held={agentHeld(props.mode, c)}
+              canToggle={props.hasDone && canCards && !agentHeld(props.mode, c, me) && (owns || props.isDone || !c.ask)} locked={!canCards || agentHeld(props.mode, c, me)}
+              held={agentHeld(props.mode, c, me)}
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
@@ -527,6 +529,8 @@ export function CardFace(p: {
         <div className="card-meta">
           {/* On a screen that mixes boards (AllBoards.tsx), which board this card is on. */}
           {chip && <span className="chip board-chip" title={`On ${chip}`}>{chip}</span>}
+          {/* Whose agents work this card (// ASSIGNEE): the part of the email before the @, the whole on hover. */}
+          {card.assignee && <span className="chip assignee" title={`Assigned to ${card.assignee}`}>→ {card.assignee.split("@")[0]}</span>}
           {card.tags?.map((t) => (
             <button
               key={t} className={`chip tag${p.tagFilter === t ? " active" : ""}`} tabIndex={-1}

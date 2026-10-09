@@ -28,6 +28,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Card claims | A `Presence` Durable Object per user (`src/presence.ts`): which agent session holds which card, written by `claim_card` and the other MCP calls (`// CLAIMS`) |
 | Boards | Many per account: a registry in D1 (`boards`, `src/boards.ts`), one `TodoAgent` per board named by the board's id; the first board keeps the user's id (`// BOARDS`) |
 | Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
+| Pages and files | A `Docs` Durable Object per board (`src/docs.ts`): text pages with revisions in its SQLite, other files in R2 under `<board id>/files/<path>` (`// PAGES`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -652,7 +653,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -1075,6 +1076,39 @@ the owner's.
   the owner's tags, or the owner's agent cards, and its cards carry the member's mark. Claims,
   `ask_ceo`, and `wait_for_answer` are the owner's there and say so in words (`NOT_YOURS`).
   `get_board` with no board lists shared boards after your own, each headed with whose it is.
+  The one exception is a card assigned to you (`// ASSIGNEE`).
+
+## // ASSIGNEE
+
+Two people on one board, each with their own Claude: whose agents work a card? The owner's, as
+`// TEAM_BOARDS` has it, unless the owner assigns the card to a member. `Card.assignee` is an
+email (`validAssignee` in `src/shared.ts`), set by the owner in the card editor's **Assign to**
+(you and the board's accepted members; a member sees only themselves) or over MCP (`assignee` on
+`add_cards` and `update_card`, `null` to clear). The card face shows `→ dana`, and the card
+line agents read says `(assigned to dana@example.com)`; `get_card` says it under the question.
+
+- **What the assignee may do**, on an agent card they'd otherwise only read
+  (`assigneeChangeError` in `src/member-rules.ts`): change the notes (the `STATUS:` line),
+  move it, finish it, and ask and answer on it (`ask`, `answer`, and `#needs-ceo` coming and
+  going with them). The title, due date, other tags, files, and the assignment itself stay the
+  owner's, and a save that touches them is refused with `[assignee_only]`. The write guard
+  gets the member's email (`assertMayChange(…, me)`), and the agent-card queue comparison
+  leaves their card out, so moving it never reads as reordering the owner's.
+- **Over MCP** (`notMine` in `src/mcp.ts`): on a shared board, `claim_card`, `release_card`,
+  `ask_ceo`, and `wait_for_answer` work on a card assigned to the caller and are refused in
+  words on any other. The question goes on as the member (`TodoAgent.askCeoAs`, under the
+  guard), and `wait_for_answer` reads the card as a member reads it. The owner answers from
+  the app as always; so can the assignee (`answerAsk` is in `MEMBER_CALLS`, and the guard
+  allows it only on their card). The working rules say it in one sentence (rule 1).
+- **In the app**: on someone else's board the Ask block is live on a card assigned to you
+  (`AskMeContext` in `Ask.tsx`), "need you" counts those cards, and the card opens for editing
+  instead of read only (`agentHeld(mode, card, me)`). The editor doesn't yet grey out the fields
+  the assignee can't change; the server's sentence says which.
+- Not yet: the member's event feed carrying cards assigned to them on other people's boards.
+  `wait_for_answer` covers the answer; the feed would cover new assignments.
+- `npm run check:boards` has the whole loop: assign, claim, STATUS, a retitle refused, move,
+  ask, wait, the owner answering from the app, the assignee answering, another agent card still
+  refused, and the assignment taken back.
 - **The event feed** is one per account and carries every board the account owns: the hello
   lists each board's open agent cards with `board` and `boardName` on each, and every event
   after it carries `board` (`TodoAgent.publish`).
@@ -1113,6 +1147,49 @@ first board, the rest of yours, and the ones shared with you. It's in the board 
 - **Encrypted boards are left out**, counted in the line under the top bar: their cards are
   ciphertext here. Archived boards are left out too.
 - Over MCP the same merge is `get_board` with no `board` (`// BOARDS`).
+
+## // PAGES
+
+Every board has pages and files (`src/docs.ts`): the wiki half of the product. A page is a
+text file, Markdown first of all (also plain text, CSV, JSON, YAML, HTML), up to 256 KB, kept
+in the board's `Docs` Durable Object (one per board, named by the board's id) with its earlier
+versions beside it (30 per page). Anything else is bytes in R2 under `<board id>/files/<path>`,
+with a row in the same object. The same membership check as the board decides who may read
+and write (`access`, through `where` in `docs.ts`): the owner and writers write, viewers read,
+and a board that isn't yours answers like one that doesn't exist.
+
+- **Paths** are folders and a file name, `docs/plan.md`: forward slashes, no leading slash, no
+  `.` or `..` pieces, printable, at most 200 characters (`cleanPath`). A small text file PUT at
+  any path becomes a page whatever the request said; a big one or a binary becomes a file.
+- **Etags, so nobody overwrites anybody.** Every file has an etag (12 bytes of its SHA-256).
+  `PUT` with `If-Match: <etag>` is refused with `412 conflict` and the current info when the
+  page changed in between; `If-None-Match: *` creates only. The app saves with the etag it
+  opened the page at, and on a 412 keeps what you typed on screen and offers a reload. Agents
+  get the same contract: `read_page` hands back the etag, `write_page` and `edit_page` take it.
+- **The API** is `GET /api/files?board=` (the list, newest change first, plus `seq`, the change
+  cursor; `?since=<seq>` lists what changed after it), `GET /api/files/<path>?board=` (JSON
+  with the text under `Accept: application/json`, else the bytes, images and PDFs inline, the
+  rest as a download, every one under a sandboxing CSP like attachments), `PUT`, `DELETE`,
+  `POST /api/files/move`, and `GET /api/files/<path>/revisions?board=` (`&rev=<etag>` for one).
+  Pages share a 64 MB ceiling per board; files share `ATTACHMENT_MAX_MB` per file.
+- **The app** is `/tasks/pages?board=<id>&path=<path>` (`src/client/Pages.tsx`), from "Pages
+  and files" in the account menu: the list on the left grouped by folder, the page on the right
+  rendered with the notes renderer (`Markdown.tsx`, so raw HTML never runs), Edit into a plain
+  textarea (⌘Enter saves, Esc cancels), New page (a `.md` with a heading), Upload files (into
+  the open page's folder, or `files/`), Rename, Delete (two taps), Download, and Versions: each
+  earlier version can be read and put back into the editor. A viewer sees none of the buttons
+  that change anything.
+- **Over MCP**: `list_pages`, `read_page`, `write_page`, `edit_page` (one exact passage,
+  refused if it appears zero or more than one times, with the count), and `delete_page`, each
+  taking `board` like every other tool, and running as a member on a board shared with you (a
+  viewer's agent reads, a writer's writes).
+- **Not yet**: search across pages (`// SEARCH` covers cards only, card `crnp9` has the plan),
+  export (card `c6mh0`), a page linking to a card and back, and live updates while two people
+  have the same page open (the save catches the conflict; nothing pushes the other person's
+  change yet).
+- `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
+  revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
+  tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).
 
 ## // TEAM_BOARDS
 
