@@ -351,7 +351,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
             </button>
           )}
           <span className="spacer" />
-          <SearchBox search={search} onOpen={setEditing} inputRef={searchInput} />
+          <SearchBox search={search} onOpen={(h) => setEditing(h.id)} inputRef={searchInput} />
           <div className="actions">
             <div className="btn-pair">
               <button className="btn" onClick={undo} disabled={!stack.undo} title={stack.undo ? `Undo ${stack.undo.toLowerCase()} (⌘Z)` : "Nothing to undo"} aria-label="Undo">

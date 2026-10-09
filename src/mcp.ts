@@ -19,6 +19,7 @@ import { WAIT_SECONDS, workingRules } from "./agent-rules";
 import { askState, fenceLines, fileMember, fileNote, oneLine } from "./shared";
 import { findOwnedBoard, ownedBoards, type BoardRef } from "./boards";
 import { sharedBoards, type SharedBoard } from "./members";
+import { ensureIndexed, reachable, searchAll } from "./search-all";
 import { cleanPath, PAGE_MAX_BYTES, type FileInfo } from "./docs";
 import type { TodoAgent } from "./agent";
 import type { Presence } from "./presence";
@@ -49,7 +50,7 @@ const NOT_YOURS = (s: SharedBoard) => `This board is ${s.ownerEmail}'s, shared w
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page"] as const;
+const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card", "list_pages", "read_page", "write_page", "edit_page", "delete_page", "search"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
@@ -623,6 +624,40 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       } catch (e) {
         return text((e as Error).message, true);
       }
+    });
+
+    // Everything the caller can reach, in one go: cards and pages on every board (search-all.ts).
+    server.registerTool("search", {
+      title: "Search everything",
+      description: doc("search"),
+      inputSchema: z.object({
+        query: z.string().min(1).max(500).describe("What to look for, in plain words"),
+        mode: z.enum(["hybrid", "keyword", "semantic"]).optional().describe("hybrid (default) mixes exact words and meaning; keyword matches words; semantic matches meaning"),
+        kind: z.enum(["card", "page"]).optional().describe("Only cards, or only pages. Default both"),
+        limit: z.number().int().min(1).max(50).optional().describe("Most results to return, default 10"),
+        board: BOARD_ARG,
+      }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { query: string; mode?: "hybrid" | "keyword" | "semantic"; kind?: "card" | "page"; limit?: number; board?: string }) => {
+      const boards = await reachable(env, user, input.board);
+      if (!boards) return noBoard(input.board!);
+      await ensureIndexed(env, boards);
+      const r = await searchAll(env, boards, input);
+      if (!r.hits.length) return text(`Nothing matches "${oneLine(input.query).slice(0, 80)}".${r.semantic === "unavailable" ? " (Meaning-based search is unavailable right now; this was a keyword search.)" : ""}`);
+      const strip = (s: string) => s.replace(/[\u0001\u0002]/g, "");
+      const many = boards.length > 1;
+      const lines: string[] = [];
+      for (const h of r.hits) {
+        const where = many ? `${h.boardName} · ` : "";
+        const snippet = h.snippet ? ` — …${strip(h.snippet)}…` : "";
+        if (h.kind === "page") { lines.push(oneLine(`- page ${h.id}: ${strip(h.title)} (${where}${h.match} match)${snippet}`)); continue; }
+        // A card a member wrote on says so here too, the same as search_cards: the board knows, the index doesn't.
+        const b = boards.find((x) => x.id === h.board);
+        const here = b ? await reach({ id: b.id, name: b.name, ownerId: "", ownerEmail: b.ownerEmail, first: false, createdAt: null, archivedAt: null }) : null;
+        const member = here ? await here.agent.memberLine(h.id, b!.ownerEmail) : "";
+        lines.push(oneLine(`- [${h.id}] ${strip(h.title)} (${where}${h.lane}${h.due ? `, due ${h.due}` : ""}${h.assignee ? `, assigned to ${h.assignee}` : ""}; ${h.match} match)${snippet}${member}`));
+      }
+      return text(lines.join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : ""));
     });
 
     for (const name of TOOL_NAMES) {

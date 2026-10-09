@@ -18,13 +18,15 @@ const EMBED_BATCH = 50;
 // Measured with bge-small on real cards: the right card scores 0.57–0.65, unrelated ones
 // 0.30–0.54, and the gap between them is 0.08 or more. No single cutoff separates
 // them across queries, so keep cards above a floor AND close to the best score.
-const SEMANTIC_FLOOR = 0.52;
-const SEMANTIC_MARGIN = 0.06;
+export const SEMANTIC_FLOOR = 0.52;
+export const SEMANTIC_MARGIN = 0.06;
 // Words too common to search on.
 const STOPWORDS = new Set(("a an and are as at be but by for from has have i in is it its me my of on or " +
   "so that the this to was we were what when where which who will with you your am do did not need").split(" "));
-const RRF_K = 60;
-const MARK = ["\u0001", "\u0002"] as const;
+export const RRF_K = 60;
+export const MARK = ["\u0001", "\u0002"] as const;
+/** The text a card is embedded and keyword-indexed from. The cross-board index (search-all.ts) uses the same. */
+export const cardText = (c: Card) => (c.notes ? `${c.title}\n${c.notes}` : c.title).slice(0, 2000);
 
 /** FNV-1a: cheap change detection for "does this card need a new embedding". */
 function hash(s: string): string {
@@ -33,7 +35,7 @@ function hash(s: string): string {
   return (h >>> 0).toString(16);
 }
 
-const textOf = (c: Card) => (c.notes ? `${c.title}\n${c.notes}` : c.title).slice(0, 2000);
+const textOf = cardText;
 
 function cosine(a: Float32Array, b: Float32Array): number {
   let dot = 0, na = 0, nb = 0;
@@ -46,17 +48,20 @@ function cosine(a: Float32Array, b: Float32Array): number {
  * matching for terms of three or more letters (so "pass" finds "passport" but "i"
  * doesn't find "IRS").
  */
-function ftsQuery(q: string, join: " " | " OR "): string | null {
+export function ftsQuery(q: string, join: " " | " OR "): string | null {
   const words = q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const terms = words.filter((w) => !STOPWORDS.has(w)).slice(0, 12);
   const use = terms.length ? terms : words.slice(0, 12); // a query of only common words still searches
   return use.length ? use.map((t) => (t.length >= 3 ? `"${t}"*` : `"${t}"`)).join(join) : null;
 }
 
+/** Where fresh embeddings also go (the cross-board vector index, search-all.ts). */
+export type VectorSink = (items: { id: string; vec: Float32Array }[]) => Promise<void>;
+
 export class CardIndex {
   private refreshing: Promise<void> | null = null;
 
-  constructor(private sql: SqlStorage, private ai: Ai, private model: string) {}
+  constructor(private sql: SqlStorage, private ai: Ai, private model: string, private sink?: VectorSink) {}
 
   init() {
     this.sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS card_fts USING fts5(
@@ -112,7 +117,14 @@ export class CardIndex {
       batch.forEach(({ c, h }, j) => {
         this.sql.exec("INSERT OR REPLACE INTO card_vec (card_id, hash, vec) VALUES (?, ?, ?)", c.id, h, vecs[j].buffer);
       });
+      // The same vectors go to the cross-board index, so a card is embedded once. Its failure is its own.
+      if (this.sink) await this.sink(batch.map(({ c }, j) => ({ id: c.id, vec: vecs[j] }))).catch((e) => console.warn("vector sink failed", (e as Error).message));
     }
+  }
+
+  /** Embed arbitrary texts with this index's model (pages, search queries). */
+  embedTexts(texts: string[]): Promise<Float32Array[]> {
+    return this.embed(texts);
   }
 
   private async embed(texts: string[]): Promise<Float32Array[]> {

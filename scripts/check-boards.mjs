@@ -283,6 +283,45 @@ const aclaim2 = await mcp(M, "claim_card", { id, session_id: "tasks-member01", a
 ok("and the member's agent can't claim it anymore", aclaim2.isError && aclaim2.text.includes("the owner's"), aclaim2);
 os.close(); ms.close();
 
+// Search across boards (// SEARCH): the app's endpoint and the MCP tool, over cards and pages
+// on every board the caller can reach. Index rows are written after each change, so wait a beat.
+await new Promise((r) => setTimeout(r, 800));
+const s1 = await call(owner, "GET", "/api/search?q=smoke");
+const sHit = s1.data?.hits?.find((h) => h.id === id);
+ok("GET /api/search finds a card on the second board, with its board and lane", s1.status === 200 && sHit?.kind === "card" && sHit.board === B && sHit.boardName === "Shop API" && sHit.lane === "Doing" && sHit.title.includes("smoke"), s1.data);
+ok("without a vector index it says meaning-based search is unavailable", s1.data?.semantic === "unavailable", s1.data?.semantic);
+const s2 = await call(owner, "GET", "/api/search?q=plan");
+const pHit = s2.data?.hits?.find((h) => h.kind === "page");
+ok("a page is found by its words, under its moved path, with its heading as the title", pHit?.id === "docs/plan-final.md" && pHit.board === B && pHit.title.includes("Plan"), s2.data);
+ok("and the old path is gone from the index", !s2.data?.hits?.some((h) => h.id === "docs/plan.md"), s2.data);
+const s3 = await call(owner, "GET", "/api/search?q=plan&kind=card");
+ok("kind=card leaves pages out", s3.status === 200 && !s3.data.hits.some((h) => h.kind === "page"), s3.data);
+const s4 = await call(owner, "GET", "/api/search?q=alpha");
+ok("a deleted page is out of the index", s4.status === 200 && !s4.data.hits.some((h) => h.id === "notes/a.md"), s4.data);
+const s5 = await call(owner, "GET", `/api/search?q=smoke&board=${B}`);
+ok("board= narrows to one board", s5.status === 200 && s5.data.hits.some((h) => h.id === id), s5.data);
+const s6 = await call(owner, "GET", "/api/search?q=smoke&board=nope");
+ok("a board that isn't yours is a 404", s6.status === 404, s6.data);
+const s7 = await call(owner, "GET", "/api/search");
+ok("no query is a 400", s7.status === 400, s7.data);
+const s8 = await call(member, "GET", "/api/search?q=smoke");
+ok("a member searching finds the shared board's card", s8.status === 200 && s8.data.hits.some((h) => h.id === id && h.board === B), s8.data);
+const stranger = await account("stranger");
+const s9 = await call(stranger, "GET", "/api/search?q=smoke");
+ok("someone who isn't on the board finds nothing", s9.status === 200 && s9.data.hits.length === 0, s9.data);
+const ms1 = await mcp(T, "search", { query: "smoke" });
+ok("MCP search names the board and lane on a card hit", !ms1.isError && ms1.text.includes(`[${id}]`) && ms1.text.includes("Shop API · Doing"), ms1);
+const ms2 = await mcp(T, "search", { query: "plan", kind: "page" });
+ok("MCP search lists a page hit by its path", !ms2.isError && ms2.text.includes("page docs/plan-final.md"), ms2);
+const ms3 = await mcp(T, "search", { query: "member's agent" });
+ok("a card a member wrote says so on its hit", !ms3.isError && ms3.text.includes(`[${mid}]`) && ms3.text.includes(member.email), ms3);
+const ms4 = await mcp(T, "search", { query: "smoke", board: "Shop API" });
+ok("MCP search on one board leaves the board name off", !ms4.isError && ms4.text.includes(`[${id}]`) && !ms4.text.includes("Shop API ·"), ms4);
+const ms5 = await mcp(M, "search", { query: "smoke" });
+ok("a member's agent searches the shared board too", !ms5.isError && ms5.text.includes(`[${id}]`), ms5);
+const ms6 = await mcp(T, "search", { query: "zzzqqq" });
+ok("nothing matching says so", !ms6.isError && ms6.text.startsWith("Nothing matches"), ms6);
+
 const demote = await call(owner, "POST", "/api/board/members/role", { board: B, email: member.email, role: "viewer" });
 ok("the owner makes the member a viewer", demote.status === 200, demote.data);
 const vadd = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "Still trying" }] });

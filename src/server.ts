@@ -8,6 +8,7 @@ import { access, handleMembers, spendBoardCall } from "./members";
 import { BOARD_ID, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { handleBoards, ownedBoard } from "./boards";
 import { handleFiles } from "./docs";
+import { handleSearch } from "./search-all";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -142,7 +143,7 @@ const app: ExportedHandler<Env> = {
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handleAdmin(req, env, sub)) ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
-        ?? (await handleBoards(req, env, sub)) ?? (await handleFiles(req, env, sub)) ?? (await handleMembers(req, env, sub))
+        ?? (await handleBoards(req, env, sub)) ?? (await handleFiles(req, env, sub)) ?? (await handleSearch(req, env, sub)) ?? (await handleMembers(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 

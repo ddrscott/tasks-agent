@@ -11,4 +11,8 @@ interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   OAUTH_PROVIDER: import("@cloudflare/workers-oauth-provider").OAuthHelpers;
+  // The vector index behind meaning-based search across boards (src/search-all.ts). Optional:
+  // it's commented out in wrangler.jsonc until the index exists on the account (// SEARCH in
+  // the README), and without it searches are keyword-only and say so.
+  VECTORS?: VectorizeIndex;
 }

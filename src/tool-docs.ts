@@ -67,11 +67,18 @@ export const TOOL_DOCS = {
     about: "Delete a page or file.",
     destructive: true,
   },
+  search: {
+    description:
+      "Search everything you can reach at once: cards and pages on every board you own and every board shared with you, by keywords and by meaning. " +
+      "Each hit names its board and whether it's a card (with its id, lane, and due date) or a page (with its path), with a snippet. " +
+      "Pass board to search one board. Use it when you don't know which board holds what you're after; search_cards searches one board with lane and tag filters.",
+    about: "Find cards and pages across every board you can reach, by keyword or by meaning.",
+  },
   search_cards: {
     description:
-      "Search cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
-      "lanes, due dates, and a snippet, and on a shared board whether a member wrote on the card. Use it to find the card a user means when the board is large or the wording differs.",
-    about: "Find cards by keyword or by meaning across titles and notes.",
+      "Search one board's cards by keywords and by meaning across titles and notes. Returns matching cards with ids, " +
+      "lanes, due dates, and a snippet, and on a shared board whether a member wrote on the card. Use it to find the card a user means when the board is large or the wording differs; `search` looks across every board, and pages too.",
+    about: "Find cards by keyword or by meaning across one board's titles and notes.",
   },
   add_cards: {
     description: "Create one or more cards. Use this for every new task the user mentions.",

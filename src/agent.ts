@@ -11,6 +11,7 @@ import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events";
 import { endedCards } from "./presence-shared";
 import { CardIndex } from "./search";
+import { countIndexed, dropBoard, dropEntries, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
 import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
 import { boardById } from "./boards";
 import {
@@ -656,23 +657,71 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS member_deletes (member TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (member, day))`;
     if (!this.state.sealed) this.index.backfill(this.state);
+    // The next search over this board asks it to check its rows in the cross-board index (ensureSearch).
+    this.ctx.waitUntil(unmarkIndexed(this.env, this.name, "card").catch((e: Error) => console.warn("search unmark failed", e.message)));
+  }
+
+  /**
+   * Check this board's cards are in the cross-board index (search-all.ts), and put them all
+   * in when the count is off: a board from before the index existed, or a write that failed.
+   * Called by a search over a board that hasn't been checked since its object last started
+   * (ensureIndexed), which waits for the rows so the search sees them; then D1 says it's done
+   * (markIndexed) and later searches don't wake it.
+   */
+  async ensureSearch(): Promise<void> {
+    if (!this.state.sealed && (await countIndexed(this.env, this.name, "card")) !== this.state.cards.length) {
+      await resetEntries(this.env, this.name, "card", this.cardEntries(null, this.state));
+      this.index.refreshVectors(this.state).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+    }
+    await markIndexed(this.env, this.name, "card");
   }
 
   // Keyword and semantic search over this board (search.ts).
   private _index?: CardIndex;
   private get index(): CardIndex {
     if (!this._index) {
-      this._index = new CardIndex(this.ctx.storage.sql, this.env.AI, this.env.EMBEDDING_MODEL);
+      // Each card's embedding also goes to the cross-board vector index (search-all.ts), when there is one.
+      this._index = new CardIndex(this.ctx.storage.sql, this.env.AI, this.env.EMBEDDING_MODEL,
+        (items) => upsertVectors(this.env, this.name, items.map((i) => ({ kind: "card" as const, ref: i.id, vec: i.vec }))));
       this._index.init();
     }
     return this._index;
   }
 
-  /** Keep the search index in step with a board change. Embeddings update in the background. */
+  /**
+   * Keep the search indexes in step with a board change: this board's own (search.ts), and
+   * the cross-board one in D1 (search-all.ts), which gets a row per card that changed in what
+   * a hit shows (title, notes, lane, due, assignee). Embeddings update in the background.
+   */
   private reindex(before: Board | null, after: Board) {
     if (after.sealed) return; // the server can't read an encrypted board, so it can't index one
     this.index.sync(before, after);
     this.index.refreshVectors(after).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+    const changed = this.cardEntries(before, after);
+    const now = new Set(after.cards.map((c) => c.id));
+    const gone = (before?.cards ?? []).map((c) => c.id).filter((id) => !now.has(id));
+    if (changed.length) this.ctx.waitUntil(indexEntries(this.env, this.name, changed).catch((e: Error) => console.warn("search index write failed", e.message)));
+    if (gone.length) this.ctx.waitUntil(dropEntries(this.env, this.name, "card", gone).catch((e: Error) => console.warn("search index delete failed", e.message)));
+  }
+
+  /** The cross-board index rows for the cards that differ between two boards (every card, with no `before`). */
+  private cardEntries(before: Board | null, after: Board): Entry[] {
+    const old = new Map((before?.cards ?? []).map((c) => [c.id, c]));
+    const laneName = new Map(after.lanes.map((l) => [l.id, l.name]));
+    const laneWas = new Map((before?.lanes ?? []).map((l) => [l.id, l.name]));
+    const out: Entry[] = [];
+    for (const c of after.cards) {
+      const p = old.get(c.id);
+      if (p && p.title === c.title && p.notes === c.notes && p.laneId === c.laneId && p.due === c.due && p.assignee === c.assignee && laneName.get(c.laneId) === laneWas.get(c.laneId)) continue;
+      out.push({ kind: "card", ref: c.id, title: c.title, body: c.notes, meta: { lane: laneName.get(c.laneId) ?? c.laneId, due: c.due, ...(c.assignee ? { assignee: c.assignee } : {}) } });
+    }
+    return out;
+  }
+
+  /** Forget this board's cards in every index: it's being encrypted, reset, or rewritten. */
+  private clearIndex() {
+    this.index.clear();
+    this.ctx.waitUntil(dropBoard(this.env, this.name, ["card"]).catch((e: Error) => console.warn("search index clear failed", e.message)));
   }
 
   /** Search titles and notes. For the UI (callable), the assistant, and MCP (RPC). */
@@ -1472,9 +1521,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       this.epoch += 1;
       this.tellOwner();
     }
-    this.index.clear();
-    this.index.sync(null, next);
-    this.index.refreshVectors(next).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+    this.clearIndex();
+    this.reindex(null, next);
   }
 
   /** A new envelope for the same key, under a new passphrase. `previous` guards against two tabs racing. */
@@ -1496,7 +1544,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const { sealed: _gone, ...settings } = this.state;
     await this.swapBoard(ops.keepSettings(ops.newBoard(), settings));
     this.sql`DELETE FROM seal_meta`;
-    this.index.clear();
+    this.clearIndex();
   }
 
   /** What the upload endpoint may accept: files encrypted under `kid`, and plain ones only while turning encryption off. */
@@ -1616,7 +1664,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   private async swapBoard(next: Board) {
     this.sql`DELETE FROM history`;
     this.sql`DELETE FROM redo`;
-    this.index.clear();
+    this.clearIndex();
     this.resetTurnState();
     await this.persistMessages([], [], { _deleteStaleRows: true });
     this.setState(next);

@@ -29,6 +29,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Boards | Many per account: a registry in D1 (`boards`, `src/boards.ts`), one `TodoAgent` per board named by the board's id; the first board keeps the user's id (`// BOARDS`) |
 | Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
 | Pages and files | A `Docs` Durable Object per board (`src/docs.ts`): text pages with revisions in its SQLite, other files in R2 under `<board id>/files/<path>` (`// PAGES`) |
+| Search | Across boards: an FTS5 table in D1 (`search_fts`) for keywords, Vectorize (`VECTORS`, optional) for meaning (`src/search-all.ts`, `// SEARCH`); per board, FTS5 and a vector scan in the board's own SQLite (`src/search.ts`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
 ```
@@ -653,7 +654,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -2275,8 +2276,55 @@ address or a guess, and nothing on screen offers a change the server would refus
 
 ## // SEARCH
 
-Search covers card titles and notes (not attachments yet). It runs inside each user's
-TodoAgent (`src/search.ts`), so results never cross between users.
+There are two searches. The one people use is across everything they can reach: cards and
+pages on every board they own and every board shared with them (`src/search-all.ts`, below).
+The older one is inside a single board's TodoAgent (`src/search.ts`), which the assistant and
+the MCP `search_cards` tool still use for a board with lane and tag filters, and which ⌘K
+falls back to on an encrypted board.
+
+### Across boards
+
+- **Index:** one FTS5 table in D1, `search_fts` (migration `0010_search.sql`), with a row per
+  card and per page, keyed by board id. Each board's objects write their own rows as things
+  change: `TodoAgent.reindex` on every card change (title, notes, lane, due date, assignee),
+  `Docs` on every page write, move, and delete. A card row's `meta` holds what a hit shows
+  without going back to the board (lane, due, assignee). Encrypted boards write nothing, and
+  encrypting one drops its rows. The rows are a copy, never the source.
+- **A board that hasn't written yet:** boards from before the index existed, and any object
+  whose write failed. `search_boards` in D1 says which boards have checked their rows since
+  their object last started (the object clears its mark on start, `unmarkIndexed`). A search
+  over a board with no mark wakes it first (`ensureIndexed` → `TodoAgent.ensureSearch`,
+  `Docs.ensureSearch`): the object compares its count of rows with what it holds, rewrites
+  them all when they differ, and marks itself. That's one RPC per board per object start,
+  and one cheap D1 read per search after that.
+- **Keyword:** bm25 over the FTS5 table with titles weighted 5x, the same tokenizer and query
+  shape as the per-board search (`ftsQuery` is shared), one query with `board IN (…)` over
+  the ids the caller may see. Highlighted titles and snippets come from FTS5.
+- **Semantic:** Vectorize, when the Worker has the `VECTORS` binding. Each card and page is one
+  vector from `EMBEDDING_MODEL` (the per-board index hands its card vectors over, so a card is
+  embedded once; pages are embedded by `Docs`), with the board's id, the kind, and the ref in
+  its metadata, so a query filters to the caller's boards (`$in`). The id is a hash of the
+  ref, since Vectorize ids are 64 bytes and a path can be 200. The binding is commented out
+  in `wrangler.jsonc` until the index exists on the account (`// DEPLOY`); without it, or when
+  it fails, the result says `semantic: "unavailable"` and keyword hits stand alone, the same
+  as the per-board search without Workers AI. Vectorize has no local emulation: with the
+  binding on, local dev talks to the real index (`remote: true`), so the local checks write
+  test vectors there under throwaway board ids. Leave it off for `npm run dev:local`.
+- **Hybrid** (the default) merges both with reciprocal rank fusion, as before.
+- **Who sees what:** `reachable` lists the caller's own boards (archived left out) and the
+  shared boards they're a viewer or writer on, and every query is over those ids. A hit on a
+  card a member wrote says so: the index doesn't know, so the MCP tool asks the board
+  (`memberLine`) per card hit, the same note `search_cards` puts on a hit.
+- **Surfaces:** `GET /tasks/api/search?q=…` (`mode`, `limit`, `board` by id or name, `kind`
+  card or page) for the ⌘K box, which shows a board chip on a hit from another board and
+  opens the card there (`?card=` on the board address, read once the board is up) or the
+  page on the Pages screen (`?path=`); and the MCP `search` tool, with the same arguments,
+  whose hits name the board and the lane or the page path.
+
+### On one board
+
+The per-board search covers card titles and notes (not attachments). It runs inside the
+board's TodoAgent (`src/search.ts`), so results never cross between boards.
 
 - **Keyword:** an FTS5 table (`card_fts`) with porter stemming, prefix matches for terms
   of three or more letters, and bm25 ranking with titles weighted 5x. Common words are
@@ -2290,15 +2338,16 @@ TodoAgent (`src/search.ts`), so results never cross between users.
 - **Freshness:** every change updates the keyword index in the same step, undo
   included. Embeddings refresh in the background when a card's text changes, and any
   stale ones are refreshed before a semantic search. Moving cards costs nothing.
-- **Surfaces:** the ⌘K search box, the assistant's `search_cards` tool, and the MCP
-  `search_cards` tool. All three call `TodoAgent.search`.
+- **Surfaces:** the assistant's `search_cards` tool and the MCP `search_cards` tool, both
+  calling `TodoAgent.search`. (⌘K used to as well; it searches across boards now.)
   The two tools print each hit as exactly one line (`describeHits` in `src/tools.ts`), so
   notes with line breaks in them can't look like a second hit (`// TEAM_BOARDS`, **A row is
   one card**). The search box gets the snippet as it is and draws it as text.
 - Without Workers AI (`npm run dev:local`), search falls back to keyword matches and
   says so.
 - On an end-to-end encrypted board the server has nothing to index. The tables are emptied, and
-  ⌘K searches the decrypted board in the tab instead (`src/client/localSearch.ts`, keyword only).
+  ⌘K searches the decrypted board in the tab instead (`src/client/localSearch.ts`, keyword
+  only), and only that board.
 
 ## // ATTACHMENTS
 
@@ -2726,9 +2775,25 @@ npm run db:migrate:remote    # FIRST, whenever migrations/ changed
 npm run deploy               # vite build && wrangler deploy
 ```
 
-**Migrate before you deploy.** `0009_boards.sql` (`// BOARDS`) adds the `boards` table, which
-the new Worker reads on every socket connect, every `/api/board*` call, and every MCP call;
-deployed without it, those fail. It only adds a table, so the old Worker runs fine on top of it.
+**Migrate before you deploy.** `0010_search.sql` (`// SEARCH`) adds the `search_fts` and
+`search_boards` tables, which every board object writes on every card and page change and
+every search reads; deployed without it, those writes log a failure and searches 500.
+`0009_boards.sql` (`// BOARDS`) adds the `boards` table, which the new Worker reads on every
+socket connect, every `/api/board*` call, and every MCP call; deployed without it, those fail.
+Both only add tables, so the old Worker runs fine on top of them.
+
+**Meaning-based search across boards is off until you make the index.** Once, on the account:
+
+```sh
+npx wrangler vectorize create tasks-search --dimensions=384 --metric=cosine
+npx wrangler vectorize create-metadata-index tasks-search --property-name=board --type=string
+npx wrangler vectorize create-metadata-index tasks-search --property-name=kind --type=string
+```
+
+then uncomment the `vectorize` binding in `wrangler.jsonc` and deploy. Until then search is
+keyword-only and says so. Boards index their cards and pages the first time anyone searches
+after the deploy (`// SEARCH`, **A board that hasn't written yet**); vectors fill in as cards
+and pages change, or all at once for a board when its object next starts.
 
 Before that, four migrations went out with team boards and the admin page, in
 this order: `0005_users.sql` (the admin page's `users` table), then `0006_team_boards.sql`,

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { SearchHit, SearchResult } from "../tools";
 import { IconSearch } from "./icons";
 
-// The search box in the top bar (⌘K). Queries run in the user's agent (TodoAgent.search),
-// which mixes keyword and meaning-based matches; results open the card.
+// The search box in the top bar (⌘K). Signed in, a query runs across every board you can
+// reach, cards and pages alike (/api/search, // SEARCH); a hit says which board it's on when
+// that isn't the one on screen, and opens the card or the page where it lives. The demo and
+// an encrypted board search one board in the browser instead, with the same box.
 
 /** Render text with \u0001…\u0002 marks from the search index as <mark>. */
 function Marked({ text }: { text: string }) {
@@ -13,11 +15,13 @@ function Marked({ text }: { text: string }) {
 
 type Props = {
   search(query: string): Promise<SearchResult>;
-  onOpen(cardId: string): void;
+  onOpen(hit: SearchHit): void;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  /** The board on screen: hits on it don't name a board. */
+  here?: string;
 };
 
-export function SearchBox({ search, onOpen, inputRef }: Props) {
+export function SearchBox({ search, onOpen, inputRef, here }: Props) {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,16 +53,23 @@ export function SearchBox({ search, onOpen, inputRef }: Props) {
 
   const hits = result?.hits ?? [];
   function choose(h: SearchHit) {
-    onOpen(h.id);
+    onOpen(h);
     setOpen(false);
     inputRef.current?.blur();
   }
+  const meta = (h: SearchHit) => {
+    const bits = [h.kind === "page" ? "page" : h.lane];
+    if (h.due) bits.push(`due ${h.due}`);
+    if (h.assignee) bits.push(`assigned to ${h.assignee}`);
+    if (h.match === "semantic") bits.push("similar meaning");
+    return bits.join(" · ");
+  };
 
   return (
     <div className="search" ref={box}>
       <IconSearch />
       <input
-        ref={inputRef} type="search" value={q} placeholder="Search tasks" aria-label="Search tasks"
+        ref={inputRef} type="search" value={q} placeholder="Search" aria-label="Search cards and pages"
         role="combobox" aria-expanded={open && !!q.trim()} aria-controls="search-results"
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
@@ -73,15 +84,21 @@ export function SearchBox({ search, onOpen, inputRef }: Props) {
       {open && q.trim() && (
         <div className="search-results popover" id="search-results" role="listbox">
           {busy && !result && <div className="search-note">searching</div>}
-          {result && hits.length === 0 && <div className="search-note">No cards match “{q.trim()}”.</div>}
+          {result && hits.length === 0 && <div className="search-note">Nothing matches “{q.trim()}”.</div>}
           {hits.map((h, i) => (
             <button
-              key={h.id} role="option" aria-selected={i === active} className="search-hit"
+              key={`${h.board ?? ""}/${h.kind ?? "card"}/${h.id}`} role="option" aria-selected={i === active} className="search-hit"
               onMouseEnter={() => setActive(i)} onClick={() => choose(h)}
             >
-              <span className="search-title"><Marked text={h.title} /></span>
+              <span className="search-title">
+                {h.kind === "page" && <span className="search-kind">page</span>}
+                <Marked text={h.title} />
+              </span>
               {h.snippet && <span className="search-snippet">…<Marked text={h.snippet} />…</span>}
-              <span className="search-meta">{h.lane}{h.due ? ` · due ${h.due}` : ""}{h.match === "semantic" ? " · similar meaning" : ""}</span>
+              <span className="search-meta">
+                {h.board && h.board !== here && h.boardName && <span className="chip board-chip" title={h.boardName}>{h.boardName}</span>}
+                {h.kind === "page" ? h.id : meta(h)}
+              </span>
             </button>
           ))}
           {result?.semantic === "unavailable" && <div className="search-note">Showing keyword matches only.</div>}

@@ -132,6 +132,11 @@ export type SearchHit = {
   match: "keyword" | "semantic" | "both";
   /** What a member put on the card, as one line (memberNote in shared.ts). Left off a card that's all the owner's. */
   member?: string;
+  /** From the cross-board search (search-all.ts): which board, and whether the hit is a card (id is its id) or a page (id is its path). */
+  board?: string;
+  boardName?: string;
+  kind?: "card" | "page";
+  assignee?: string;
 };
 export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
 

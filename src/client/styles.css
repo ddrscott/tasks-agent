@@ -392,7 +392,9 @@ kbd {
 .search-hit[aria-selected="true"] { background: var(--surface-2); }
 .search-title { font-size: 14px; font-weight: 500; }
 .search-snippet { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.search-meta { font: 11px var(--font-mono); color: var(--muted); }
+.search-meta { font: 11px var(--font-mono); color: var(--muted); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.search-meta .board-chip { font-size: 10px; padding: 0 5px; line-height: 16px; }
+.search-kind { font: 10px var(--font-mono); color: var(--accent); margin-right: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
 .search mark, .search-results mark { background: var(--accent-soft); color: inherit; border-radius: 2px; padding: 0 1px; }
 .search-note { padding: 8px 10px; font: 12px var(--font-mono); color: var(--muted); }
 .topbar .spacer { flex: 1; }

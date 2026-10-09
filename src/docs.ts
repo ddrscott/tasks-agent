@@ -22,6 +22,7 @@ import { currentUser, type User } from "./auth";
 import { ownedBoard } from "./boards";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
+import { countIndexed, dropBoard, dropEntries, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors } from "./search-all";
 
 const MB = 1024 * 1024;
 /** The most text a page holds; longer content is a file, stored as bytes. */
@@ -83,6 +84,11 @@ const etagOf = async (bytes: Uint8Array): Promise<string> => {
 };
 const utf8 = new TextEncoder();
 const now = () => new Date().toISOString();
+/** What a page is called in search hits: its first Markdown heading, else its file name. */
+export function titleOf(path: string, text: string): string {
+  const h = text.match(/^#{1,6}[ \t]+(.+?)[ \t#]*$/m);
+  return (h?.[1] ?? path.split("/").pop() ?? path).slice(0, 200);
+}
 
 export class Docs extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -102,6 +108,49 @@ export class Docs extends DurableObject<Env> {
     // Every change, in order, so a reader can ask "what changed since seq N".
     this.sql.exec(`CREATE TABLE IF NOT EXISTS log (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, action TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, etag TEXT)`);
+    // The next search over this board asks it to check its pages are in the cross-board index (ensureSearch).
+    if (this.board) this.ctx.waitUntil(unmarkIndexed(env, this.board, "page").catch((e: Error) => console.warn("search unmark failed", e.message)));
+  }
+
+  /**
+   * Check this board's pages are in the cross-board index (search-all.ts), and put them all in
+   * when the count is off: pages from before the index existed, or a write that failed. A
+   * search calls this once per start of this object (ensureIndexed); then D1 says it's done.
+   */
+  async ensureSearch(): Promise<void> {
+    if (!this.board) return;
+    const pages = this.allPages();
+    if ((await countIndexed(this.env, this.board, "page")) !== pages.length) {
+      await resetEntries(this.env, this.board, "page", pages.map((p) => ({ kind: "page" as const, ref: p.path, title: titleOf(p.path, p.text), body: p.text })));
+      if (this.env.VECTORS) await this.indexPages(pages);
+    }
+    await markIndexed(this.env, this.board, "page");
+  }
+
+  /** The board this tree belongs to: the object is named by the board's id. */
+  private get board(): string {
+    return this.ctx.id.name ?? "";
+  }
+
+  /** Put pages in the cross-board search (search-all.ts): keyword rows, then a vector each. Failures are logged, not thrown. */
+  private async indexPages(pages: { path: string; text: string }[]): Promise<void> {
+    if (!pages.length || !this.board) return;
+    try {
+      await indexEntries(this.env, this.board, pages.map((p) => ({ kind: "page" as const, ref: p.path, title: titleOf(p.path, p.text), body: p.text })));
+      if (!this.env.VECTORS) return;
+      const vecs = await embed(this.env, pages.map((p) => `${titleOf(p.path, p.text)}\n${p.text}`));
+      await upsertVectors(this.env, this.board, pages.map((p, i) => ({ kind: "page" as const, ref: p.path, vec: vecs[i] })));
+    } catch (e) {
+      console.warn("indexing pages failed", (e as Error).message);
+    }
+  }
+  private unindex(paths: string[]) {
+    if (this.board) this.ctx.waitUntil(dropEntries(this.env, this.board, "page", paths).catch((e: Error) => console.warn("unindexing a page failed", e.message)));
+  }
+
+  /** Take every page of this board out of the search index (the board is being removed). */
+  forgetSearch(): void {
+    if (this.board) this.ctx.waitUntil(dropBoard(this.env, this.board, ["page"]).catch((e: Error) => console.warn("forgetting a board's pages failed", e.message)));
   }
 
   private row(path: string): Row | null {
@@ -174,6 +223,7 @@ export class Docs extends DurableObject<Env> {
       this.sql.exec("INSERT INTO pages (path, text) VALUES (?, ?)", path, text);
     }
     this.logIt(path, "put", by, etag);
+    this.ctx.waitUntil(this.indexPages([{ path, text }]));
     return { ok: true, info: this.info(this.row(path)!), created: !was };
   }
 
@@ -186,6 +236,7 @@ export class Docs extends DurableObject<Env> {
     if (was) {
       this.sql.exec("UPDATE files SET size = ?, type = ?, etag = ?, is_page = 0, updated_at = ?, updated_by = ? WHERE path = ?", size, type, etag, at, by, path);
       this.sql.exec("DELETE FROM pages WHERE path = ?", path);
+      if (was.is_page) this.unindex([path]);
     } else {
       this.sql.exec("INSERT INTO files (path, size, type, etag, is_page, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)", path, size, type, etag, at, by, at, by);
     }
@@ -202,6 +253,7 @@ export class Docs extends DurableObject<Env> {
       const old = this.sql.exec<{ text: string }>("SELECT text FROM pages WHERE path = ?", path).toArray()[0]?.text ?? "";
       this.sql.exec("INSERT INTO revisions (path, etag, at, by, size, text) VALUES (?, ?, ?, ?, ?, ?)", path, was.etag, was.updated_at, was.updated_by, was.size, old);
       this.sql.exec("DELETE FROM pages WHERE path = ?", path);
+      this.unindex([path]);
     }
     this.sql.exec("DELETE FROM files WHERE path = ?", path);
     this.logIt(path, "delete", by, null);
@@ -219,6 +271,11 @@ export class Docs extends DurableObject<Env> {
     this.sql.exec("UPDATE revisions SET path = ? WHERE path = ?", to, from);
     this.logIt(from, "delete", by, null);
     this.logIt(to, "move", by, was.etag);
+    if (was.is_page) {
+      this.unindex([from]);
+      const text = this.sql.exec<{ text: string }>("SELECT text FROM pages WHERE path = ?", to).toArray()[0]?.text;
+      if (text !== undefined) this.ctx.waitUntil(this.indexPages([{ path: to, text }]));
+    }
     return { ok: true, info: this.info(this.row(to)!) };
   }
 

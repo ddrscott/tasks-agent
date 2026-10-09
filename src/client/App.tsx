@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import type { TodoAgent } from "../agent";
 import type { Usage } from "../billing";
 import { keyProof, type BoardKey } from "../sealed";
+import type { SearchHit, SearchResult } from "../tools";
 import { clean, doneLaneId, markOf, memberTouch, splitTitleTags, tagsByUse, tidyTags, todoLaneId, type Board, type Card } from "../shared";
 import { api, BASE } from "./base";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
@@ -67,8 +68,11 @@ export function App() {
     scrollTo(0, 0);
   }, []);
   /** A board's pages (// PAGES). */
-  const goPages = useCallback((board: string | null) => {
-    history.pushState(null, "", `${BASE}/pages${board ? `?board=${board}` : ""}`);
+  const goPages = useCallback((board: string | null, path?: string) => {
+    const q = new URLSearchParams();
+    if (board) q.set("board", board);
+    if (path) q.set("path", path);
+    history.pushState(null, "", `${BASE}/pages${q.size ? `?${q}` : ""}`);
     setPage("pages");
     scrollTo(0, 0);
   }, []);
@@ -146,7 +150,7 @@ function takeFlash(): string | null {
  * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
  * saying so, and nothing keeps knocking on a board that won't open.
  */
-function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null): void }) {
+function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null, path?: string): void }) {
   const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
   const [access, setAccess] = useState<MemberAccess | null>(null);
   /** The board in the address when it's another board of yours (// BOARDS): opened as its owner, not as a member. */
@@ -206,8 +210,12 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: 
     return () => { off = true; clearTimeout(timer); };
   }, [boardId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const switchTo = useCallback((board: string | null) => {
-    history.pushState(null, "", board ? `${BASE}/?board=${board}` : `${BASE}/`);
+  // `card` opens that card once the board is up (Workspace reads it from the address): a search hit on another board.
+  const switchTo = useCallback((board: string | null, card?: string) => {
+    const q = new URLSearchParams();
+    if (board) q.set("board", board);
+    if (card) q.set("card", card);
+    history.pushState(null, "", `${BASE}/${q.size ? `?${q}` : ""}`);
     setAccess(null);
     setOwn(null);
     setBoardId(board);
@@ -229,7 +237,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages }: { me: 
 }
 
 type WorkspaceProps = {
-  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null): void;
+  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null, path?: string): void;
   /** Open the admin page. The menu only offers it to an admin, and only on their own board. */
   onAdmin(): void;
   /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
@@ -237,7 +245,7 @@ type WorkspaceProps = {
   /** Another board of your own, when it's the one on screen (// BOARDS). Null on your first board and on a shared one. */
   own: string | null;
   boards: Boards | null;
-  onSwitch(board: string | null): void;
+  onSwitch(board: string | null, card?: string): void;
   /** The shared board is gone for this account (removed, left, encrypted): go back to your own, and say why. `unsaved` is whatever was being typed there. */
   onLost(why: string, unsaved?: Kept[]): void;
   /** Read the list of boards again. */
@@ -829,10 +837,32 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, shared, 
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  const searchCards = useCallback(async (query: string) => {
+  // The search box looks across every board you can reach, cards and pages (// SEARCH). An
+  // encrypted board is searched in the browser, and only it: the server holds none of its words.
+  const searchCards = useCallback(async (query: string): Promise<SearchResult> => {
     if (rawRef.current?.sealed) return boardRef.current ? localSearch(boardRef.current, query) : { hits: [], semantic: "off" as const };
-    return agent.stub.search({ query, limit: 12 });
-  }, [agent]);
+    const r = await fetch(api(`/api/search?q=${encodeURIComponent(query)}&limit=12`));
+    if (!r.ok) throw new Error(`search failed: ${r.status}`);
+    return (await r.json()) as SearchResult;
+  }, []);
+  const here = shared?.board ?? own ?? me.id;
+  /** A search hit: a card on this board opens here; one on another board opens there; a page opens the Pages screen on it. */
+  const openHit = useCallback((h: SearchHit) => {
+    const board = h.board ?? here;
+    if (h.kind === "page") { onPages(board === me.id ? null : board, h.id); return; }
+    if (board === here) { setEditing(h.id); return; }
+    onSwitch(board === me.id ? null : board, h.id);
+  }, [here, me.id, onPages, onSwitch]);
+  // Opened from a search hit on another board (switchTo): the card named in the address, once the board is up.
+  useEffect(() => {
+    if (!board) return;
+    const q = new URLSearchParams(location.search);
+    const c = q.get("card");
+    if (!c) return;
+    q.delete("card");
+    history.replaceState(null, "", `${location.pathname}${q.size ? `?${q}` : ""}`);
+    if (board.cards.some((x) => x.id === c)) setEditing(c);
+  }, [!!board]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onBusy = useCallback((b: boolean) => {
     agentBusy.current = b;
@@ -903,7 +933,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, shared, 
             </button>
           )}
           <span className="spacer" />
-          <SearchBox search={searchCards} onOpen={setEditing} inputRef={searchInput} />
+          <SearchBox search={searchCards} onOpen={openHit} inputRef={searchInput} here={here} />
           <div className="actions">
             {/* Undo, questions, and the cloud assistant are the owner's. On someone else's board they aren't drawn. */}
             {!member && (
