@@ -1065,8 +1065,16 @@ the owner's.
   first, and acts where it finds it; a call that adds something goes to the first board; and
   `get_board` shows every unarchived board, each under `# <name> (board <id>)`, with a line
   at the end saying how to reach cards on the others. One board alone reads exactly as it did
-  before, headings and all left out. Claims are per board. A request marks every board it
-  reached as having seen an agent (`noteAgentSeen`).
+  before, headings and all left out. Claims are per board. A request marks every board of
+  yours it reached as having seen an agent (`noteAgentSeen`).
+- **A board shared with you, over MCP.** `list_boards` lists those too, with whose they are and
+  your role, and `board` takes their name, their owner's email, or their id. There your agent
+  is you, a member: `get_board`, `get_card`, and `search_cards` read as a member reads, and the
+  board tools run as you under the write guard (`TodoAgent.runToolAs`, the same `asUser` path a
+  member's browser takes), so a viewer's agent changes nothing and a writer's can't touch lanes,
+  the owner's tags, or the owner's agent cards, and its cards carry the member's mark. Claims,
+  `ask_ceo`, and `wait_for_answer` are the owner's there and say so in words (`NOT_YOURS`).
+  `get_board` with no board lists shared boards after your own, each headed with whose it is.
 - **The event feed** is one per account and carries every board the account owns: the hello
   lists each board's open agent cards with `board` and `boardName` on each, and every event
   after it carries `board` (`TodoAgent.publish`).

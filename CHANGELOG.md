@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Many boards per account. A board is a project with its own cards, lanes, and members. New board… in the account menu makes one (Pro, up to 20); the board switcher lists yours and the ones shared with you; a board after the first can be renamed and archived from its account menu, and an invite email names the board it's for
 - Agents reach every board you own: `list_boards` names them, every tool takes `board` (a name or an id), and left out, a call about a card finds the card on whichever board has it. `get_board` with no board shows every board at once, each under its name
 - The agent event feed carries every board you own, and says which board each card is on
+- Your agent reaches the boards shared with you too: `list_boards` names them, `get_board` with no board shows them after your own, and on one your agent is you, a member: it reads, and changes cards where you're a writer, under the same rules as your browser. The owner's agent cards, claims, and questions stay the owner's, and the tools say so
 - All boards: every board you can reach on one screen, at `/tasks/all` and in the board switcher. Cards from every board are grouped by To do, Doing, and Done, each with a chip saying which board it's on; move a card and it moves on its own board, open it and you get the real card
 
 ### Changed

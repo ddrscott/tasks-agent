@@ -767,8 +767,8 @@ export type SharedBoard = { board: string; name: string; ownerEmail: string; rol
 /** A board of yours after the first (boards.ts). */
 export type OwnBoard = { board: string; name: string; createdAt: number | null; archived: boolean };
 
-/** Every board this account can reach: its first board, the rest of its own, and the ones shared with it. */
-async function boards(env: Env, user: User): Promise<Response> {
+/** The boards shared with this account, with what each is worth right now. The app's switcher and the MCP server (list_boards) both read it. */
+export async function sharedBoards(env: Env, user: User): Promise<SharedBoard[]> {
   const { results } = await env.DB.prepare(
     "SELECT owner_id, owner_email, role, accepted_at FROM board_members WHERE member_id = ? AND member_email = ? AND status = 'accepted' ORDER BY accepted_at LIMIT 50",
   ).bind(user.id, user.email).all<Pick<MemberRow, "owner_id" | "owner_email" | "role" | "accepted_at">>();
@@ -780,6 +780,12 @@ async function boards(env: Env, user: User): Promise<Response> {
     const d = decide({ isOwner: false, membership: r.role, plan, sealed: false });
     shared.push({ board: r.owner_id, name: b?.name ?? "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
   }
+  return shared;
+}
+
+/** Every board this account can reach: its first board, the rest of its own, and the ones shared with it. */
+async function boards(env: Env, user: User): Promise<Response> {
+  const shared = await sharedBoards(env, user);
   const mine: OwnBoard[] = (await ownedBoards(env, user, true)).filter((b) => !b.first).map((b) => ({ board: b.id, name: b.name, createdAt: b.createdAt, archived: b.archivedAt !== null }));
   return json({ own: { board: user.id, email: user.email, plan: await planFor(env, user.id) }, mine, shared });
 }

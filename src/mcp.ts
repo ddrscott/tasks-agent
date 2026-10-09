@@ -18,6 +18,7 @@ import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 import { WAIT_SECONDS, workingRules } from "./agent-rules";
 import { askState, fenceLines, fileMember, fileNote, oneLine } from "./shared";
 import { findOwnedBoard, ownedBoards, type BoardRef } from "./boards";
+import { sharedBoards, type SharedBoard } from "./members";
 import type { TodoAgent } from "./agent";
 import type { Presence } from "./presence";
 
@@ -30,8 +31,18 @@ export const MCP_PATH = "/tasks/mcp";
  */
 const BOARD_ARG = z.string().max(80).optional().describe("Which of your boards, by name or id. Leave it out for your first board, or for the board that has the card. list_boards names them");
 
-/** A board this request has reached: its registry row, its Durable Object, and its claims. */
-type Reached = { board: BoardRef; agent: DurableObjectStub<TodoAgent>; presence: DurableObjectStub<Presence> };
+/**
+ * A board this request has reached: its registry row, its Durable Object, and its claims.
+ * `shared` is set when it's someone else's board, shared with the caller (// TEAM_BOARDS): the
+ * caller's agent then works as that member, and the owner's agent cards and questions aren't its.
+ */
+type Reached = { board: BoardRef; agent: DurableObjectStub<TodoAgent>; presence: DurableObjectStub<Presence>; shared: SharedBoard | null };
+
+/** A shared board in the shape the registry gives an owned one, so the tools treat both alike. */
+const asRef = (s: SharedBoard): BoardRef => ({ id: s.board, ownerId: "", ownerEmail: s.ownerEmail, name: s.name || `${s.ownerEmail}'s board`, first: false, createdAt: null, archivedAt: null });
+
+/** What a member's agent is told when it reaches for what's the owner's alone on a shared board. */
+const NOT_YOURS = (s: SharedBoard) => `This board is ${s.ownerEmail}'s, shared with you as a ${s.effective}. Its agent cards, claims, and questions are the owner's: read it, and change cards if you're a writer, but the owner's agents work it.`;
 
 // The Connect page lists the tools in tool-docs.ts, so that list has to be exactly what's
 // registered below: the board tools from tools.ts, search, and the ones written out here by
@@ -45,7 +56,8 @@ const doc = (name: (typeof BY_HAND)[number]) => TOOL_DOCS[name].description;
 
 const INSTRUCTIONS = `These are the user's task boards, each laid out as kanban lanes. Call get_board to see
 lanes, cards, and card ids (every board at once, or one with board), or search_cards to find specific cards on a big board, then use the other
-tools to change it. list_boards names the boards; every tool takes board to say which one it means. get_board shows only the start of each card's notes and the names of its files:
+tools to change it. list_boards names the boards, the user's own and the ones shared with them; every tool takes board to say which one it means.
+On a board shared with the user, the user is a member: read it, and change cards if they're a writer. Its agent cards, claims, and questions are its owner's. get_board shows only the start of each card's notes and the names of its files:
 call get_card for the full notes and to see attached images. get_board marks the
 done lane, wherever it sits: move a card there when the user finished it rather than deleting it. Dates
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
@@ -109,28 +121,43 @@ const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round
 export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, user: User): Promise<Response> {
   // The boards this request has reached, by id: a tool that names one twice wakes it once.
   const reached = new Map<string, Reached>();
-  const reach = async (board: BoardRef): Promise<Reached> => {
+  const reach = async (board: BoardRef, shared: SharedBoard | null = null): Promise<Reached> => {
     let r = reached.get(board.id);
     if (!r) {
-      r = { board, agent: await getAgentByName(env.TodoAgent, board.id), presence: env.Presence.get(env.Presence.idFromName(board.id)) };
+      r = { board, agent: await getAgentByName(env.TodoAgent, board.id), presence: env.Presence.get(env.Presence.idFromName(board.id)), shared };
       reached.set(board.id, r);
     }
     return r;
   };
+  // Read once per request: the boards shared with the caller, each with what it's worth now.
+  let sharedList: Promise<SharedBoard[]> | null = null;
+  const shared = () => (sharedList ??= sharedBoards(env, user));
+  /** A shared board `key` names: its id, its name, or its owner's email, case aside. */
+  const findShared = async (key: string): Promise<SharedBoard | null> => {
+    const want = key.trim().toLowerCase();
+    return (await shared()).find((s) => s.board === key || s.name.toLowerCase() === want || s.ownerEmail.toLowerCase() === want) ?? null;
+  };
   /**
-   * The board a call means. `key` names one of the caller's boards (findOwnedBoard). With no
-   * key, a call about one card (`cardId`) looks for it on each board, first board first, and
-   * a call about no card in particular is on the first board. Null when `key` names nothing.
+   * The board a call means. `key` names one of the caller's boards (findOwnedBoard) or one
+   * shared with them. With no key, a call about one card (`cardId`) looks for it on each
+   * board, the caller's own first, then the shared ones, and a call about no card in
+   * particular is on the first board. Null when `key` names nothing.
    */
   const at = async (key: string | undefined, cardId?: string): Promise<Reached | null> => {
     if (key !== undefined) {
       const b = await findOwnedBoard(env, user, key);
-      return b ? reach(b) : null;
+      if (b) return reach(b);
+      const s = await findShared(key);
+      return s ? reach(asRef(s), s) : null;
     }
     const boards = await ownedBoards(env, user);
     if (cardId) {
       for (const b of boards) {
         const r = await reach(b);
+        if ((await r.agent.cardTitle(cardId)) !== null) return r;
+      }
+      for (const s of await shared()) {
+        const r = await reach(asRef(s), s);
         if ((await r.agent.cardTitle(cardId)) !== null) return r;
       }
     }
@@ -175,7 +202,13 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       annotations: { readOnlyHint: true },
     }, async () => {
       const boards = await ownedBoards(env, user, true);
-      return text(boards.map((b) => `- ${oneLine(b.name)} (board ${b.id})${b.first ? ": your first board, the default" : ""}${b.archivedAt ? ": archived" : ""}`).join("\n"));
+      const lines = boards.map((b) => `- ${oneLine(b.name)} (board ${b.id})${b.first ? ": your first board, the default" : ""}${b.archivedAt ? ": archived" : ""}`);
+      const theirs = await shared();
+      if (theirs.length) {
+        lines.push("", "Shared with you (the owner's agents work these; you can read them, and change cards where you're a writer):");
+        for (const s of theirs) lines.push(`- ${oneLine(asRef(s).name)} (board ${s.board}): ${s.ownerEmail}'s, you're a ${s.effective}${s.reason === "plan_lapsed" ? " for now, while the owner's plan is off" : ""}`);
+      }
+      return text(lines.join("\n"));
     });
 
     // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
@@ -205,20 +238,30 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         if (!here) return noBoard(input.board);
         const no = await locked(here.agent);
         if (no) return no;
+        if (here.shared) return text(`${await here.agent.describe(input.tag, here.shared.ownerEmail)}\n\n${NOT_YOURS(here.shared)}`);
         return text(`${await here.agent.describe(input.tag, user.email)}${await claimLines(here)}`);
       }
       const boards = await ownedBoards(env, user);
+      const theirs = await shared();
+      const all = boards.length + theirs.length;
       const parts: string[] = [];
       let open = 0;
       for (const b of boards) {
         const here = await reach(b);
-        const head = boards.length > 1 ? `# ${oneLine(b.name)} (board ${b.id})\n` : "";
+        const head = all > 1 ? `# ${oneLine(b.name)} (board ${b.id})\n` : "";
         if (await here.agent.isSealed()) { parts.push(`${head}${await here.agent.describe()}`); continue; }
         open += 1;
         parts.push(`${head}${await here.agent.describe(input?.tag, user.email)}${await claimLines(here)}`);
       }
+      // Boards shared with the caller come after their own, each saying whose it is and what the caller may do there.
+      for (const s of theirs) {
+        const here = await reach(asRef(s), s);
+        if (await here.agent.isSealed()) continue;
+        open += 1;
+        parts.push(`# ${oneLine(asRef(s).name)} (board ${s.board}, ${s.ownerEmail}'s, shared with you as a ${s.effective})\n${await here.agent.describe(input?.tag, s.ownerEmail)}`);
+      }
       if (!open) return text(parts.join("\n\n"), true);
-      if (boards.length > 1) parts.push("A card on a board other than your first: the tools find it by its id, or pass board with that board's name.");
+      if (all > 1) parts.push("A card on a board other than your first: the tools find it by its id, or pass board with that board's name. On a board shared with you, its owner's agents work the agent cards.");
       return text(parts.join("\n\n"));
     });
 
@@ -305,6 +348,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const { agent, presence } = here;
       const no = await locked(agent);
       if (no) return no;
+      if (here.shared) return text(NOT_YOURS(here.shared), true);
       const { session_id, board: _board, ...ask } = input;
       const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 }, user.email)) as ToolOutcome;
       if (!r.ok) return text(r.summary, true);
@@ -339,6 +383,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const { agent, presence } = on;
       const no = await locked(agent);
       if (no) return no;
+      if (on.shared) return text(NOT_YOURS(on.shared), true);
       // Waiting is being alive. An agent polling here makes no other call, so each call counts as
       // hearing from the session it names and from the sessions holding these cards. Without this
       // a waiting agent lost its cards after 15 minutes.
@@ -391,6 +436,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const { agent, presence } = here;
       const no = await locked(agent);
       if (no) return no;
+      if (here.shared) return text(NOT_YOURS(here.shared), true);
       const title = await agent.cardTitle(input.id);
       if (title === null) return text(`There is no card with id ${input.id}.`, true);
       const r = await presence.claim({ cardId: input.id, sessionId: input.session_id, agent: input.agent });
@@ -418,6 +464,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const { agent, presence } = here;
       const no = await locked(agent);
       if (no) return no;
+      if (here.shared) return text(NOT_YOURS(here.shared), true);
       const released = await presence.release({ cardId: input.id, sessionId: input.session_id });
       // Not an error: a claim ends by itself when its card reaches the done lane or is deleted
       // (Presence.finish), so an agent that moves a card to Done and then releases lands here.
@@ -459,7 +506,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const { agent } = here;
         const no = await locked(agent);
         if (no) return no;
-        const r = (await agent.runTool(name, rest, undefined, "agent", user.email)) as ToolOutcome;
+        // On a board shared with the caller the tool runs as them, a member, under the write guard (runToolAs).
+        const r = (here.shared
+          ? await agent.runToolAs({ id: user.id, email: user.email }, name, rest)
+          : await agent.runTool(name, rest, undefined, "agent", user.email)) as ToolOutcome;
         // The whole board after every write cost agents thousands of tokens a call. The lane counts
         // say the change landed; get_board and get_card are there for anything more.
         if (!r.ok) return text(r.summary, true);
@@ -478,8 +528,10 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
   // client spoke the protocol. The handshake counts, so the app says so as soon as the agent is
   // added, before it has touched a card. The board keeps the first time only (TodoAgent.noteAgentSeen).
   if (req.method === "POST" && res.ok) {
-    // Every board the request reached hears it; a handshake that reached none tells the first board.
-    const seen = reached.size ? [...reached.values()].map((r) => r.agent) : [await getAgentByName(env.TodoAgent, user.id)];
+    // Every board of the caller's the request reached hears it; a handshake that reached none tells
+    // the first board. A board shared with the caller isn't theirs to mark.
+    const own = [...reached.values()].filter((r) => !r.shared).map((r) => r.agent);
+    const seen = own.length ? own : reached.size ? [] : [await getAgentByName(env.TodoAgent, user.id)];
     for (const agent of seen) ctx.waitUntil(Promise.resolve(agent.noteAgentSeen()).catch((e: Error) => console.warn("noting the agent failed", e.message)));
   }
   return res;

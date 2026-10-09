@@ -1187,6 +1187,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   }
 
   /**
+   * A member's agent over MCP (mcp.ts): the tool runs as that member, under the same write
+   * guard their browser's calls go through (asUser), so a viewer's agent changes nothing and a
+   * writer's can't touch lanes, the owner's tags, or the owner's agent cards. The change is
+   * stamped as that member's, made by an agent.
+   */
+  runToolAs(who: { id: string; email: string }, name: ToolName, input: unknown): Promise<ToolOutcome> {
+    return this.asUser(who, "agent", () => this.runTool(name, input, undefined, "agent", who.email));
+  }
+
+  /**
    * An outside agent just made a call over MCP (mcp.ts). The first one is remembered on the
    * board, which is what takes "No agent connected yet" off every open tab. It's a setting, not
    * a change: no undo step, no event on the feed, and no card moves or flashes. Every call after

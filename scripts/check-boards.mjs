@@ -138,6 +138,39 @@ ok("the first board doesn't have it", wrongBoard?.status === 404, wrongBoard?.st
 const withFile = await mcp(T, "get_card", { id });
 ok("MCP get_card shows the file's text from the right prefix", withFile.text.includes("hello from the smoke test"), withFile);
 
+// The member's own agent reaches the board over MCP, as the member (// BOARDS, // TEAM_BOARDS).
+const mtok = await call(member, "POST", "/api/tokens", { name: "smoke member" });
+const M = mtok.data.token;
+const mlist = await mcp(M, "list_boards");
+ok("MCP list_boards shows a board shared with you, with the role", !mlist.isError && mlist.text.includes(`Shop API (board ${B}): ${owner.email}'s, you're a writer`), mlist);
+const mall = await mcp(M, "get_board");
+ok("MCP get_board with no board includes the shared board after your own", !mall.isError && mall.text.includes(`# My board (board ${member.id})`) && mall.text.includes(`# Shop API (board ${B}, ${owner.email}'s, shared with you as a writer)`) && mall.text.includes("Boards smoke card 2"), mall);
+const mone = await mcp(M, "get_board", { board: owner.email });
+ok("MCP get_board by the owner's email, with the member note", !mone.isError && mone.text.includes("Boards smoke card 2") && mone.text.includes("shared with you as a writer"), mone);
+const madd = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "From the member's agent" }] });
+const mid = /ids, in the order given: (c[a-z0-9]{4})/.exec(madd.text)?.[1];
+ok("a writer's agent adds a card to the shared board", !madd.isError && !!mid, madd);
+const marked = await mcp(T, "get_card", { id: mid });
+ok("and the owner's agent sees it as the member's words", !marked.isError && marked.text.includes(member.email), marked);
+const mtag = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "Sneaky", tags: ["agent"] }] });
+ok("a member's agent can't use the owner's tags", mtag.isError && /agent/.test(mtag.text), mtag);
+const mclaim = await mcp(M, "claim_card", { id, session_id: "tasks-member01", agent: "smoke" });
+ok("a member's agent can't claim on a shared board", mclaim.isError && mclaim.text.includes("the owner's"), mclaim);
+const mask = await mcp(M, "ask_ceo", { id, question: "May I?", options: ["Yes", "No"] });
+ok("or ask a question there", mask.isError && mask.text.includes("the owner's"), mask);
+const mlane = await mcp(M, "add_lane", { board: "Shop API", name: "Theirs" });
+ok("or add a lane", mlane.isError, mlane);
+const mcard = await mcp(M, "get_card", { id });
+ok("a member's agent reads a card by id with no board named", !mcard.isError && mcard.text.includes("Boards smoke card 2"), mcard);
+const demote = await call(owner, "POST", "/api/board/members/role", { board: B, email: member.email, role: "viewer" });
+ok("the owner makes the member a viewer", demote.status === 200, demote.data);
+const vadd = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "Still trying" }] });
+ok("a viewer's agent changes nothing", vadd.isError && /view/i.test(vadd.text), vadd);
+const vread = await mcp(M, "get_board", { board: B });
+ok("but still reads", !vread.isError && vread.text.includes("Boards smoke card 2"), vread);
+const nope2 = await mcp(M, "get_board", { board: "My board" });
+ok("'My board' is the member's own first board, not the owner's", !nope2.isError && !nope2.text.includes("Boards smoke card 2"), nope2);
+
 const ren = await call(owner, "POST", "/api/boards/rename", { board: B, name: "Shop API v2" });
 ok("rename", ren.status === 200 && ren.data.board.name === "Shop API v2", ren.data);
 const arch = await call(owner, "POST", "/api/boards/archive", { board: B });
