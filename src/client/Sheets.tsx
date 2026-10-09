@@ -302,7 +302,7 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
   return (
     <div className="app">
       <div className="main">
-        <header className="topbar">
+        <header className="topbar pages-bar">
           <h1 className="wordmark">tasks<span>.</span></h1>
           <button className="btn" onClick={onBoard} title="Back to the board">← {name}</button>
           <span className="pages-crumb">worksheets</span>

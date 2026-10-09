@@ -1359,8 +1359,11 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
 .pages-note.error { border-color: var(--accent); }
 .pages-revisions { display: flex; flex-direction: column; gap: 2px; border: var(--border-w) solid var(--line); background: var(--surface); padding: 8px; max-width: 520px; }
 @media (max-width: 760px) {
-  .pages { grid-template-columns: 1fr; }
+  /* One column, rows at their own height (not stretched to fill the screen), and a header that wraps instead of clipping. */
+  .pages { grid-template-columns: 1fr; align-content: start; }
   .pages-list { max-height: 40dvh; }
+  .pages-crumb { display: none; }
+  .topbar.pages-bar { flex-wrap: wrap; row-gap: 6px; }
 }
 
 /* Worksheets (Sheets.tsx, // WORKSHEETS): a grid of typed cells, JetBrains Mono for the data, hard edges. */
