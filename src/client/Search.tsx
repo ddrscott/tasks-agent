@@ -58,7 +58,7 @@ export function SearchBox({ search, onOpen, inputRef, here }: Props) {
     inputRef.current?.blur();
   }
   const meta = (h: SearchHit) => {
-    const bits = [h.kind === "page" ? "page" : h.lane];
+    const bits = [h.kind === "page" ? "page" : h.kind === "row" ? `row in ` : h.lane];
     if (h.due) bits.push(`due ${h.due}`);
     if (h.assignee) bits.push(`assigned to ${h.assignee}`);
     if (h.match === "semantic") bits.push("similar meaning");
@@ -92,6 +92,7 @@ export function SearchBox({ search, onOpen, inputRef, here }: Props) {
             >
               <span className="search-title">
                 {h.kind === "page" && <span className="search-kind">page</span>}
+                {h.kind === "row" && <span className="search-kind">row</span>}
                 <Marked text={h.title} />
               </span>
               {h.snippet && <span className="search-snippet">…<Marked text={h.snippet} />…</span>}

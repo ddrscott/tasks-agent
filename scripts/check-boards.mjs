@@ -426,6 +426,15 @@ ok("a member's agent queries the shared board's worksheets", !mq.isError && mq.t
 const mwRow = await mcp(M, "write_rows", { board: "Shop API", sheet: "Budget", rows: [{ Line: "CDN", Cost: 3 }] });
 ok("a writer's agent adds a row", !mwRow.isError && mwRow.text.includes("Added 1 row"), mwRow);
 
+// Worksheet rows are in search (// SEARCH, kind row), written after each change.
+await new Promise((r) => setTimeout(r, 800));
+const sr = await call(owner, "GET", "/api/search?q=hosting&kind=row");
+const rowHit = sr.data?.hits?.find((h) => h.kind === "row");
+ok("a worksheet row is found by a cell's words, naming its sheet", sr.status === 200 && rowHit?.lane === "Budget" && /^s[a-z0-9]{5}\/\d+$/.test(rowHit.id) && rowHit.title.includes("Hosting"), sr.data);
+ok("a deleted row is gone from search", !(await call(owner, "GET", "/api/search?q=domain&kind=row")).data?.hits?.some((h) => h.kind === "row" && h.title.includes("Domain")));
+const msr = await mcp(T, "search", { query: "hosting", kind: "row" });
+ok("MCP search lists a row hit with its worksheet", !msr.isError && /- row \d+ of worksheet Budget/.test(msr.text), msr);
+
 const demote = await call(owner, "POST", "/api/board/members/role", { board: B, email: member.email, role: "viewer" });
 ok("the owner makes the member a viewer", demote.status === 200, demote.data);
 const vadd = await mcp(M, "add_cards", { board: "Shop API", cards: [{ title: "Still trying" }] });

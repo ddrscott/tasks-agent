@@ -1280,8 +1280,11 @@ the MCP tools are in `src/mcp.ts`.
   when that finishes. The Pages screen does the same with the change cursor (`since=`): the
   list reloads, an open page reloads when it isn't being edited, and an edit in progress
   gets a notice instead of being thrown away.
-- Not yet: computed columns, formulas in cells, undo from the grid (the log is there), XLSX,
-  and worksheet rows in search.
+- **In search.** Every row is a keyword entry in the cross-board index (`// SEARCH`, kind
+  `row`, ref `<sheet id>/<row id>`), its first text cell as the title and every cell in the
+  body, written after each insert, update, delete, and rename. A hit opens the sheet with
+  that row pointed at. Rows carry no vectors.
+- Not yet: computed columns, formulas in cells, undo from the grid (the log is there), XLSX.
 
 ## // TEAM_BOARDS
 

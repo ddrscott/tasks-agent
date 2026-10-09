@@ -78,8 +78,12 @@ export function App() {
     scrollTo(0, 0);
   }, []);
   /** A board's worksheets (// WORKSHEETS). */
-  const goSheets = useCallback((board: string | null) => {
-    history.pushState(null, "", `${BASE}/sheets${board ? `?board=${board}` : ""}`);
+  const goSheets = useCallback((board: string | null, sheet?: string, row?: string) => {
+    const q = new URLSearchParams();
+    if (board) q.set("board", board);
+    if (sheet) q.set("sheet", sheet);
+    if (row) q.set("row", row);
+    history.pushState(null, "", `${BASE}/sheets${q.size ? `?${q}` : ""}`);
     setPage("sheets");
     scrollTo(0, 0);
   }, []);
@@ -169,7 +173,7 @@ function takeFlash(): string | null {
  * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
  * saying so, and nothing keeps knocking on a board that won't open.
  */
-function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null): void }) {
+function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null, sheet?: string, row?: string): void }) {
   const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
   const [access, setAccess] = useState<MemberAccess | null>(null);
   /** The board in the address when it's another board of yours (// BOARDS): opened as its owner, not as a member. */
@@ -256,7 +260,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
 }
 
 type WorkspaceProps = {
-  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null): void;
+  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void; onPages(board: string | null, path?: string): void; onSheets(board: string | null, sheet?: string, row?: string): void;
   /** Open the admin page. The menu only offers it to an admin, and only on their own board. */
   onAdmin(): void;
   /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
@@ -869,9 +873,10 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
   const openHit = useCallback((h: SearchHit) => {
     const board = h.board ?? here;
     if (h.kind === "page") { onPages(board === me.id ? null : board, h.id); return; }
+    if (h.kind === "row") { const [sheet, row] = h.id.split("/"); onSheets(board === me.id ? null : board, sheet, row); return; }
     if (board === here) { setEditing(h.id); return; }
     onSwitch(board === me.id ? null : board, h.id);
-  }, [here, me.id, onPages, onSwitch]);
+  }, [here, me.id, onPages, onSheets, onSwitch]);
   // Opened from a search hit on another board (switchTo): the card named in the address, once the board is up.
   useEffect(() => {
     if (!board) return;

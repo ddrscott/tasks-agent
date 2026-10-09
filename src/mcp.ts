@@ -820,12 +820,12 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: z.object({
         query: z.string().min(1).max(500).describe("What to look for, in plain words"),
         mode: z.enum(["hybrid", "keyword", "semantic"]).optional().describe("hybrid (default) mixes exact words and meaning; keyword matches words; semantic matches meaning"),
-        kind: z.enum(["card", "page"]).optional().describe("Only cards, or only pages. Default both"),
+        kind: z.enum(["card", "page", "row"]).optional().describe("Only cards, only pages, or only worksheet rows. Default all"),
         limit: z.number().int().min(1).max(50).optional().describe("Most results to return, default 10"),
         board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: true },
-    }, async (input: { query: string; mode?: "hybrid" | "keyword" | "semantic"; kind?: "card" | "page"; limit?: number; board?: string }) => {
+    }, async (input: { query: string; mode?: "hybrid" | "keyword" | "semantic"; kind?: "card" | "page" | "row"; limit?: number; board?: string }) => {
       const boards = await reachable(env, user, input.board);
       if (!boards) return noBoard(input.board!);
       await ensureIndexed(env, boards);
@@ -838,6 +838,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const where = many ? `${h.boardName} · ` : "";
         const snippet = h.snippet ? ` — …${strip(h.snippet)}…` : "";
         if (h.kind === "page") { lines.push(oneLine(`- page ${h.id}: ${strip(h.title)} (${where}${h.match} match)${snippet}`)); continue; }
+        if (h.kind === "row") { const [sheet, row] = h.id.split("/"); lines.push(oneLine(`- row ${row} of worksheet ${h.lane} (id ${sheet}): ${strip(h.title)} (${where}${h.match} match)${snippet}`)); continue; }
         // A card a member wrote on says so here too, the same as search_cards: the board knows, the index doesn't.
         const b = boards.find((x) => x.id === h.board);
         const here = b ? await reach({ id: b.id, name: b.name, ownerId: "", ownerEmail: b.ownerEmail, first: false, createdAt: null, archivedAt: null }) : null;

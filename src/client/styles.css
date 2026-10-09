@@ -1844,3 +1844,6 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
   .tag-combo-find input { font-size: 16px; }
   .tag-combo-list button { padding: 11px 10px; font-size: 14px; }
 }
+/* A worksheet row a search hit pointed at: outlined until the person clicks anywhere in it. */
+.sheet-table tr.sheet-pointed td { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.sheet-table tr.sheet-pointed td:first-child { box-shadow: inset 2px 0 0 var(--accent); }

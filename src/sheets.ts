@@ -303,6 +303,14 @@ export class Sheets {
     return { sheet: info, rows, total: info.rows };
   }
 
+  /** Rows by id, for the search index after a change. */
+  byIds(key: string, ids: number[]): { sheet: SheetInfo; rows: Row[] } {
+    const s = this.need(key);
+    const want = ids.filter(Number.isInteger).slice(0, ROWS_PER_CALL);
+    const rows = want.length ? this.sql.exec<Row>(`SELECT * FROM ${ident(s.name)} WHERE _id IN (${want.map(() => "?").join(", ")})`, ...want).toArray() : [];
+    return { sheet: this.info(s), rows };
+  }
+
   /** Add rows. Each is an object keyed by column name (id works too); unknown keys are refused by name. Returns the new ids. */
   insert(key: string, rawRows: unknown, by: string): { sheet: SheetInfo; ids: number[] } {
     const s = this.need(key);

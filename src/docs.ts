@@ -23,7 +23,7 @@ import { boardById, ownedBoard } from "./boards";
 import { EXPORT_FORMATS, EXPORT_TYPES, pageDocx, pageHtml, pagePdf, pagesZip, pageTitle, type ExportFormat } from "./export";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
-import { countIndexed, dropBoard, dropEntries, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors } from "./search-all";
+import { countIndexed, dropBoard, dropEntries, dropPrefix, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
 import { sheetFromCsv, Sheets, type QueryResult, type Row as SheetRow, type SheetInfo } from "./sheets";
 
 const MB = 1024 * 1024;
@@ -126,6 +126,9 @@ export class Docs extends DurableObject<Env> {
       await resetEntries(this.env, this.board, "page", pages.map((p) => ({ kind: "page" as const, ref: p.path, title: titleOf(p.path, p.text), body: p.text })));
       if (this.env.VECTORS) await this.indexPages(pages);
     }
+    // Worksheet rows ride on the same mark: this object holds both.
+    const rowsHeld = this.sheets.list().reduce((n, s) => n + s.rows, 0);
+    if ((await countIndexed(this.env, this.board, "row")) !== rowsHeld) await this.indexAllRows();
     await markIndexed(this.env, this.board, "page");
   }
 
@@ -304,16 +307,76 @@ export class Docs extends DurableObject<Env> {
   sheetGet(key: string): SheetInfo | null { return this.sheets.get(key); }
   sheetCreate(name: unknown, columns: unknown, by: string): SheetInfo { return this.sheets.create(name, columns, by); }
   sheetImport(name: unknown, csv: unknown, by: string): { sheet: SheetInfo; rows: number } { return sheetFromCsv(this.sheets, name, csv, by); }
-  sheetRename(key: string, name: unknown, by: string): SheetInfo { return this.sheets.rename(key, name, by); }
-  sheetRemove(key: string, by: string): SheetInfo { return this.sheets.remove(key, by); }
+  sheetRename(key: string, name: unknown, by: string): SheetInfo {
+    const s = this.sheets.rename(key, name, by);
+    this.ctx.waitUntil(this.indexSheet(s.id).catch((e: Error) => console.warn("indexing a renamed worksheet failed", e.message)));
+    return s;
+  }
+  sheetRemove(key: string, by: string): SheetInfo {
+    const s = this.sheets.remove(key, by);
+    if (this.board) this.ctx.waitUntil(dropPrefix(this.env, this.board, "row", `${s.id}/`).catch((e: Error) => console.warn("unindexing a worksheet failed", e.message)));
+    return s;
+  }
   sheetAddColumn(key: string, name: unknown, type: unknown, by: string): SheetInfo { return this.sheets.addColumn(key, name, type, by); }
   sheetChangeColumn(key: string, col: string, change: { name?: unknown; pos?: unknown }, by: string): SheetInfo { return this.sheets.changeColumn(key, col, change, by); }
   sheetDropColumn(key: string, col: string, by: string): SheetInfo { return this.sheets.dropColumn(key, col, by); }
   sheetRows(key: string, opts: { limit?: number; offset?: number; sort?: string; dir?: string } = {}): { sheet: SheetInfo; rows: SheetRow[]; total: number } { return this.sheets.rows(key, opts); }
-  sheetInsert(key: string, rows: unknown, by: string): { sheet: SheetInfo; ids: number[] } { return this.sheets.insert(key, rows, by); }
-  sheetUpdate(key: string, updates: unknown, by: string): { sheet: SheetInfo; changed: number } { return this.sheets.update(key, updates, by); }
-  sheetDeleteRows(key: string, ids: unknown, by: string): { sheet: SheetInfo; deleted: number } { return this.sheets.deleteRows(key, ids, by); }
+  sheetInsert(key: string, rows: unknown, by: string): { sheet: SheetInfo; ids: number[] } {
+    const r = this.sheets.insert(key, rows, by);
+    this.ctx.waitUntil(this.indexRows(r.sheet.id, r.ids).catch((e: Error) => console.warn("indexing rows failed", e.message)));
+    return r;
+  }
+  sheetUpdate(key: string, updates: unknown, by: string): { sheet: SheetInfo; changed: number } {
+    const r = this.sheets.update(key, updates, by);
+    const ids = Array.isArray(updates) ? updates.map((u) => Number((u as { id?: unknown })?.id)).filter(Number.isInteger) : [];
+    this.ctx.waitUntil(this.indexRows(r.sheet.id, ids).catch((e: Error) => console.warn("indexing rows failed", e.message)));
+    return r;
+  }
+  sheetDeleteRows(key: string, ids: unknown, by: string): { sheet: SheetInfo; deleted: number } {
+    const r = this.sheets.deleteRows(key, ids, by);
+    const gone = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger) : [];
+    if (this.board) this.ctx.waitUntil(dropEntries(this.env, this.board, "row", gone.map((id) => `${r.sheet.id}/${id}`)).catch((e: Error) => console.warn("unindexing rows failed", e.message)));
+    return r;
+  }
   sheetQuery(sql: unknown, limit?: unknown): QueryResult { return this.sheets.query(sql, limit); }
+
+  /** Rows in the cross-board search (search-all.ts, kind `row`): ref `<sheet id>/<row id>`, the first text cell as the title, every cell in the body. Keyword only; rows carry no vectors. */
+  private rowEntries(sheet: SheetInfo, rows: SheetRow[]): Entry[] {
+    const textCol = sheet.columns.find((c) => c.type === "text" || c.type === "link");
+    return rows.map((r) => {
+      const first = textCol ? r[textCol.name] : null;
+      const title = first !== null && first !== undefined && String(first).trim() ? String(first).slice(0, 200) : `Row ${r._id}`;
+      const body = sheet.columns.map((c) => `${c.name}: ${r[c.name] ?? ""}`).join("\n");
+      return { kind: "row", ref: `${sheet.id}/${r._id}`, title, body, meta: { sheet: sheet.name, sheetId: sheet.id } };
+    });
+  }
+  private async indexRows(sheetId: string, ids: number[]): Promise<void> {
+    if (!this.board || !ids.length) return;
+    const { sheet, rows } = this.sheets.byIds(sheetId, ids);
+    await indexEntries(this.env, this.board, this.rowEntries(sheet, rows));
+  }
+  /** Every row of one sheet again (after a rename, the title's sheet name changes). */
+  private async indexSheet(sheetId: string): Promise<void> {
+    if (!this.board) return;
+    const info = this.sheets.get(sheetId);
+    if (!info) return;
+    await dropPrefix(this.env, this.board, "row", `${sheetId}/`);
+    for (let off = 0; off < info.rows; off += 500) {
+      const { rows } = this.sheets.rows(sheetId, { limit: 500, offset: off });
+      await indexEntries(this.env, this.board, this.rowEntries(info, rows));
+    }
+  }
+  /** Every row of every sheet, when the count is off (ensureSearch). */
+  private async indexAllRows(): Promise<void> {
+    if (!this.board) return;
+    await this.env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = 'row'").bind(this.board).run();
+    for (const s of this.sheets.list()) {
+      for (let off = 0; off < s.rows; off += 500) {
+        const { rows } = this.sheets.rows(s.id, { limit: 500, offset: off });
+        await indexEntries(this.env, this.board, this.rowEntries(s, rows));
+      }
+    }
+  }
 }
 
 // ---------- the HTTP API ----------

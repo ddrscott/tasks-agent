@@ -41,6 +41,8 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
   const [sheets, setSheets] = useState<SheetInfo[] | null>(null);
   const [canWrite, setCanWrite] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(location.search).get("sheet"));
+  /** A row to point at once the sheet is up: a search hit (// SEARCH). */
+  const [pointed, setPointed] = useState<number | null>(() => { const r = Number(new URLSearchParams(location.search).get("row")); return Number.isInteger(r) && r > 0 ? r : null; });
   const [sheet, setSheet] = useState<SheetInfo | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -420,7 +422,7 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
                     </thead>
                     <tbody>
                       {shown.map((r, i) => (
-                        <tr key={r._id} title={`row ${r._id} · ${r._by}, ${when(r._at)}`}>
+                        <tr key={r._id} className={pointed === r._id ? "sheet-pointed" : undefined} ref={pointed === r._id ? (el) => { el?.scrollIntoView({ block: "center" }); } : undefined} title={`row ${r._id} · ${r._by}, ${when(r._at)}`} onClick={() => { if (pointed) setPointed(null); }}>
                           <td className="sheet-rownum">{i + 1}</td>
                           {sheet.columns.map((c) => <td key={c.id} className={c.type === "number" ? "num" : c.type === "checkbox" ? "check" : ""}>{cellEditor(r, c)}</td>)}
                           {canWrite && <td />}

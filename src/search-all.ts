@@ -21,11 +21,13 @@ import { BOARD_ID } from "./member-rules";
 import { ftsQuery, MARK, RRF_K, SEMANTIC_FLOOR, SEMANTIC_MARGIN } from "./search";
 import type { SearchHit, SearchResult } from "./tools";
 
-export type Kind = "card" | "page";
+export type Kind = "card" | "page" | "row";
 /** One thing in the index: a card (ref = its id) or a page (ref = its path). */
-export type Entry = { kind: Kind; ref: string; title: string; body: string; meta?: CardMeta };
+export type Entry = { kind: Kind; ref: string; title: string; body: string; meta?: CardMeta | RowMeta };
 /** What a card hit shows without going back to its board. */
 export type CardMeta = { lane: string; due: string | null; assignee?: string };
+/** What a worksheet row hit shows: which sheet. The ref is `<sheet id>/<row id>`. */
+export type RowMeta = { sheet: string; sheetId: string };
 
 /** The most of a page's text that's keyword-indexed, and the part of it that's embedded. */
 const BODY_MAX = 64 * 1024;
@@ -109,8 +111,13 @@ export async function ensureIndexed(env: Env, boards: Reachable[]): Promise<void
   await Promise.all(wake);
 }
 
+/** Every row of a kind whose ref starts with `prefix` (a worksheet's rows: `<sheet id>/`). Keyword rows only; rows carry no vectors. */
+export async function dropPrefix(env: Env, board: string, kind: Kind, prefix: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = ? AND ref LIKE ?").bind(board, kind, `${prefix.replace(/[%_]/g, "\\$&")}%`).run();
+}
+
 /** Everything of a board's: when it's encrypted, reset, or its cards are all rewritten. Vectors of one kind stay unless `kinds` names it. */
-export async function dropBoard(env: Env, board: string, kinds: Kind[] = ["card", "page"]): Promise<void> {
+export async function dropBoard(env: Env, board: string, kinds: Kind[] = ["card", "page", "row"]): Promise<void> {
   await env.DB.batch(kinds.map((k) => env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = ?").bind(board, k)));
   // Vectorize has no delete-by-filter: a board's vectors are found by a query that names it, in rounds.
   const v = vectors(env);
@@ -210,13 +217,13 @@ export async function searchAll(env: Env, boards: Reachable[], input: AllInput):
     if (!row) continue; // a vector whose row is gone: the board deleted it a moment ago
     const b = byId.get(row.board);
     if (!b) continue;
-    const meta = (row.meta ? JSON.parse(row.meta) : {}) as Partial<CardMeta>;
+    const meta = (row.meta ? JSON.parse(row.meta) : {}) as Partial<CardMeta & RowMeta>;
     const k2 = kwRow.get(k);
     hits.push({
       id: row.ref,
       title: row.t,
       snippet: k2?.s.includes(MARK[0]) ? k2.s : "",
-      lane: row.kind === "page" ? "page" : meta.lane ?? "",
+      lane: row.kind === "page" ? "page" : row.kind === "row" ? meta.sheet ?? "worksheet" : meta.lane ?? "",
       due: meta.due ?? null,
       match: k2 && semSet.has(k) ? "both" : k2 ? "keyword" : "semantic",
       board: b.id,
@@ -283,7 +290,7 @@ export async function handleSearch(req: Request, env: Env, path: string): Promis
     query: q,
     mode: mode === "keyword" || mode === "semantic" ? mode : "hybrid",
     limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
-    kind: kind === "card" || kind === "page" ? kind : undefined,
+    kind: kind === "card" || kind === "page" || kind === "row" ? kind : undefined,
   });
   return json(r);
 }

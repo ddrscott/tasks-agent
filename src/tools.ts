@@ -135,7 +135,7 @@ export type SearchHit = {
   /** From the cross-board search (search-all.ts): which board, and whether the hit is a card (id is its id) or a page (id is its path). */
   board?: string;
   boardName?: string;
-  kind?: "card" | "page";
+  kind?: "card" | "page" | "row";
   assignee?: string;
 };
 export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
