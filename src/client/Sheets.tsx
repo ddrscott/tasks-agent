@@ -112,6 +112,32 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
     if (sheets && selected && !openedOnce.current) { openedOnce.current = true; void open(selected); }
   }, [sheets, selected, open]);
 
+  // Someone else (or their agent) changing the open worksheet: every few seconds compare its
+  // last change with what's on screen, and reload the rows when nothing here is mid-edit.
+  const liveRef = useRef({ sheet, sort, editing, draftRow });
+  liveRef.current = { sheet, sort, editing, draftRow };
+  useEffect(() => {
+    let off = false;
+    const tick = async () => {
+      if (off || document.hidden) return;
+      try {
+        const r = await fetch(api(`/api/sheets${q(id)}`));
+        if (!r.ok || off) return;
+        const list = ((await r.json()) as { sheets: SheetInfo[] }).sheets;
+        setSheets(list);
+        const { sheet: s, sort: so, editing: ed, draftRow: dr } = liveRef.current;
+        if (!s) return;
+        const now = list.find((x) => x.id === s.id);
+        if (!now) { say("error", "This worksheet was deleted."); setSheet(null); return; }
+        if (now.updatedAt === s.updatedAt) return;
+        if (ed || Object.values(dr).some((v) => v !== "")) { setSheet({ ...s, updatedAt: now.updatedAt, updatedBy: now.updatedBy }); say("ok", `${now.updatedBy === me.email ? "You, elsewhere," : now.updatedBy} changed this worksheet. It reloads when you finish the cell.`); return; }
+        await loadRows(s.id, so);
+      } catch { /* the next tick will try again */ }
+    };
+    const t = setInterval(() => { void tick(); }, 5000);
+    return () => { off = true; clearInterval(t); };
+  }, [id, me.email, loadRows, say]);
+
   const refresh = useCallback(async () => {
     if (sheet) await loadRows(sheet.id, sort);
     void loadList();

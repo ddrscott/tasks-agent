@@ -1272,6 +1272,12 @@ the MCP tools are in `src/mcp.ts`.
   On a shared board a writer's agent writes and a viewer's reads, the same as pages.
 - **Limits.** 60 columns, 50 000 rows, 1000 rows per call, 10 KB per cell, names of 60 (sheet)
   and 40 (column) characters with no quotes.
+- **Live.** The grid asks the board for the sheet list every five seconds while the tab is
+  visible, and when the open sheet's last change isn't the one on screen, reloads the rows,
+  unless a cell or the new row is mid-edit, in which case it says who changed it and reloads
+  when that finishes. The Pages screen does the same with the change cursor (`since=`): the
+  list reloads, an open page reloads when it isn't being edited, and an edit in progress
+  gets a notice instead of being thrown away.
 - Not yet: computed columns, formulas in cells, undo from the grid (the log is there), XLSX,
   and worksheet rows in search.
 

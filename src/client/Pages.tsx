@@ -53,10 +53,14 @@ export function Pages({ me, board, boards, onBoard }: Props) {
 
   const say = useCallback((kind: "ok" | "error", text: string, reload = false) => setNote({ kind, text, reload }), []);
 
+  /** The change cursor the list came with (docs.ts `log`): polling asks for what came after it. */
+  const seq = useRef<number | null>(null);
   const loadList = useCallback(async () => {
     const r = await fetch(api(`/api/files${q(id)}`));
     if (!r.ok) { setFiles([]); say("error", r.status === 404 ? "That board isn't yours to read." : "The list didn't load. Try again in a minute."); return; }
-    setFiles(((await r.json()) as { files: FileInfo[] }).files);
+    const d = (await r.json()) as { files: FileInfo[]; seq: number };
+    seq.current = d.seq;
+    setFiles(d.files);
   }, [id, say]);
 
   useEffect(() => {
@@ -89,6 +93,35 @@ export function Pages({ me, board, boards, onBoard }: Props) {
       setLoaded(info ? { info, text: null } : null);
     }
   }, [board, id, files, say]);
+
+  // Someone else (or their agent) changing things while this is open: ask the board every few
+  // seconds what changed after the cursor. The list reloads; the open page reloads when it
+  // isn't being edited, and says so when it is, so an edit in progress is never thrown away.
+  const liveRef = useRef({ selected, editing, loaded });
+  liveRef.current = { selected, editing, loaded };
+  useEffect(() => {
+    let off = false;
+    const tick = async () => {
+      if (off || seq.current === null || document.hidden) return;
+      try {
+        const r = await fetch(api(`/api/files${q(id, `&since=${seq.current}`)}`));
+        if (!r.ok || off) return;
+        const { changes } = (await r.json()) as { changes: { seq: number; path: string; by: string; etag: string | null }[] };
+        if (!changes.length) return;
+        seq.current = changes[changes.length - 1].seq;
+        const { selected: sel, editing: ed, loaded: ld } = liveRef.current;
+        const mine = changes.filter((c) => c.path === sel);
+        if (mine.length && ld && mine[mine.length - 1].etag !== ld.info.etag) {
+          const who = mine[mine.length - 1].by;
+          if (ed) say("error", `${who === me.email ? "You, elsewhere," : who} changed this page while you were editing. Copy what you typed, then reload to see the newest version.`, true);
+          else void open(sel);
+        }
+        void loadList();
+      } catch { /* the next tick will try again */ }
+    };
+    const t = setInterval(() => { void tick(); }, 5000);
+    return () => { off = true; clearInterval(t); };
+  }, [id, me.email, open, loadList, say]);
 
   // The page named in the address, once the list is in.
   const openedOnce = useRef(false);
