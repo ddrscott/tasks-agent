@@ -4,7 +4,7 @@
 // page's HTML both come from that row.
 
 /** `/tasks/` itself is the board, or the landing page when signed out. These are the rest. */
-export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite", "admin"] as const;
+export const PAGES = ["connect", "privacy", "terms", "demo", "pricing", "invite", "admin", "all"] as const;
 export type Page = "board" | (typeof PAGES)[number];
 
 /** The page a path names, or null when there's no such page. `base` is "/tasks". */
@@ -55,6 +55,8 @@ export const PAGE_META = {
   invite: { name: "Board invite", description: "Accept or decline an invite to someone's Tasks board. Sign in as the address it was sent to." },
   // Admins only (src/users.ts). The page is the same HTML as any other, so it's kept out of search instead.
   admin: { name: "Admin", description: "Who can use Tasks, and on what plan." },
+  // Every board you can reach on one screen (// ALL_BOARDS). Signed in only; kept out of search like the board.
+  all: { name: "All boards", description: "Every board you can reach, on one screen: your cards from every board, grouped by To do, Doing, and Done." },
   terms: { name: "Terms", description: "The terms of service for Tasks, the task board your AI coding agents work over MCP." },
   notFound: { name: "Not found", description: "There's no page at this address." },
 } as const satisfies Record<Page | "notFound", { name: string; description: string }>;

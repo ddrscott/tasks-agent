@@ -26,6 +26,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
 | Card claims | A `Presence` Durable Object per user (`src/presence.ts`): which agent session holds which card, written by `claim_card` and the other MCP calls (`// CLAIMS`) |
+| Boards | Many per account: a registry in D1 (`boards`, `src/boards.ts`), one `TodoAgent` per board named by the board's id; the first board keeps the user's id (`// BOARDS`) |
 | Team boards | D1 for members, invites, and the audit log (`src/members.ts`); members reach the owner's `TodoAgent` through a membership check (`// TEAM_BOARDS`) |
 | Outside agents | MCP server (`agents/mcp/server`, stateless Streamable HTTP) behind `@cloudflare/workers-oauth-provider` (grants in KV `OAUTH_KV`), plus personal access tokens in D1 |
 
@@ -47,10 +48,12 @@ run ahead of whatever serves the zone.
 
 ## // HOW_IT_WORKS
 
-- **One board per user.** The client connects to `/tasks/agent`, and the Worker
-  picks the Durable Object from the session cookie. The cookie is scoped to `Path=/tasks`.
-  A board someone shared with you is `/tasks/agent?board=<its id>`: the id is not a secret,
-  and a membership check decides, with one answer for "no such board" and "not yours"
+- **A board per project, and a first board per user.** The client connects to `/tasks/agent`,
+  and with no `board` in the query the Worker picks the Durable Object from the session
+  cookie: your first board, named by your user id. The cookie is scoped to `Path=/tasks`.
+  `/tasks/agent?board=<id>` is another board of yours (`// BOARDS`) or one someone shared
+  with you: the id is not a secret, one read says whether it's yours, and otherwise a
+  membership check decides, with one answer for "no such board" and "not yours"
   (`// TEAM_BOARDS`).
 - **One code path for every change.** Drag and drop, buttons, the assistant's
   tools, and MCP calls all end in the pure functions in `src/shared.ts`. The board
@@ -649,7 +652,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -1018,6 +1021,90 @@ the same session id and keep the claim. Call wait_for_answer
 with the card's id and your session id to wait: it holds until the answer comes. Call
 release_card when the card is done or you stop working on it.
 ```
+
+## // BOARDS
+
+An account owns many boards. A board is a project: its own cards, lanes, and members, and as
+the pivot goes on, its own pages, files, and worksheets. The first board an account ever had is
+still there under its old id (the user id) with nothing moved; it's called My board and can't be
+renamed or archived. Every board after it is a row in D1 (`boards`, migration 0009,
+`src/boards.ts`) with a random 32-hex id, a name, and `archived_at`. Each board is its own
+`TodoAgent` Durable Object named by its id, and its attachments (`<board id>/<attachment id>` in
+R2), claims (`Presence`), members, and audit log are stored under that id too:
+`board_members.owner_id` and its siblings hold the board's id, which for a first board is also
+the owner's.
+
+- **Making one is Pro**, like sharing one: `POST /api/boards/create` answers 402 `pro_required`
+  on a free plan, and `MAX_BOARDS` (20) is the cap per account. Rename and archive are
+  `POST /api/boards/rename`, `/archive`, and `/unarchive`, with `board` in the body, owner only;
+  a board that isn't yours answers 404, the same as one that doesn't exist. Archiving hides a
+  board from lists and from "every board" views and keeps everything on it; it's still
+  reachable by id and by name. `GET /api/boards` lists `own` (the first), `mine` (the rest,
+  archived ones marked), and `shared`, each with its name.
+- **Opening one.** `/tasks/?board=<id>` is a board of yours or one shared with you. The
+  preflight (`GET /api/board/access`) says which (`role: "owner"`, or a member role), and the
+  app opens it as the owner or as a member (`BoardHost` in `App.tsx`). The Worker tells the
+  two apart on the socket with one read (`ownedBoard`): an owned board gets the owner path,
+  with `H_BOARD` naming the Durable Object and `H_USER` its owner. The board records the owner
+  (`TodoAgent.ownerId`, from the socket or from the registry) so the plan that governs it and
+  the event feed its changes go to are its owner's. Anything else is `memberConnect`.
+- **Whose plan.** A board follows its owner's plan: `access` and `syncSharing` look the owner
+  up in the registry, a plan change (Stripe, or an admin's switch) runs over every board the
+  owner has (`planChanged`), and an admin's flip is written on each board of theirs that was
+  shared. The daily invite-email cap stays per owner, across their boards.
+- **In the app.** The switcher next to the wordmark lists MY_BOARDS and SHARED_WITH_ME, and
+  shows once there's more than one board to switch between. The account menu has New board…
+  (a dialog, `BoardDialog.tsx`, that shows the server's sentence when it says no), and on a
+  board after the first: Rename this board…, Archive this board (two taps), and Go to my
+  board. Members, the audit log, attachments, and encryption are keyed by the board on screen
+  (`ownId` in `App.tsx`): `/api/board/*` takes `board` (the query on a GET, the body on a
+  POST) and defaults to the first board, so nothing that exists had to change its address.
+- **Over MCP.** `list_boards` names them. Every tool takes `board`, a name or an id (case
+  doesn't matter; "My board" is the first). Left out: a call about a card (`get_card`,
+  `update_card`, `claim_card`, `ask_ceo`, …) looks for the card on each board, first board
+  first, and acts where it finds it; a call that adds something goes to the first board; and
+  `get_board` shows every unarchived board, each under `# <name> (board <id>)`, with a line
+  at the end saying how to reach cards on the others. One board alone reads exactly as it did
+  before, headings and all left out. Claims are per board. A request marks every board it
+  reached as having seen an agent (`noteAgentSeen`).
+- **The event feed** is one per account and carries every board the account owns: the hello
+  lists each board's open agent cards with `board` and `boardName` on each, and every event
+  after it carries `board` (`TodoAgent.publish`).
+- `npm run check:boards` runs all of it against a local dev server (`// DEVELOP`): a free
+  account refused, a Pro account making, renaming, and archiving a board, an invite into it
+  accepted, every MCP tool reaching it by name and by card id, and a file landing under its
+  prefix.
+
+Not yet, each a card on the Tasks board: a member's agents working a shared board over MCP,
+pages and files, worksheets, search across boards, export.
+
+## // ALL_BOARDS
+
+`/tasks/all` is every board you can reach on one screen (`src/client/AllBoards.tsx`): your
+first board, the rest of yours, and the ones shared with you. It's in the board switcher as
+"All boards" once there's more than one board to switch between, and it's a page in
+`src/routes.ts` like any other.
+
+- **One socket per board.** `useAgent` is a hook, so each board gets a tiny component of its own
+  (`BoardSocket`) that opens the same connection the board page would (`?board=<id>` for all but
+  the first) and reports its state and its stub up. Nothing new on the server: the Worker and
+  the board see the same owner or member connection they always do.
+- **Merged by what a lane means.** Cards land in virtual lanes by role: To do, Doing, Done, then
+  one lane per name for lanes that have no role ("Waiting on them" from two boards share a
+  lane). Within a lane, boards come in list order and each board's cards in its own stored
+  order. A card's id on this screen is `<board id>~<card id>`, and a chip on each face says
+  which board it's on (`CardChipContext`, read by `CardFace`).
+- **Writer mode, whatever you are on each board.** The view uses `BoardView` in writer mode, so
+  cards move and open and lanes have no controls; the lanes are each board's own. Moving a card
+  resolves the virtual lane back to the real one on that card's board (the lane with that role,
+  or the lane with that name) and refuses in words when the board has none ("Shop API has no
+  Doing lane"); the index is the card's place among its own board's cards in that lane. The
+  server still enforces each board's rules: a viewer's board turns the move down and the toast
+  says so. Quick add lands on your first board. Opening a card opens the real `CardEditor` against
+  that board's stub and files. Undo stays on each board.
+- **Encrypted boards are left out**, counted in the line under the top bar: their cards are
+  ciphertext here. Archived boards are left out too.
+- Over MCP the same merge is `get_board` with no `board` (`// BOARDS`).
 
 ## // TEAM_BOARDS
 
@@ -2363,6 +2450,7 @@ npm run check:setup      # the event feed installer against a temp HOME: fresh, 
 npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
 npm run check:claims     # which board changes end a claim; with a dev server's address, claim, refuse, ask, answer, release over MCP
 npm run check:members    # team boards, against a running local dev server: five-plus real accounts attack every way in (// TEAM_BOARDS)
+npm run check:boards     # many boards per account, against the same dev server: make, rename, archive, invite into, and reach over MCP (// BOARDS)
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
 npm run check:launch     # the launch copy against its limits, and the gallery's files and sizes
@@ -2553,7 +2641,11 @@ npm run db:migrate:remote    # FIRST, whenever migrations/ changed
 npm run deploy               # vite build && wrangler deploy
 ```
 
-**Migrate before you deploy.** Four migrations go out with team boards and the admin page, in
+**Migrate before you deploy.** `0009_boards.sql` (`// BOARDS`) adds the `boards` table, which
+the new Worker reads on every socket connect, every `/api/board*` call, and every MCP call;
+deployed without it, those fail. It only adds a table, so the old Worker runs fine on top of it.
+
+Before that, four migrations went out with team boards and the admin page, in
 this order: `0005_users.sql` (the admin page's `users` table), then `0006_team_boards.sql`,
 `0007_board_activity.sql`, and `0008_used_invites.sql` (the team-board tables, the audit log's
 card entries, and used invite links). The new Worker reads the team-board tables on every
@@ -2595,6 +2687,7 @@ for Email Sending.
 | `STRIPE_PRICE_ID` | empty (billing off) | the Pro subscription's recurring price |
 | `ATTACHMENT_MAX_MB` | `25` | largest single attachment |
 | `ATTACHMENT_QUOTA_MB` | `250` | attachment storage per user |
+| `MAX_BOARDS` | `20` | boards one account may own, the first included (`// BOARDS`) |
 | `MAX_BOARD_MEMBERS` | `10` | people on one shared board, pending invites included |
 | `MAX_DAILY_INVITE_EMAILS` | `20` | invite emails one owner can send in a UTC day, resends included |
 | `MEMBER_RECHECK_SECONDS` | `30` | how often a board rechecks its connected members against D1 (at least 5) |

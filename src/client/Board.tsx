@@ -11,6 +11,7 @@ import { AskBlock, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
+import { CardChipContext } from "./AllBoards";
 
 /** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
 /** `fix` is the lines in `left` that will be refused again exactly as they are (needsEdit in member-rules.ts): they have to be edited first. */
@@ -501,6 +502,7 @@ export function CardFace(p: {
   const { card } = p;
   const status = !p.isDone && !card.ask ? faceLine(card) : null;
   const boardOwner = useContext(AskOwnerContext);
+  const chip = useContext(CardChipContext)?.(card) ?? null;
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -523,6 +525,8 @@ export function CardFace(p: {
         {/* Right after you answer, the old STATUS still says it's waiting on you, so the face says what you answered until the agent writes a new one (faceLine). */}
         {status && <div className="card-status" title={status.kind === "status" ? `STATUS: ${statusLine(card.notes) ?? status.text}` : `${boardOwner ? `${boardOwner}'s` : "Your"} answer. The agent hasn't written a new STATUS line yet.`}>{status.text}</div>}
         <div className="card-meta">
+          {/* On a screen that mixes boards (AllBoards.tsx), which board this card is on. */}
+          {chip && <span className="chip board-chip" title={`On ${chip}`}>{chip}</span>}
           {card.tags?.map((t) => (
             <button
               key={t} className={`chip tag${p.tagFilter === t ? " active" : ""}`} tabIndex={-1}

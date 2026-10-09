@@ -26,13 +26,15 @@ import { SearchBox } from "./Search";
 import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote, useBoardMembers } from "./Members";
+import { BoardDialog } from "./BoardDialog";
+import { AllBoards } from "./AllBoards";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { TagFilter, useTagWhere } from "./TagFilter";
 import { MemberChat } from "./MemberChat";
-import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
+import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, boardName, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
@@ -54,6 +56,13 @@ export function App() {
   const go = useCallback((p: Page, hash = "") => {
     history.pushState(null, "", (p === "board" ? `${BASE}/` : `${BASE}/${p}`) + hash);
     setPage(p);
+    scrollTo(0, 0);
+  }, []);
+
+  /** Open one board: its id in the address, or none for the first (// BOARDS). */
+  const goBoard = useCallback((board: string | null) => {
+    history.pushState(null, "", board ? `${BASE}/?board=${board}` : `${BASE}/`);
+    setPage("board");
     scrollTo(0, 0);
   }, []);
 
@@ -89,7 +98,20 @@ export function App() {
   if (page === "pricing") return <Landing signedIn signIn={<SignedInCard email={me.email} />} />;
   // Anyone signed in can ask for the page; the server answers 403 unless they're an admin, and the page says so.
   if (page === "admin") return <Admin me={me.email} onBack={() => go("board")} />;
-  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} />;
+  // Every board you can reach on one screen (// ALL_BOARDS).
+  if (page === "all") return <AllBoardsHost me={me} goBoard={goBoard} />;
+  return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} onAll={() => go("all")} />;
+}
+
+/** The All boards page with its board list (AllBoards.tsx). New board… goes to the first board, where the dialog lives. */
+function AllBoardsHost({ me, goBoard }: { me: Me; goBoard(board: string | null): void }) {
+  const [boards, setBoards] = useState<Boards | null>(null);
+  const loadBoards = useCallback(() => {
+    fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
+  }, []);
+  useEffect(() => { loadBoards(); }, [loadBoards]);
+  if (!boards) return <div className="splash">opening your boards</div>;
+  return <AllBoards me={me} boards={boards} onBoards={loadBoards} onSwitch={goBoard} onNew={() => goBoard(null)} />;
 }
 
 /** One line to show on the next board that opens, left by the invite page ("You're on dana's board as a writer"). */
@@ -105,9 +127,11 @@ function takeFlash(): string | null {
  * whether you're on it (`GET /api/board/access`); if not, you get your own board and a line
  * saying so, and nothing keeps knocking on a board that won't open.
  */
-function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void }) {
+function BoardHost({ me, onSignOut, onConnect, onAdmin, onAll }: { me: Me; onSignOut(): void; onConnect(hash?: string): void; onAdmin(): void; onAll(): void }) {
   const [boardId, setBoardId] = useState<string | null>(() => boardFromUrl(me.id));
   const [access, setAccess] = useState<MemberAccess | null>(null);
+  /** The board in the address when it's another board of yours (// BOARDS): opened as its owner, not as a member. */
+  const [own, setOwn] = useState<string | null>(null);
   const [boards, setBoards] = useState<Boards | null>(null);
   const [notice, setNotice] = useState<string | null>(takeFlash);
   /** What was being typed on a shared board when it closed under this account, and why it closed. Shown on the board that opens next. */
@@ -125,6 +149,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
     if (unsaved?.length) setKept({ why, kept: unsaved });
     setNotice(unsaved?.length ? null : why);
     setAccess(null);
+    setOwn(null);
     setBoardId(null);
   }, []);
 
@@ -135,7 +160,7 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
   }, [me.id]);
 
   useEffect(() => {
-    if (!boardId) { setAccess(null); return; }
+    if (!boardId) { setAccess(null); setOwn(null); return; }
     let off = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setAccess(null);
@@ -149,9 +174,12 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
         timer = setTimeout(() => { void ask(tries + 1); }, Math.min(15, Math.max(1, Number(r.headers.get("Retry-After")) || 2)) * 1000);
         return;
       }
-      const a = r.ok ? asMemberAccess(((await r.json()) as { access?: unknown }).access) : null;
+      const got = r.ok ? ((await r.json()) as { access?: { role?: unknown } }).access : null;
+      const a = asMemberAccess(got);
       if (off) return;
-      if (a) setAccess(a);
+      if (a) { setOwn(null); setAccess(a); }
+      // Another board of your own (// BOARDS): opened as its owner.
+      else if (got?.role === "owner") { setAccess(null); setOwn(boardId); }
       // One answer for a board that was unshared, one you were never on, and one that doesn't exist: the server doesn't say which.
       else fallBack("That board isn't shared with you. You may have been removed, or the link is wrong. This is your own board.");
     }).catch(() => { if (!off) fallBack("That board couldn't be reached just now. This is your own board."); });
@@ -162,16 +190,19 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
   const switchTo = useCallback((board: string | null) => {
     history.pushState(null, "", board ? `${BASE}/?board=${board}` : `${BASE}/`);
     setAccess(null);
+    setOwn(null);
     setBoardId(board);
   }, []);
 
-  if (boardId && (!access || access.board !== boardId)) return <div className="splash">opening the board</div>;
+  const ready = !boardId || access?.board === boardId || own === boardId;
+  if (!ready) return <div className="splash">opening the board</div>;
   return (
     <Workspace
       // A different board is a different connection and a clean slate: nothing from one leaks into the next.
       key={boardId ?? "own"}
-      me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin}
-      shared={boardId ? access : null} boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
+      me={me} onSignOut={onSignOut} onConnect={onConnect} onAdmin={onAdmin} onAll={onAll}
+      shared={boardId && access?.board === boardId ? access : null} own={boardId && own === boardId ? own : null}
+      boards={boards} onSwitch={switchTo} onLost={fallBack} onBoards={loadBoards}
       notice={notice} onNoticeShown={() => setNotice(null)}
       kept={boardId ? null : kept} onKeptDone={() => setKept(null)}
     />
@@ -179,11 +210,13 @@ function BoardHost({ me, onSignOut, onConnect, onAdmin }: { me: Me; onSignOut():
 }
 
 type WorkspaceProps = {
-  me: Me; onSignOut(): void; onConnect(hash?: string): void;
+  me: Me; onSignOut(): void; onConnect(hash?: string): void; onAll(): void;
   /** Open the admin page. The menu only offers it to an admin, and only on their own board. */
   onAdmin(): void;
   /** Set when the board is someone else's: what the server said this account may do there. Null on your own board. */
   shared: MemberAccess | null;
+  /** Another board of your own, when it's the one on screen (// BOARDS). Null on your first board and on a shared one. */
+  own: string | null;
   boards: Boards | null;
   onSwitch(board: string | null): void;
   /** The shared board is gone for this account (removed, left, encrypted): go back to your own, and say why. `unsaved` is whatever was being typed there. */
@@ -198,11 +231,14 @@ type WorkspaceProps = {
   onKeptDone(): void;
 };
 
-function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch, onLost, onBoards, notice, onNoticeShown, kept, onKeptDone }: WorkspaceProps) {
+function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, shared, own, boards, onSwitch, onLost, onBoards, notice, onNoticeShown, kept, onKeptDone }: WorkspaceProps) {
   useTitle("Board");
   // Everything below asks `mode`, never the URL or a guess: "owner" on your own board, and on a
   // shared one whatever the server last said (the preflight, then `tasks_access` on the socket).
   const member = !!shared;
+  // The id of the board on screen when it's yours: your own id for your first board, else the
+  // board's. It's what Members, files, and encryption are keyed by.
+  const ownId = own ?? me.id;
   const [access, setAccess] = useState<MemberAccess | null>(shared);
   const accessRef = useRef(access);
   accessRef.current = access;
@@ -377,6 +413,37 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const sharedBoard = shared?.board ?? null;
   const say = useCallback((text: string, undo = false, ms?: number) => setToast({ text, action: undo && !member ? "undo" : null, key: Date.now(), ms }), [member]);
 
+  // Boards of your own after the first (// BOARDS): made, renamed, and archived from the account
+  // menu. The server's sentence is what the dialog shows when it says no (a free plan, the limit).
+  const [naming, setNaming] = useState<"new" | "rename" | null>(null);
+  const [archiveArmed, setArchiveArmed] = useState(false);
+  const boardCall = useCallback(async (path: string, body: Record<string, unknown>) => {
+    const r = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = (await r.json().catch(() => null)) as { board?: { id: string; name: string }; error?: string } | null;
+    if (!r.ok || !data?.board) throw new Error(data?.error ?? "That didn't work. Try again in a minute.");
+    return data.board;
+  }, []);
+  const createBoard = useCallback(async (name: string) => {
+    const b = await boardCall("/api/boards/create", { name });
+    setNaming(null);
+    onBoards();
+    onSwitch(b.id);
+  }, [boardCall, onBoards, onSwitch]);
+  const renameBoard = useCallback(async (name: string) => {
+    await boardCall("/api/boards/rename", { board: own, name });
+    setNaming(null);
+    onBoards();
+  }, [boardCall, onBoards, own]);
+  const archiveBoard = useCallback(async () => {
+    try {
+      await boardCall("/api/boards/archive", { board: own });
+      onBoards();
+      onSwitch(null);
+    } catch (e) {
+      say((e as Error).message);
+    }
+  }, [boardCall, onBoards, onSwitch, own, say]);
+
   // Losing the board: stop the socket so nothing reconnects, and hand back to BoardHost, once.
   const lost = useRef(false);
   /** Set while this tab's own Leave is on its way, so the board closing reads as leaving, not as being removed. */
@@ -436,7 +503,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   const agent = useAgent<TodoAgent, Board>({
     agent: "TodoAgent",
     basePath: "tasks/agent",
-    ...(sharedBoard ? { query: { board: sharedBoard } } : {}),
+    // A shared board and another board of your own are both named in the query; the Worker tells them apart.
+    ...(sharedBoard ?? own ? { query: { board: (sharedBoard ?? own)! } } : {}),
     onStateUpdate: (s) => ingest(s),
     // The board's own frames (// TEAM_BOARDS), beside the SDK's: a member's access, and who deleted a card.
     onMessage: (m: MessageEvent) => {
@@ -449,7 +517,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         // The plan may be what changed (Pro bought, lapsed, given or taken back by an admin), so
         // the usage call that feeds the account menu and the assistant's meter is made again too.
         else if (f.type === "tasks_members" && !sharedBoard) {
-          membersChanged(me.id);
+          membersChanged(ownId);
           usageRef.current();
           // Someone left on their own. Nothing else on this screen would say so.
           const left = (f as { left?: unknown }).left;
@@ -785,14 +853,14 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
   return (
     <AskContext.Provider value={answerAsk}>
     <AskOwnerContext.Provider value={access?.ownerEmail ?? null}>
-    <Who me={me.email} on={showWho} own={sharedBoard ? undefined : me.id}>
+    <Who me={me.email} on={showWho} own={sharedBoard ? undefined : ownId}>
     <DraftsContext.Provider value={drafts}>
     <NoAgentProvider board={board} onConnect={onConnect} off={member}>
     <div className="app">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
-          <BoardSwitcher boards={boards} access={access} onSwitch={onSwitch} onOpen={onBoards} />
+          <BoardSwitcher boards={boards} myId={me.id} access={access} own={own} onSwitch={onSwitch} onOpen={onBoards} onNew={() => setNaming("new")} onAll={onAll} />
           <TagFilter board={board} where={where} onChange={setWhere} />
           {board.sealed && !sharedBoard && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
@@ -829,12 +897,12 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
               <IconChat /><span className="label">Assistant</span>
             </button>}
             {/* Your own board only. It shows once someone's invited (// TEAM_BOARDS). */}
-            {!sharedBoard && <SharedButton userId={me.id} onOpen={() => setMembersOpen(true)} />}
-            {!sharedBoard && <PlanWatch userId={me.id} onChange={refreshUsage} />}
+            {!sharedBoard && <SharedButton userId={ownId} onOpen={() => setMembersOpen(true)} />}
+            {!sharedBoard && <PlanWatch userId={ownId} onChange={refreshUsage} />}
             <div className="anchor">
               <button className="btn icon account-btn" title={me.email} aria-label="Account" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><IconUser />{!sharedBoard && <SharedBadge userId={me.id} />}</button>
               {menuOpen && (
-                <Popover menu label={`Account, ${me.email}`} onClose={() => setMenuOpen(false)}>
+                <Popover menu label={`Account, ${me.email}`} onClose={() => { setMenuOpen(false); setArchiveArmed(false); }}>
                   <div className="menu">
                     <div className="who">{me.email}</div>
                     {access ? (
@@ -854,7 +922,19 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
                       <>
                     {/* First, because it's the one thing in here with no button or shortcut anywhere else. */}
                     <button role="menuitem" onClick={() => { setMenuOpen(false); onConnect(); }}>Connect an agent</button>
-                    {!sharedBoard && <button role="menuitem" onClick={() => { setMenuOpen(false); setMembersOpen(true); }}>Members<SharedNote userId={me.id} /></button>}
+                    {!sharedBoard && <button role="menuitem" onClick={() => { setMenuOpen(false); setMembersOpen(true); }}>Members<SharedNote userId={ownId} /></button>}
+                    {/* Boards of your own (// BOARDS). The first can't be renamed or archived; any other can, from itself. */}
+                    <div className="menu-label h">BOARDS</div>
+                    {own && <button role="menuitem" onClick={() => { setMenuOpen(false); onSwitch(null); }}>Go to my board</button>}
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); setNaming("new"); }}>New board…</button>
+                    {own && <button role="menuitem" onClick={() => { setMenuOpen(false); setNaming("rename"); }}>Rename this board…</button>}
+                    {own && (
+                      <button
+                        className={`danger${archiveArmed ? " armed" : ""}`} role="menuitem"
+                        onClick={() => { if (!archiveArmed) { setArchiveArmed(true); return; } setMenuOpen(false); setArchiveArmed(false); void archiveBoard(); }}
+                      >{archiveArmed ? "Tap again to archive this board" : "Archive this board"}</button>
+                    )}
+                    <div className="menu-label h">ACCOUNT</div>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setQuickAddLane(todoLaneId(board.lanes)); }}>New card <kbd>n</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setChat(true); }}>Ask the assistant <kbd>/</kbd></button>
                     <button role="menuitem" onClick={() => { setMenuOpen(false); setThemeOpen(true); }}>Change theme <kbd>t</kbd></button>
@@ -917,12 +997,12 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
       {!chatOpen && canWrite && <button className="btn primary chat-fab" onClick={() => setChat(true)}><IconChat />Ask</button>}
 
       {newCardLane && (
-        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} frozen={frozen} />
+        <NewCard key={newCardLane} lanes={board.lanes} laneId={newCardLane} knownTags={knownTags} vault={vault} board={sharedBoard ?? own ?? undefined} onAdd={addFullCard} onClose={() => setNewCardLane(null)} frozen={frozen} />
       )}
       {editingCard && (
         <CardEditor
           key={editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={board.sealed ? vault : null}
-          mode={mode} board={sharedBoard ?? undefined} lapsed={access?.reason === "plan_lapsed"}
+          mode={mode} board={sharedBoard ?? own ?? undefined} lapsed={access?.reason === "plan_lapsed"}
           onSave={(patch) => void updateCard(editingCard.id, patch)}
           onMove={(laneId) => void agent.stub.moveCard(editingCard.id, laneId, Number.MAX_SAFE_INTEGER).catch(refused)}
           onMoveNow={(laneId) => {
@@ -965,7 +1045,10 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, shared, boards, onSwitch
         />
       )}
       {membersOpen && !sharedBoard && (
-        <MembersDialog me={me} onClose={() => setMembersOpen(false)} onEncryption={() => { setMembersOpen(false); setEncOpen(true); }} />
+        <MembersDialog me={me} board={ownId} onClose={() => setMembersOpen(false)} onEncryption={() => { setMembersOpen(false); setEncOpen(true); }} />
+      )}
+      {naming && !sharedBoard && (
+        <BoardDialog mode={naming} name={naming === "rename" ? boardName(boards, own, me.id) : ""} onSubmit={naming === "new" ? createBoard : renameBoard} onClose={() => setNaming(null)} />
       )}
 
       {toast && (

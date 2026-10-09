@@ -17,22 +17,35 @@ import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, 
 import { TOOL_DOCS, type McpToolName } from "./tool-docs";
 import { WAIT_SECONDS, workingRules } from "./agent-rules";
 import { askState, fenceLines, fileMember, fileNote, oneLine } from "./shared";
+import { findOwnedBoard, ownedBoards, type BoardRef } from "./boards";
+import type { TodoAgent } from "./agent";
+import type { Presence } from "./presence";
 
 export const MCP_PATH = "/tasks/mcp";
+
+/**
+ * `board` on every tool: which of the caller's boards (boards.ts), by name or id. Left out, a
+ * call about one card looks for the card on each board, a call that adds something goes to the
+ * first board, and get_board shows every board.
+ */
+const BOARD_ARG = z.string().max(80).optional().describe("Which of your boards, by name or id. Leave it out for your first board, or for the board that has the card. list_boards names them");
+
+/** A board this request has reached: its registry row, its Durable Object, and its claims. */
+type Reached = { board: BoardRef; agent: DurableObjectStub<TodoAgent>; presence: DurableObjectStub<Presence> };
 
 // The Connect page lists the tools in tool-docs.ts, so that list has to be exactly what's
 // registered below: the board tools from tools.ts, search, and the ones written out here by
 // hand. If tool-docs.ts names a tool that's in neither set, `covered` fails to compile. A new
 // hand-written tool gets its description through doc(), which only takes names from this list.
-const BY_HAND = ["get_started", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card"] as const;
+const BY_HAND = ["get_started", "list_boards", "get_board", "get_card", "ask_ceo", "wait_for_answer", "claim_card", "release_card"] as const;
 type Registered = ToolName | "search_cards" | (typeof BY_HAND)[number];
 const covered: Exclude<McpToolName, Registered> extends never ? true : never = true;
 void covered;
 const doc = (name: (typeof BY_HAND)[number]) => TOOL_DOCS[name].description;
 
-const INSTRUCTIONS = `This is the user's personal task board, laid out as kanban lanes. Call get_board to see
-lanes, cards, and card ids, or search_cards to find specific cards on a big board, then use the other
-tools to change it. get_board shows only the start of each card's notes and the names of its files:
+const INSTRUCTIONS = `These are the user's task boards, each laid out as kanban lanes. Call get_board to see
+lanes, cards, and card ids (every board at once, or one with board), or search_cards to find specific cards on a big board, then use the other
+tools to change it. list_boards names the boards; every tool takes board to say which one it means. get_board shows only the start of each card's notes and the names of its files:
 call get_card for the full notes and to see attached images. get_board marks the
 done lane, wherever it sits: move a card there when the user finished it rather than deleting it. Dates
 are YYYY-MM-DD. Cards can carry tags (shown as #agent); pass tag to get_board or
@@ -94,16 +107,44 @@ const newFence = () => [...crypto.getRandomValues(new Uint8Array(10))].map((n) =
 const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, user: User): Promise<Response> {
-  const agent = await getAgentByName(env.TodoAgent, user.id);
-  const presence = env.Presence.get(env.Presence.idFromName(user.id));
+  // The boards this request has reached, by id: a tool that names one twice wakes it once.
+  const reached = new Map<string, Reached>();
+  const reach = async (board: BoardRef): Promise<Reached> => {
+    let r = reached.get(board.id);
+    if (!r) {
+      r = { board, agent: await getAgentByName(env.TodoAgent, board.id), presence: env.Presence.get(env.Presence.idFromName(board.id)) };
+      reached.set(board.id, r);
+    }
+    return r;
+  };
+  /**
+   * The board a call means. `key` names one of the caller's boards (findOwnedBoard). With no
+   * key, a call about one card (`cardId`) looks for it on each board, first board first, and
+   * a call about no card in particular is on the first board. Null when `key` names nothing.
+   */
+  const at = async (key: string | undefined, cardId?: string): Promise<Reached | null> => {
+    if (key !== undefined) {
+      const b = await findOwnedBoard(env, user, key);
+      return b ? reach(b) : null;
+    }
+    const boards = await ownedBoards(env, user);
+    if (cardId) {
+      for (const b of boards) {
+        const r = await reach(b);
+        if ((await r.agent.cardTitle(cardId)) !== null) return r;
+      }
+    }
+    return reach(boards[0]);
+  };
+  const noBoard = (key: string) => text(`There's no board of yours called "${oneLine(key).slice(0, 80)}". Call list_boards to see them.`, true);
 
   const handler = createMcpHandler(() => {
     // Every tool answers the same way on an end-to-end encrypted board: the server can't read it, so neither can an agent.
-    const locked = async () => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
+    const locked = async (agent: Reached["agent"]) => ((await agent.isSealed()) ? text(await agent.describe(), true) : null);
     const server = new McpServer({ name: "tasks", title: "Tasks", version: "1.0.0" }, { instructions: INSTRUCTIONS });
     // One card's text with a marker code made for it (newFence). The code has to be a string
     // the card's own text doesn't hold, so on the one-in-never chance it does, another is made.
-    const readCard = async (id: string) => {
+    const readCard = async (agent: Reached["agent"], id: string) => {
       for (let i = 0; i < 5; i++) {
         const fence = newFence();
         const card = await agent.cardDetail(id, user.email, fence);
@@ -112,25 +153,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       }
       return null;
     };
-
-    // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
-    // an encrypted board like every other tool: there's nothing there for an agent to work.
-    server.registerTool("get_started", {
-      title: "Get started",
-      description: doc("get_started"),
-      inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
-    }, async () => (await locked()) ?? text(workingRules(new URL(req.url).origin, "/tasks", newSessionId())));
-
-    server.registerTool("get_board", {
-      title: "Get board",
-      description: doc("get_board"),
-      inputSchema: z.object({ tag: z.string().optional().describe("Only cards with this tag, like agent") }),
-      annotations: { readOnlyHint: true },
-    }, async (input: { tag?: string }) => {
-      const no = await locked();
-      if (no) return no;
-      const board = await agent.describe(input?.tag, user.email);
+    /** The claims on a board, one line each, for get_board. */
+    const claimLines = async ({ agent, presence }: Reached) => {
       // Claims sit beside the board, not in it (presence.ts), so they're added here.
       const view = await presence.view();
       const lines: string[] = [];
@@ -141,7 +165,61 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         // One claim, one row (oneLine): the title, what the session said of itself, and the member note can't start another.
         lines.push(`  - ${oneLine(`[${c.cardId}] ${title} — claimed by ${describeHolder(c, view.now)}${await agent.memberLine(c.cardId, user.email)}`)}`);
       }
-      return text(lines.length ? `${board}\nClaimed by a live session (skip these unless the session is yours):\n${lines.join("\n")}` : board);
+      return lines.length ? `\nClaimed by a live session (skip these unless the session is yours):\n${lines.join("\n")}` : "";
+    };
+
+    server.registerTool("list_boards", {
+      title: "List boards",
+      description: doc("list_boards"),
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    }, async () => {
+      const boards = await ownedBoards(env, user, true);
+      return text(boards.map((b) => `- ${oneLine(b.name)} (board ${b.id})${b.first ? ": your first board, the default" : ""}${b.archivedAt ? ": archived" : ""}`).join("\n"));
+    });
+
+    // The working rules, so the prompt a person pastes is one line (agent-rules.ts). It answers on
+    // an encrypted board like every other tool: there's nothing there for an agent to work.
+    server.registerTool("get_started", {
+      title: "Get started",
+      description: doc("get_started"),
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    }, async () => {
+      // The rules are the same on every board. An account whose first board is encrypted is told so, as every tool tells it.
+      const first = await at(undefined);
+      return (await locked(first!.agent)) ?? text(workingRules(new URL(req.url).origin, "/tasks", newSessionId()));
+    });
+
+    server.registerTool("get_board", {
+      title: "Get board",
+      description: doc("get_board"),
+      inputSchema: z.object({ tag: z.string().optional().describe("Only cards with this tag, like agent"), board: BOARD_ARG }),
+      annotations: { readOnlyHint: true },
+    }, async (input: { tag?: string; board?: string }) => {
+      // One board when it's named; with no name, every board the caller owns, one after the
+      // other, each under a heading that says its name and id. One board alone reads exactly as
+      // it always has, headings and all left out.
+      if (input?.board !== undefined) {
+        const here = await at(input.board);
+        if (!here) return noBoard(input.board);
+        const no = await locked(here.agent);
+        if (no) return no;
+        return text(`${await here.agent.describe(input.tag, user.email)}${await claimLines(here)}`);
+      }
+      const boards = await ownedBoards(env, user);
+      const parts: string[] = [];
+      let open = 0;
+      for (const b of boards) {
+        const here = await reach(b);
+        const head = boards.length > 1 ? `# ${oneLine(b.name)} (board ${b.id})\n` : "";
+        if (await here.agent.isSealed()) { parts.push(`${head}${await here.agent.describe()}`); continue; }
+        open += 1;
+        parts.push(`${head}${await here.agent.describe(input?.tag, user.email)}${await claimLines(here)}`);
+      }
+      if (!open) return text(parts.join("\n\n"), true);
+      if (boards.length > 1) parts.push("A card on a board other than your first: the tools find it by its id, or pass board with that board's name.");
+      return text(parts.join("\n\n"));
     });
 
     server.registerTool("get_card", {
@@ -150,12 +228,16 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         files: z.boolean().optional().describe("false to list attachments without their contents. Default true"),
+        board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: true },
-    }, async (input: { id: string; files?: boolean }) => {
-      const no = await locked();
+    }, async (input: { id: string; files?: boolean; board?: string }) => {
+      const here = await at(input.board, input.id);
+      if (!here) return noBoard(input.board!);
+      const { agent, board } = here;
+      const no = await locked(agent);
       if (no) return no;
-      let read = await readCard(input.id);
+      let read = await readCard(agent, input.id);
       if (!read) return text(`There is no card with id ${input.id}.`, true);
       if (input.files === false) return { content: [{ type: "text" as const, text: read.card.text }] };
       // Text files are read first, so the marker code can be checked against what's in them: it
@@ -163,12 +245,12 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const bodies = new Map<string, { text: string; bytes: number } | null>();
       for (const a of read.card.attachments) {
         if (!TEXT_TYPES.test(a.type) || a.size > MAX_TEXT_BYTES) continue;
-        // Keys start with the user id (attachments.ts), so this can only reach the token owner's files.
-        const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
+        // Keys start with the board's id (attachments.ts), so this can only reach this board's files.
+        const obj = await env.ATTACHMENTS.get(`${board.id}/${a.id}`);
         bodies.set(a.id, !obj || obj.customMetadata?.sealed === "1" || obj.size > MAX_TEXT_BYTES ? null : { text: await obj.text(), bytes: obj.size });
       }
       for (let i = 0; i < 5 && [...bodies.values()].some((f) => f?.text.includes(read!.fence)); i++) {
-        read = await readCard(input.id);
+        read = await readCard(agent, input.id);
         if (!read) return text(`There is no card with id ${input.id}.`, true);
       }
       const { card, fence } = read;
@@ -197,7 +279,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
           content.push({ type: "text", text: `[${a.id}] ${name}${member ? whose : ":"}\n${f.begin}\n${body.text}\n${f.end}` });
           continue;
         }
-        const obj = await env.ATTACHMENTS.get(`${user.id}/${a.id}`);
+        const obj = await env.ATTACHMENTS.get(`${board.id}/${a.id}`);
         if (!obj || obj.customMetadata?.sealed === "1") { hidden("it couldn't be read."); continue; }
         imageBytes += a.size;
         content.push({ type: "text", text: `[${a.id}] ${name}${whose}${member ? " The image:" : ":"}` }, { type: "image", data: base64(new Uint8Array(await obj.arrayBuffer())), mimeType: a.type });
@@ -214,12 +296,16 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         options: z.array(z.string().min(1).max(140)).min(2).max(4).describe("2 to 4 answers to choose from. The owner can also type something else"),
         recommended: z.number().int().min(1).max(4).optional().describe("Which option you recommend, counting from 1"),
         session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, the one you claimed the card with, so the card stays yours while it waits"),
+        board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    }, async (input: { id: string; question: string; options: string[]; recommended?: number; session_id?: string }) => {
-      const no = await locked();
+    }, async (input: { id: string; question: string; options: string[]; recommended?: number; session_id?: string; board?: string }) => {
+      const here = await at(input.board, input.id);
+      if (!here) return noBoard(input.board!);
+      const { agent, presence } = here;
+      const no = await locked(agent);
       if (no) return no;
-      const { session_id, ...ask } = input;
+      const { session_id, board: _board, ...ask } = input;
       const r = (await agent.askCeo({ ...ask, recommended: input.recommended === undefined ? undefined : input.recommended - 1 }, user.email)) as ToolOutcome;
       if (!r.ok) return text(r.summary, true);
       // The asker keeps the card while it waits on the owner (Presence.asked). With no session_id
@@ -242,12 +328,17 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         ids: z.array(z.string()).min(1).max(5).describe("The cards you asked on, like c1a2b"),
         seconds: z.number().int().min(1).max(45).optional().describe(`How long to hold at most. Default ${WAIT_SECONDS}`),
         session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).optional().describe("Your session id, so the board knows you're still here"),
+        board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: true },
-    }, async (input: { ids: string[]; seconds?: number; session_id?: string }) => {
-      const no = await locked();
-      if (no) return no;
+    }, async (input: { ids: string[]; seconds?: number; session_id?: string; board?: string }) => {
       const ids = [...new Set(input.ids)];
+      // The cards waited on are on one board: the one named, or the one that has the first of them.
+      const on = await at(input.board, ids[0]);
+      if (!on) return noBoard(input.board!);
+      const { agent, presence } = on;
+      const no = await locked(agent);
+      if (no) return no;
       // Waiting is being alive. An agent polling here makes no other call, so each call counts as
       // hearing from the session it names and from the sessions holding these cards. Without this
       // a waiting agent lost its cards after 15 minutes.
@@ -261,7 +352,7 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         const ready: string[] = [];
         for (const id of ids) {
           // A member's notes come back between marker lines, so they can't pass for the next card's block in this same answer.
-          const card = (await readCard(id))?.card ?? null;
+          const card = (await readCard(agent, id))?.card ?? null;
           const state = card ? askState(card.text) : null;
           // A card the owner moved to the done lane is finished, question and all: its claim ended
           // there too (Presence.finish), and the rules never pick up a card in that lane.
@@ -291,10 +382,14 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
         id: z.string().describe("Card id like c1a2b"),
         session_id: z.string().min(6).max(80).regex(/^[\w.:-]+$/).describe("Your session id: the one get_started gave you, the same on every call"),
         agent: z.string().max(40).optional().describe("What you are, like claude-code, codex, or cursor"),
+        board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, async (input: { id: string; session_id: string; agent?: string }) => {
-      const no = await locked();
+    }, async (input: { id: string; session_id: string; agent?: string; board?: string }) => {
+      const here = await at(input.board, input.id);
+      if (!here) return noBoard(input.board!);
+      const { agent, presence } = here;
+      const no = await locked(agent);
       if (no) return no;
       const title = await agent.cardTitle(input.id);
       if (title === null) return text(`There is no card with id ${input.id}.`, true);
@@ -314,10 +409,14 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       inputSchema: z.object({
         id: z.string().describe("Card id like c1a2b"),
         session_id: z.string().min(6).max(80).describe("The session id you claimed it with"),
+        board: BOARD_ARG,
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, async (input: { id: string; session_id: string }) => {
-      const no = await locked();
+    }, async (input: { id: string; session_id: string; board?: string }) => {
+      const here = await at(input.board, input.id);
+      if (!here) return noBoard(input.board!);
+      const { agent, presence } = here;
+      const no = await locked(agent);
       if (no) return no;
       const released = await presence.release({ cardId: input.id, sessionId: input.session_id });
       // Not an error: a claim ends by itself when its card reaches the done lane or is deleted
@@ -329,13 +428,17 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
     server.registerTool(SEARCH_TOOL.name, {
       title: "Search cards",
       description: SEARCH_TOOL.description,
-      inputSchema: SEARCH_TOOL.inputSchema,
+      inputSchema: SEARCH_TOOL.inputSchema.extend({ board: BOARD_ARG }),
       annotations: { readOnlyHint: true },
     }, async (input: unknown) => {
-      const no = await locked();
+      const { board: key, ...rest } = (input ?? {}) as { board?: string } & Record<string, unknown>;
+      const here = await at(key);
+      if (!here) return noBoard(key!);
+      const { agent } = here;
+      const no = await locked(agent);
       if (no) return no;
       try {
-        return text(describeHits((await agent.search(input)) as SearchResult));
+        return text(describeHits((await agent.search(rest)) as SearchResult));
       } catch (e) {
         return text((e as Error).message, true);
       }
@@ -345,12 +448,18 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       const t = BOARD_TOOLS[name];
       server.registerTool(name, {
         description: t.description,
-        inputSchema: t.inputSchema,
+        inputSchema: t.inputSchema.extend({ board: BOARD_ARG }),
         annotations: { readOnlyHint: false, destructiveHint: !!t.destructive, idempotentHint: false, openWorldHint: false },
       }, async (input: unknown) => {
-        const no = await locked();
+        const { board: key, ...rest } = (input ?? {}) as { board?: string } & Record<string, unknown>;
+        // A call about cards finds them by the first id it names; one that adds goes to the first board.
+        const hint = typeof rest.id === "string" ? rest.id : Array.isArray(rest.ids) && typeof rest.ids[0] === "string" ? rest.ids[0] : undefined;
+        const here = await at(key, hint);
+        if (!here) return noBoard(key!);
+        const { agent } = here;
+        const no = await locked(agent);
         if (no) return no;
-        const r = (await agent.runTool(name, input, undefined, "agent", user.email)) as ToolOutcome;
+        const r = (await agent.runTool(name, rest, undefined, "agent", user.email)) as ToolOutcome;
         // The whole board after every write cost agents thousands of tokens a call. The lane counts
         // say the change landed; get_board and get_card are there for anything more.
         if (!r.ok) return text(r.summary, true);
@@ -369,7 +478,9 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
   // client spoke the protocol. The handshake counts, so the app says so as soon as the agent is
   // added, before it has touched a card. The board keeps the first time only (TodoAgent.noteAgentSeen).
   if (req.method === "POST" && res.ok) {
-    ctx.waitUntil(Promise.resolve(agent.noteAgentSeen()).catch((e: Error) => console.warn("noting the agent failed", e.message)));
+    // Every board the request reached hears it; a handshake that reached none tells the first board.
+    const seen = reached.size ? [...reached.values()].map((r) => r.agent) : [await getAgentByName(env.TodoAgent, user.id)];
+    for (const agent of seen) ctx.waitUntil(Promise.resolve(agent.noteAgentSeen()).catch((e: Error) => console.warn("noting the agent failed", e.message)));
   }
   return res;
 }

@@ -11,6 +11,7 @@ import { waitUntil } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
 import { canManage, planFor } from "./billing";
+import { boardById, ownedBoard, ownedBoards } from "./boards";
 import {
   BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, MEMBER_HTTP_RATE, retryAfter, SIGNAL_WAITS_MS, SLOW_DOWN_HTTP, spendToken, withRetries,
   type Access, type Bucket, type MemberRole,
@@ -100,22 +101,36 @@ const none = (board: string): Access => ({ board, ownerEmail: null, role: null, 
  *
  * `known.sealed` is for the Durable Object, which already knows whether its board is encrypted.
  */
-export async function access(env: Env, user: User, ownerId: string, known?: { sealed: boolean }): Promise<Access> {
-  if (typeof ownerId !== "string" || !BOARD_ID.test(ownerId)) return none(String(ownerId).slice(0, 32));
-  if (user.id === ownerId) {
-    return { board: ownerId, ownerEmail: user.email, ...decide({ isOwner: true, membership: null, plan: "free", sealed: false }), plan: await planFor(env, ownerId) };
+export async function access(env: Env, user: User, boardId: string, known?: { sealed: boolean }): Promise<Access> {
+  if (typeof boardId !== "string" || !BOARD_ID.test(boardId)) return none(String(boardId).slice(0, 32));
+  // Your first board (its id is yours), or another board of yours (the registry says so).
+  if (user.id === boardId || (await ownedBoard(env, user, boardId))) {
+    return { board: boardId, ownerEmail: user.email, ...decide({ isOwner: true, membership: null, plan: "free", sealed: false }), plan: await planFor(env, user.id) };
   }
   const row = await env.DB.prepare(
     "SELECT role, owner_email, member_email FROM board_members WHERE owner_id = ? AND member_id = ? AND status = 'accepted'",
-  ).bind(ownerId, user.id).first<Pick<MemberRow, "role" | "owner_email" | "member_email">>();
+  ).bind(boardId, user.id).first<Pick<MemberRow, "role" | "owner_email" | "member_email">>();
   // The id is a hash of the email, so these agree unless something is badly wrong. Check anyway.
-  if (!row || row.member_email !== user.email) return none(ownerId);
-  const plan = await planFor(env, ownerId);
-  const sealed = known ? known.sealed : await (await getAgentByName(env.TodoAgent, ownerId)).isSealed();
+  if (!row || row.member_email !== user.email) return none(boardId);
+  // The plan that governs a board is its owner's, whichever of their boards it is.
+  const plan = await planFor(env, await ownerOf(env, boardId));
+  const sealed = known ? known.sealed : await (await getAgentByName(env.TodoAgent, boardId)).isSealed();
   const d = decide({ isOwner: false, membership: row.role, plan, sealed });
-  if (d.effective === "none") return { ...none(ownerId), role: d.role, reason: d.reason };
-  return { board: ownerId, ownerEmail: row.owner_email, ...d, plan };
+  if (d.effective === "none") return { ...none(boardId), role: d.role, reason: d.reason };
+  return { board: boardId, ownerEmail: row.owner_email, ...d, plan };
 }
+
+/** The account that owns a board: the board's own id for a first board, else what the registry says (boards.ts). */
+async function ownerOf(env: Env, boardId: string): Promise<string> {
+  return (await boardById(env, boardId))?.ownerId ?? boardId;
+}
+
+/**
+ * A board the signed-in user owns, as the owner-side handlers below take it: `id` is the
+ * board's, `ownerId` and `email` are the owner's, and `name` and `first` are for the invite
+ * email. The daily invite cap and Stripe's "manage" live on the owner, the rest on the board.
+ */
+type Owned = { id: string; ownerId: string; email: string; name: string; first: boolean };
 
 /** Whether this email holds a live invite or a membership, which lets it sign in past ALLOWED_EMAILS. */
 export async function hasInvite(env: Env, email: string): Promise<boolean> {
@@ -296,7 +311,7 @@ async function signal(env: Env, ownerId: string, left?: string): Promise<void> {
 export async function syncSharing(env: Env, ownerId: string): Promise<{ suspended: boolean; flipped: boolean } | null> {
   const row = await env.DB.prepare("SELECT suspended FROM board_sharing WHERE owner_id = ?").bind(ownerId).first<{ suspended: number }>();
   if (!row) return null; // never shared
-  const suspended = (await planFor(env, ownerId)) === "pro" ? 0 : 1;
+  const suspended = (await planFor(env, await ownerOf(env, ownerId))) === "pro" ? 0 : 1;
   let flipped = false;
   if (row.suspended !== suspended) {
     // Only the request that flips the row writes the entry.
@@ -328,28 +343,35 @@ export async function syncSharing(env: Env, ownerId: string): Promise<{ suspende
 export function adminFlip(env: Env, ownerId: string, suspended: 0 | 1, grant: 0 | 1, at: number): D1PreparedStatement {
   return env.DB.prepare(
     `UPDATE board_sharing SET suspended = ?1, updated_at = ?2
-     WHERE owner_id = ?3 AND suspended != ?1 AND COALESCE((SELECT pro_grant FROM users WHERE user_id = ?3), 0) != ?4`,
+     WHERE (owner_id = ?3 OR owner_id IN (SELECT id FROM boards WHERE owner_id = ?3))
+       AND suspended != ?1 AND COALESCE((SELECT pro_grant FROM users WHERE user_id = ?3), 0) != ?4`,
   ).bind(suspended, at, ownerId, grant);
 }
 
-/** Write the entry for a flip `adminFlip` just made: the admin's email as the actor, marked as an admin's doing. */
+/** Write the entry for a flip `adminFlip` just made, on each of the owner's shared boards: the admin's email as the actor, marked as an admin's doing. */
 export async function logAdminFlip(env: Env, ownerId: string, admin: string, suspended: 0 | 1): Promise<void> {
-  if (!(await boardShared(env, ownerId))) return;
-  await env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)")
-    .bind(ownerId, Date.now(), admin, suspended ? "sharing_suspended" : "sharing_restored", ADMIN_DETAIL).run();
+  for (const b of await ownedBoards(env, { id: ownerId, email: "" }, true)) {
+    if (!(await boardShared(env, b.id))) continue;
+    await env.DB.prepare("INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)")
+      .bind(b.id, Date.now(), admin, suspended ? "sharing_suspended" : "sharing_restored", ADMIN_DETAIL).run();
+  }
 }
 
 /**
  * The owner's plan just changed: Stripe's webhook stored a subscription (billing.ts), or an
- * admin gave or took back Pro (users.ts, which has already recorded its own flip). Record
- * anything still unrecorded, as `system`, and tell the open sockets.
+ * admin gave or took back Pro (users.ts, which has already recorded its own flip). Every board
+ * they own follows the plan: record anything still unrecorded, as `system`, and tell the open
+ * sockets.
  */
 export async function planChanged(env: Env, ownerId: string): Promise<void> {
-  if ((await syncSharing(env, ownerId)) !== null) return signal(env, ownerId);
-  // A board nobody was ever invited to has no members to recheck and nothing to log, but its
-  // owner may have it open, with a menu that still says "Upgrade to Pro". One try, no retries:
-  // the tab asks again by itself the next time it has a reason to.
-  await (await getAgentByName(env.TodoAgent, ownerId)).planChanged();
+  for (const b of await ownedBoards(env, { id: ownerId, email: "" }, true)) {
+    if ((await syncSharing(env, b.id)) !== null) { await signal(env, b.id); continue; }
+    // A board nobody was ever invited to has no members to recheck and nothing to log, but its
+    // owner may have it open, with a menu that still says "Upgrade to Pro". The first board is
+    // told, one try, no retries: the tab asks again by itself the next time it has a reason to.
+    // Waking every other unshared board for that isn't worth it.
+    if (b.first) await (await getAgentByName(env.TodoAgent, b.id)).planChanged();
+  }
 }
 
 // ---------- the invite email ----------
@@ -367,21 +389,23 @@ function inviteLink(req: Request, token: string): string {
  * Send the invite, or in dev (DEV_LOGIN_CODES=1) print it and hand the link back, the same way
  * sign-in codes work there. In production the link only ever goes to the invited mailbox.
  */
-async function sendInvite(req: Request, env: Env, owner: User, email: string, role: MemberRole, token: string, expiresAt: number): Promise<{ devLink?: string } | { error: string }> {
+async function sendInvite(req: Request, env: Env, owner: Owned, email: string, role: MemberRole, token: string, expiresAt: number): Promise<{ devLink?: string } | { error: string }> {
   const link = inviteLink(req, token);
   if (env.DEV_LOGIN_CODES === "1") {
-    console.log(`[dev] invite for ${email} to ${owner.email}'s board (${role}): ${link}`);
+    console.log(`[dev] invite for ${email} to ${owner.email}'s board${owner.first ? "" : ` "${owner.name}"`} (${role}): ${link}`);
     return { devLink: link };
   }
   const until = new Date(expiresAt).toISOString().slice(0, 10);
-  const text = `${owner.email} invited you to their Tasks board as ${ROLE_WORDS[role]}.\n\nOpen the invite:\n${link}\n\n`
+  // A board after the first has a name worth saying; the first is just "their board".
+  const which = owner.first ? "their Tasks board" : `their Tasks board "${owner.name}"`;
+  const text = `${owner.email} invited you to ${which} as ${ROLE_WORDS[role]}.\n\nOpen the invite:\n${link}\n\n`
     + `Sign in as ${email} to accept or decline. The link works once and expires on ${until} (7 days).\n\n`
     + "If you weren't expecting this, you can ignore this email. Nothing is shared with you unless you accept.";
   const html = `<!doctype html><html><body style="margin:0;background:#f7f6f3;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#2c2c2c">
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px">
 <table width="100%" style="max-width:440px;background:#fffef9;border:2px solid #2c2c2c" cellpadding="0" cellspacing="0"><tr><td style="padding:32px">
 <div style="font-size:24px;font-weight:700;margin-bottom:24px">tasks<span style="color:#E85D00">.</span></div>
-<p style="font-size:15px;margin:0 0 16px"><b>${esc(owner.email)}</b> invited you to their Tasks board as ${esc(ROLE_WORDS[role])}.</p>
+<p style="font-size:15px;margin:0 0 16px"><b>${esc(owner.email)}</b> invited you to ${esc(which)} as ${esc(ROLE_WORDS[role])}.</p>
 <a href="${esc(link)}" style="display:inline-block;background:#E85D00;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px">Open the invite</a>
 <p style="font-size:13px;color:#6b6b6b;margin:24px 0 0">Sign in as ${esc(email)} to accept or decline. The link works once and expires on ${until} (7 days). If you weren't expecting this, ignore this email. Nothing is shared with you unless you accept.</p>
 </td></tr></table></td></tr></table></body></html>`;
@@ -422,22 +446,22 @@ const rowFor = (env: Env, ownerId: string, email: string) =>
  */
 export type Sharing = "on" | "pro_required" | "suspended" | "encrypted";
 
-async function listMembers(env: Env, owner: User): Promise<Response> {
+async function listMembers(env: Env, owner: Owned): Promise<Response> {
   // Opening the list is also a chance to notice a plan change no webhook announced.
   if ((await syncSharing(env, owner.id))?.flipped) await signal(env, owner.id);
   const { results } = await env.DB.prepare("SELECT * FROM board_members WHERE owner_id = ? ORDER BY invited_at").bind(owner.id).all<MemberRow>();
-  const plan = await planFor(env, owner.id);
+  const plan = await planFor(env, owner.ownerId);
   const sealed = await (await getAgentByName(env.TodoAgent, owner.id)).isSealed();
   const sent = await env.DB.prepare("SELECT sent FROM invite_sends WHERE owner_id = ? AND day = ?")
-    .bind(owner.id, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
+    .bind(owner.ownerId, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
   const sharing: Sharing = sealed ? "encrypted" : plan === "pro" ? "on" : results.length ? "suspended" : "pro_required";
   return json({
     board: {
-      id: owner.id, ownerEmail: owner.email, plan, sharing,
+      id: owner.id, name: owner.name, ownerEmail: owner.email, plan, sharing,
       maxMembers: maxMembers(env), used: results.length,
       maxInvitesPerDay: maxDailyInvites(env), invitesToday: sent?.sent ?? 0,
       // Whether there's a Stripe subscription for "Manage subscription" to open (canManage in billing.ts).
-      manage: await canManage(env, owner.id),
+      manage: await canManage(env, owner.ownerId),
     },
     members: results.map(toMember),
   });
@@ -456,12 +480,12 @@ async function gateRefusal(env: Env, ownerId: string): Promise<Response | null> 
 }
 
 /** What every new invite and resend needs first: Pro, and a board that isn't encrypted or being encrypted. */
-async function mayInvite(env: Env, owner: User): Promise<Response | null> {
-  if ((await planFor(env, owner.id)) !== "pro") return fail(402, "pro_required", "Sharing a board is part of Pro. Upgrade to invite people.");
+async function mayInvite(env: Env, owner: Owned): Promise<Response | null> {
+  if ((await planFor(env, owner.ownerId)) !== "pro") return fail(402, "pro_required", "Sharing a board is part of Pro. Upgrade to invite people.");
   return gateRefusal(env, owner.id);
 }
 
-async function setRole(env: Env, owner: User, row: MemberRow, role: MemberRole): Promise<Response> {
+async function setRole(env: Env, owner: Owned, row: MemberRow, role: MemberRole): Promise<Response> {
   if (row.role !== role) {
     await env.DB.batch([
       env.DB.prepare("UPDATE board_members SET role = ?, updated_at = ? WHERE owner_id = ? AND member_email = ?").bind(role, Date.now(), owner.id, row.member_email),
@@ -473,8 +497,8 @@ async function setRole(env: Env, owner: User, row: MemberRow, role: MemberRole):
 }
 
 /** A fresh token on a pending invite, and its email. The old link stops working the moment the hash is replaced. */
-async function reissue(req: Request, env: Env, owner: User, row: MemberRow, role: MemberRole): Promise<Response> {
-  if (!(await spendInviteEmail(env, owner.id))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
+async function reissue(req: Request, env: Env, owner: Owned, row: MemberRow, role: MemberRole): Promise<Response> {
+  if (!(await spendInviteEmail(env, owner.ownerId))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
   const token = randomToken();
   const now = Date.now();
   const expiresAt = now + INVITE_TTL_MS;
@@ -491,7 +515,7 @@ async function reissue(req: Request, env: Env, owner: User, row: MemberRow, role
   return json({ member, ...sent });
 }
 
-async function invite(req: Request, env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+async function invite(req: Request, env: Env, owner: Owned, body: Record<string, unknown>): Promise<Response> {
   const email = inviteEmail(body.email);
   if (!email) return fail(400, "bad_email", "That doesn't look like an email address we can invite. Use plain letters, digits, and punctuation.");
   if (!isMemberRole(body.role)) return fail(400, "bad_role", "Pick viewer or writer.");
@@ -512,7 +536,7 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
     // do something about right now, and the answer says the day's emails are gone as well, so
     // they don't make room only to be turned away again.
     const sent = await env.DB.prepare("SELECT sent FROM invite_sends WHERE owner_id = ? AND day = ?")
-      .bind(owner.id, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
+      .bind(owner.ownerId, new Date().toISOString().slice(0, 10)).first<{ sent: number }>();
     const spent = (sent?.sent ?? 0) >= maxDailyInvites(env);
     return json({
       error: `A board can have ${max} people, pending invites included. Remove someone or revoke an invite first.`
@@ -520,7 +544,7 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
       code: "member_limit", ...(spent ? { also: ["invite_limit"] } : {}),
     }, 409);
   }
-  if (!(await spendInviteEmail(env, owner.id))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
+  if (!(await spendInviteEmail(env, owner.ownerId))) return fail(429, "invite_limit", `You've sent today's ${maxDailyInvites(env)} invite emails. Try again tomorrow (UTC).`);
 
   const token = randomToken();
   const now = Date.now();
@@ -544,7 +568,7 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
   if (refusedNow) {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM board_members WHERE owner_id = ? AND member_email = ? AND status = 'pending' AND token_hash = ?").bind(owner.id, email, await tokenHash(token)),
-      env.DB.prepare("UPDATE invite_sends SET sent = sent - 1 WHERE owner_id = ? AND day = ? AND sent > 0").bind(owner.id, new Date(now).toISOString().slice(0, 10)),
+      env.DB.prepare("UPDATE invite_sends SET sent = sent - 1 WHERE owner_id = ? AND day = ? AND sent > 0").bind(owner.ownerId, new Date(now).toISOString().slice(0, 10)),
     ]);
     return refusedNow;
   }
@@ -561,7 +585,7 @@ async function invite(req: Request, env: Env, owner: User, body: Record<string, 
   return json({ member, ...sent }, 201);
 }
 
-async function resend(req: Request, env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+async function resend(req: Request, env: Env, owner: Owned, body: Record<string, unknown>): Promise<Response> {
   const email = inviteEmail(body.email);
   const row = email ? await rowFor(env, owner.id, email) : null;
   if (!row || row.status !== "pending") return fail(404, "not_found", "There's no pending invite for that address.");
@@ -571,7 +595,7 @@ async function resend(req: Request, env: Env, owner: User, body: Record<string, 
 }
 
 /** Take back a pending invite (`revoke`) or take an accepted member off the board (`remove`). */
-async function drop(env: Env, owner: User, body: Record<string, unknown>, status: "pending" | "accepted"): Promise<Response> {
+async function drop(env: Env, owner: Owned, body: Record<string, unknown>, status: "pending" | "accepted"): Promise<Response> {
   const email = inviteEmail(body.email);
   const gone = email ? await env.DB.prepare("DELETE FROM board_members WHERE owner_id = ? AND member_email = ? AND status = ? RETURNING role")
     .bind(owner.id, email, status).first<{ role: MemberRole }>() : null;
@@ -582,7 +606,7 @@ async function drop(env: Env, owner: User, body: Record<string, unknown>, status
   return json({ ok: true });
 }
 
-async function changeRole(env: Env, owner: User, body: Record<string, unknown>): Promise<Response> {
+async function changeRole(env: Env, owner: Owned, body: Record<string, unknown>): Promise<Response> {
   const email = inviteEmail(body.email);
   if (!isMemberRole(body.role)) return fail(400, "bad_role", "Pick viewer or writer.");
   const row = email ? await rowFor(env, owner.id, email) : null;
@@ -603,7 +627,7 @@ const AUDIT_KINDS = ["membership", "cards"] as const;
  * would hide matches on the pages not loaded yet. `seq` is still the entry's number in the
  * whole log. The first page also lists everyone who appears in the log, for the filter.
  */
-async function auditPage(req: Request, env: Env, owner: User): Promise<Response> {
+async function auditPage(req: Request, env: Env, owner: Owned): Promise<Response> {
   const q = new URL(req.url).searchParams;
   const before = Number(q.get("before"));
   const limit = Math.min(200, num(q.get("limit") ?? undefined, AUDIT_PAGE));
@@ -624,7 +648,7 @@ async function auditPage(req: Request, env: Env, owner: User): Promise<Response>
   return json({ entries: page.map(toEntry), next: results.length > limit ? page[page.length - 1].id : null, ...(people ? { people } : {}) });
 }
 
-async function auditExport(env: Env, owner: User, format: "csv" | "json"): Promise<Response> {
+async function auditExport(env: Env, owner: Owned, format: "csv" | "json"): Promise<Response> {
   const { results } = await env.DB.prepare(
     "SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS seq, at, actor, action, target, from_role, to_role, detail FROM board_audit WHERE owner_id = ? ORDER BY id LIMIT ?",
   ).bind(owner.id, AUDIT_EXPORT_MAX).all<AuditDbRow>();
@@ -694,9 +718,10 @@ async function lookup(req: Request, env: Env, user: User, body: Record<string, u
   const row = await liveInvite(env, user, body.token);
   if (!row) {
     const mine = await usedByMe(env, user, body.token);
-    return mine ? json({ member: { board: mine.owner_id, ownerEmail: mine.owner_email, role: mine.role } }) : inviteInvalid();
+    return mine ? json({ member: { board: mine.owner_id, name: (await boardById(env, mine.owner_id))?.name ?? "", ownerEmail: mine.owner_email, role: mine.role } }) : inviteInvalid();
   }
-  return json({ invite: { board: row.owner_id, ownerEmail: row.owner_email, email: row.member_email, role: row.role, expiresAt: row.expires_at } });
+  const name = (await boardById(env, row.owner_id))?.name ?? "";
+  return json({ invite: { board: row.owner_id, name, ownerEmail: row.owner_email, email: row.member_email, role: row.role, expiresAt: row.expires_at } });
 }
 
 async function accept(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
@@ -723,7 +748,7 @@ async function accept(req: Request, env: Env, user: User, body: Record<string, u
   if (used.meta.changes !== 1) return inviteInvalid();
   await audit(env, row.owner_id, user.email, "invite_accepted", user.email, null, row.role);
   await signal(env, row.owner_id);
-  return json({ ok: true, board: { id: row.owner_id, ownerEmail: row.owner_email, role: row.role } });
+  return json({ ok: true, board: { id: row.owner_id, name: (await boardById(env, row.owner_id))?.name ?? "", ownerEmail: row.owner_email, role: row.role } });
 }
 
 async function decline(req: Request, env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
@@ -738,20 +763,25 @@ async function decline(req: Request, env: Env, user: User, body: Record<string, 
   return json({ ok: true });
 }
 
-export type SharedBoard = { board: string; ownerEmail: string; role: MemberRole; effective: "viewer" | "writer"; reason: null | "plan_lapsed"; plan: "free" | "pro"; since: number | null };
+export type SharedBoard = { board: string; name: string; ownerEmail: string; role: MemberRole; effective: "viewer" | "writer"; reason: null | "plan_lapsed"; plan: "free" | "pro"; since: number | null };
+/** A board of yours after the first (boards.ts). */
+export type OwnBoard = { board: string; name: string; createdAt: number | null; archived: boolean };
 
+/** Every board this account can reach: its first board, the rest of its own, and the ones shared with it. */
 async function boards(env: Env, user: User): Promise<Response> {
   const { results } = await env.DB.prepare(
     "SELECT owner_id, owner_email, role, accepted_at FROM board_members WHERE member_id = ? AND member_email = ? AND status = 'accepted' ORDER BY accepted_at LIMIT 50",
   ).bind(user.id, user.email).all<Pick<MemberRow, "owner_id" | "owner_email" | "role" | "accepted_at">>();
   const shared: SharedBoard[] = [];
   for (const r of results) {
-    const plan = await planFor(env, r.owner_id);
+    const b = await boardById(env, r.owner_id);
+    const plan = await planFor(env, b?.ownerId ?? r.owner_id);
     // An encrypted board can't have members, so there's no need to wake each board to ask.
     const d = decide({ isOwner: false, membership: r.role, plan, sealed: false });
-    shared.push({ board: r.owner_id, ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
+    shared.push({ board: r.owner_id, name: b?.name ?? "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
   }
-  return json({ own: { board: user.id, email: user.email, plan: await planFor(env, user.id) }, shared });
+  const mine: OwnBoard[] = (await ownedBoards(env, user, true)).filter((b) => !b.first).map((b) => ({ board: b.id, name: b.name, createdAt: b.createdAt, archived: b.archivedAt !== null }));
+  return json({ own: { board: user.id, email: user.email, plan: await planFor(env, user.id) }, mine, shared });
 }
 
 async function leave(env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
@@ -767,44 +797,60 @@ async function leave(env: Env, user: User, body: Record<string, unknown>): Promi
 
 /**
  * The team-board API. Everything needs a browser session; the Worker has already refused
- * writes from another origin (fromElsewhere in server.ts). `/api/board/*` is the signed-in
- * user's own board, so there's no board id to pass and none to guess.
+ * writes from another origin (fromElsewhere in server.ts). `/api/board/*` is a board the
+ * signed-in user owns: their first board unless `board` (the query on a GET, the body on a
+ * POST) names another of theirs. A board that isn't theirs gets the same 404 as one that
+ * doesn't exist.
  */
 export async function handleMembers(req: Request, env: Env, path: string): Promise<Response | null> {
   const mine = path === "/api/board" || path.startsWith("/api/board/");
   if (!mine && path !== "/api/boards" && !path.startsWith("/api/boards/") && !path.startsWith("/api/invites/")) return null;
   const user = await currentUser(req, env);
   if (!user) return json({ error: "signed out" }, 401);
+  const noBoard = () => fail(404, "not_found", "No such board.");
+  /** The owner's own board the call is about, from `key`, as the owner-side handlers take it. */
+  const owned = async (key: unknown): Promise<Owned | null> => {
+    const b = await ownedBoard(env, user, typeof key === "string" ? key : null);
+    return b ? { id: b.id, ownerId: user.id, email: user.email, name: b.name, first: b.first } : null;
+  };
 
   if (req.method === "GET") {
-    if (path === "/api/board/members") return listMembers(env, user);
-    if (path === "/api/board/audit") return auditPage(req, env, user);
-    if (path === "/api/board/audit.csv") return auditExport(env, user, "csv");
-    if (path === "/api/board/audit.json") return auditExport(env, user, "json");
+    const q = new URL(req.url).searchParams;
     if (path === "/api/boards") return boards(env, user);
     if (path === "/api/board/access") {
-      const board = new URL(req.url).searchParams.get("board") ?? user.id;
+      const board = q.get("board") ?? user.id;
       // Someone else's board: counted first, so a refusal costs nothing more (spendBoardCall).
-      const slow = board === user.id ? null : spendBoardCall(user.id);
+      const slow = board === user.id || (await ownedBoard(env, user, board)) ? null : spendBoardCall(user.id);
       if (slow) return slow;
       const a = await access(env, user, board);
-      return a.effective === "none" ? fail(404, "not_found", "No such board.") : json({ access: a });
+      return a.effective === "none" ? noBoard() : json({ access: a });
     }
+    const owner = await owned(q.get("board"));
+    if (!owner) return noBoard();
+    if (path === "/api/board/members") return listMembers(env, owner);
+    if (path === "/api/board/audit") return auditPage(req, env, owner);
+    if (path === "/api/board/audit.csv") return auditExport(env, owner, "csv");
+    if (path === "/api/board/audit.json") return auditExport(env, owner, "json");
     return null;
   }
   if (req.method !== "POST") return null;
   const raw = await req.json<unknown>().catch(() => null);
   const body = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
   switch (path) {
-    case "/api/board/invites": return invite(req, env, user, body);
-    case "/api/board/invites/resend": return resend(req, env, user, body);
-    case "/api/board/invites/revoke": return drop(env, user, body, "pending");
-    case "/api/board/members/role": return changeRole(env, user, body);
-    case "/api/board/members/remove": return drop(env, user, body, "accepted");
     case "/api/invites/lookup": return lookup(req, env, user, body);
     case "/api/invites/accept": return accept(req, env, user, body);
     case "/api/invites/decline": return decline(req, env, user, body);
     case "/api/boards/leave": return leave(env, user, body);
+  }
+  if (!mine) return null;
+  const owner = await owned(body.board);
+  if (!owner) return noBoard();
+  switch (path) {
+    case "/api/board/invites": return invite(req, env, owner, body);
+    case "/api/board/invites/resend": return resend(req, env, owner, body);
+    case "/api/board/invites/revoke": return drop(env, owner, body, "pending");
+    case "/api/board/members/role": return changeRole(env, owner, body);
+    case "/api/board/members/remove": return drop(env, owner, body, "accepted");
     default: return null;
   }
 }

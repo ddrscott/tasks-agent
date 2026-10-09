@@ -12,8 +12,9 @@ import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events"
 import { endedCards } from "./presence-shared";
 import { CardIndex } from "./search";
 import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
+import { boardById } from "./boards";
 import {
-  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
   frameCost, memberMoveError, memberTidy, memberTidyCard, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
@@ -157,12 +158,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   override async fetch(request: Request): Promise<Response> {
     const member = request.headers.get(H_MEMBER);
     if (member !== null) return this.acceptMember(request, member);
-    if (request.headers.get(H_USER) !== this.name) return new Response("Not found", { status: 404 });
+    // The Worker names the board it means (H_BOARD) and its owner (H_USER). A request that names
+    // another board, or none, is for nobody here.
+    if (request.headers.get(H_BOARD) !== this.name) return new Response("Not found", { status: 404 });
     return super.fetch(request);
   }
 
-  /** The owner's socket: remember their email for attribution. */
+  /** The owner's socket: remember their email for attribution, and whose board this is (boards.ts). */
   onConnect(connection: Connection, ctx: { request: Request }) {
+    const owner = ctx.request.headers.get(H_USER);
+    if (owner && owner !== this.knownOwnerId()) this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('owner_id', ${owner})`;
     let email: string | null = null;
     try { email = decodeURIComponent(ctx.request.headers.get(H_EMAIL) ?? ""); } catch { /* not ours */ }
     if (!email) return;
@@ -173,6 +178,28 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** The owner's email, as last seen on one of their sockets. For changes made with no socket in hand (a chat turn's tools). */
   private ownerEmail(): string | null {
     return this.sql<{ v: string }>`SELECT v FROM board_meta WHERE k = 'owner_email'`[0]?.v ?? null;
+  }
+
+  /** The owner's account id as this board has recorded it, or null before any owner has reached it. */
+  private knownOwnerId(): string | null {
+    return this.sql<{ v: string }>`SELECT v FROM board_meta WHERE k = 'owner_id'`[0]?.v ?? null;
+  }
+
+  /**
+   * The account that owns this board. A first board is named by its owner's id, so it's the
+   * name. Any other board's owner is in the registry (boards.ts), read once and kept here, so
+   * the plan that governs the board and the event feed its changes go to are its owner's.
+   */
+  private async ownerId(): Promise<string> {
+    const known = this.knownOwnerId();
+    if (known) return known;
+    const b = await boardById(this.env, this.name).catch((e: Error) => { console.warn("reading the board's owner failed", e.message); return null; });
+    const id = b?.ownerId ?? this.name;
+    if (b) {
+      this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('owner_id', ${id})`;
+      if (b.ownerEmail && !this.ownerEmail()) this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('owner_email', ${b.ownerEmail})`;
+    }
+    return id;
   }
 
   /** Who to name on a card this code is changing, or null when there's nobody to name. */
@@ -590,7 +617,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       return callers.run({ kind: "owner", email: who?.email ?? this.ownerEmail(), effective: "owner", reason: null, ...(via ? { via } : {}) }, fn);
     }
     const a = await access(this.env, who, this.name, { sealed: !!this.state.sealed });
-    if (a.effective === "none" || a.role === "owner") throw new Error("No such board.");
+    // The owner of a board that isn't their first: their id isn't the board's name, and the registry says it's theirs (boards.ts).
+    if (a.role === "owner") return callers.run({ kind: "owner", email: who.email, effective: "owner", reason: null, ...(via ? { via } : {}) }, fn);
+    if (a.effective === "none") throw new Error("No such board.");
     return callers.run({ kind: "member", id: who.id, email: who.email, effective: a.effective, reason: a.reason, ...(via ? { via } : {}) }, fn);
   }
 
@@ -722,8 +751,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Tell any listening agent session (events.ts) about changes you made to #agent cards. */
   private publish(events: TaskEvent[]) {
     if (!events.length) return;
-    const feed = this.env.TaskEvents.get(this.env.TaskEvents.idFromName(this.name));
-    this.ctx.waitUntil(feed.publish(events).catch((e: Error) => console.warn("event publish failed", e.message)));
+    // The feed is the owner's, one for all their boards (ownerId), and each event names this board.
+    const named = events.map((e) => ({ ...e, board: this.name }));
+    this.ctx.waitUntil(this.ownerId()
+      .then((owner) => this.env.TaskEvents.get(this.env.TaskEvents.idFromName(owner)).publish(named))
+      .catch((e: Error) => console.warn("event publish failed", e.message)));
   }
 
   /** The open #agent cards, sent to an event client when it connects. Null on an encrypted board. */
@@ -1571,9 +1603,11 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Assistant messages used today, the cap for this user's plan, and whether they can upgrade. */
   @callable()
   async usage(): Promise<Usage> {
-    const { plan, granted } = await planSource(this.env, this.name);
+    // The plan is the owner's, whichever of their boards this is.
+    const owner = await this.ownerId();
+    const { plan, granted } = await planSource(this.env, owner);
     const used = this.sql<{ chats: number }>`SELECT chats FROM usage WHERE day = ${this.today()}`[0]?.chats ?? 0;
-    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env), ...(granted ? { granted } : {}), manage: await canManage(this.env, this.name) };
+    return { plan, used, limit: dailyLimit(this.env, plan), billing: billingEnabled(this.env), ...(granted ? { granted } : {}), manage: await canManage(this.env, owner) };
   }
 
   /** A cloud turn's tool calls: the assistant, on the owner's behalf. Only the owner's socket can start one. */

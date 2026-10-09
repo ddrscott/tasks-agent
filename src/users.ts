@@ -159,7 +159,8 @@ async function update(req: Request, env: Env, admin: User): Promise<Response> {
   else {
     // The flip goes first so it can compare the new grant with the stored one, then the grant.
     const [flip] = await env.DB.batch([adminFlip(env, userId, flipTo, setPro ? 1 : 0, now), write]);
-    if (flip.meta.changes === 1) {
+    // One row per board of theirs that was shared (adminFlip covers them all).
+    if ((flip.meta.changes ?? 0) >= 1) {
       await logAdminFlip(env, userId, admin.email, flipTo).catch((e: Error) => console.error("recording an admin's plan change failed", e.message));
     }
   }

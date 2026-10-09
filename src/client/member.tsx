@@ -18,11 +18,24 @@ export type MemberAccess = {
   reason: null | "plan_lapsed";
 };
 
-/** `GET /api/boards`: your own board, and the ones shared with you. */
+/** A board of yours after the first (boards.ts): the first one has no row and is always "My board". */
+export type OwnBoard = { board: string; name: string; createdAt: number | null; archived: boolean };
+
+/** `GET /api/boards`: your first board, the rest of your own, and the ones shared with you. */
 export type Boards = {
   own: { board: string; email: string; plan: "free" | "pro" };
-  shared: (MemberAccess & { plan: "free" | "pro"; since: number | null })[];
+  mine: OwnBoard[];
+  shared: (MemberAccess & { name: string; plan: "free" | "pro"; since: number | null })[];
 };
+
+/** The name of the board `id` as the list has it: "My board" for your first, the row's name for another of yours, the owner's email for a shared one. */
+export function boardName(boards: Boards | null, id: string | null, myId: string): string {
+  if (!id || id === myId) return "My board";
+  const mine = boards?.mine.find((b) => b.board === id);
+  if (mine) return mine.name;
+  const shared = boards?.shared.find((b) => b.board === id);
+  return shared ? shared.ownerEmail : "Board";
+}
 
 /** What the person looking at a board may do there. The owner: anything. A writer: cards. A viewer: look. */
 export type Mode = "owner" | "writer" | "viewer";

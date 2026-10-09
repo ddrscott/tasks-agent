@@ -631,8 +631,10 @@ export function memberCap(raw: string | undefined): number {
 // Headers the Worker sets when it hands a request to a board's Durable Object. They mean
 // something only because the Worker is the one who set them: it deletes every one of these
 // from what the browser sent before adding its own (INTERNAL_HEADERS, server.ts).
-/** The signed-in user's id. The board answers its own SDK protocol only when this is its owner. */
+/** The signed-in user's id: the board's owner on the owner path. The board records it as whose it is (TodoAgent.ownerId). */
 export const H_USER = "x-tasks-user";
+/** The board the request is for, which is the Durable Object's own name. The board answers its own SDK protocol only when this names it (boards.ts: an owner has many). */
+export const H_BOARD = "x-tasks-board";
 /** The signed-in user's email, for attribution. */
 export const H_EMAIL = "x-tasks-email";
 /** `{"id","email"}` of a member the Worker has checked. Its presence picks the member protocol. */
@@ -644,7 +646,7 @@ export const H_MEMBER = "x-tasks-member";
  */
 export const H_HOLD = "x-tasks-dev-hold";
 export const INTERNAL_HEADERS = [
-  H_USER, H_EMAIL, H_MEMBER, H_HOLD, "x-user",
+  H_USER, H_BOARD, H_EMAIL, H_MEMBER, H_HOLD, "x-user",
   // The Agents SDK's own: startup props, and the marker that routes a socket to a sub-agent.
   "x-agents-lifecycle-props", "x-cf-agents-subagent-url",
 ] as const;

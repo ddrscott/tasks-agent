@@ -5,7 +5,8 @@ import { currentUser, handleAuth, type User } from "./auth";
 import { handleBilling, handlePlans } from "./billing";
 import { handleMcp, MCP_PATH } from "./mcp";
 import { access, handleMembers, spendBoardCall } from "./members";
-import { BOARD_ID, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
+import { BOARD_ID, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
+import { handleBoards, ownedBoard } from "./boards";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
 import { AUTHORIZE_PATH, handleAuthorize, handleGrants } from "./oauth";
 import { EVENTS_PROTOCOL } from "./events";
@@ -139,7 +140,7 @@ const app: ExportedHandler<Env> = {
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))
         ?? (await handleTokens(req, env, sub)) ?? (await handleGrants(req, env, sub))
         ?? (await handleAdmin(req, env, sub)) ?? (await handlePlans(req, env, sub)) ?? (await handleBilling(req, env, sub)) ?? (await handleAttachments(req, env, sub))
-        ?? (await handleMembers(req, env, sub))
+        ?? (await handleBoards(req, env, sub)) ?? (await handleMembers(req, env, sub))
         ?? Response.json({ error: "not found" }, { status: 404 });
     }
 
@@ -150,20 +151,23 @@ const app: ExportedHandler<Env> = {
     }
 
     // The client connects to /tasks/agent (WebSocket plus a few HTTP calls). With no `board`
-    // in the query the session decides which Durable Object it reaches: your own. `?board=<id>`
-    // asks for a board someone shared with you, and the membership check decides (// TEAM_BOARDS).
+    // in the query the session decides which Durable Object it reaches: your first board.
+    // `?board=<id>` names another board of yours (boards.ts), or one someone shared with you,
+    // where the membership check decides (// TEAM_BOARDS).
     if (sub === "/agent" || sub.startsWith("/agent/")) {
       if (fromElsewhere(req)) return forbidden();
       const user = await currentUser(req, env);
       if (!user) return new Response("Sign in first", { status: 401 });
       const board = new URL(req.url).searchParams.get("board");
-      if (board !== null && board !== user.id) return memberConnect(req, env, user, sub, board);
+      const own = await ownedBoard(env, user, board);
+      if (!own) return memberConnect(req, env, user, sub, board ?? "");
       // Who's calling is said in headers only the Worker may set, so drop any the browser sent.
       const headers = new Headers(req.headers);
       for (const h of INTERNAL_HEADERS) headers.delete(h);
       headers.set(H_USER, user.id);
+      headers.set(H_BOARD, own.id);
       headers.set(H_EMAIL, encodeURIComponent(user.email)); // header values are bytes; an email needn't be
-      const agent = await getAgentByName(env.TodoAgent, user.id);
+      const agent = await getAgentByName(env.TodoAgent, own.id);
       return agent.fetch(new Request(req, { headers }));
     }
 

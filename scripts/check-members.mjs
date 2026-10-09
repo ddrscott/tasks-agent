@@ -2086,17 +2086,20 @@ section("attachments");
 
 // ---------- every other /api route is your own ----------
 
-section("everything else is your own board");
+section("a board that isn't yours is no board at all (// BOARDS)");
 {
   const wm = await call(writer, "GET", `/api/board/members?board=${owner.id}`);
-  ok("a member asking for the members list gets their own (empty) one", wm.status === 200 && wm.data.board.id === writer.id && wm.data.members.length === 0, wm.data);
+  // /api/board/* takes `board`, and a board you don't own answers like one that doesn't exist (// BOARDS).
+  ok("a member asking for the owner's members list gets 404, the same as for no board", wm.status === 404 && wm.data.code === "not_found" && !wm.text.includes(owner.email), wm.data);
+  const own = await call(writer, "GET", "/api/board/members");
+  ok("and with no board named, their own (empty) one", own.status === 200 && own.data.board.id === writer.id && own.data.members.length === 0, own.data);
   const wa = await call(writer, "GET", `/api/board/audit?board=${owner.id}`);
-  ok("a member can't read the owner's audit log", wa.status === 200 && wa.data.entries.length === 0 && !wa.text.includes(owner.email), wa.text.slice(0, 200));
+  ok("a member can't read the owner's audit log", wa.status === 404 && !wa.text.includes(owner.email), wa.text.slice(0, 200));
   const wc = await call(viewer, "GET", `/api/board/audit.csv?board=${owner.id}`);
   ok("a member can't download the owner's audit log", !wc.text.includes(owner.email) && wc.text.trim().split("\n").length === 1, wc.text.slice(0, 200));
   ok("a member can't remove another member", (await call(writer, "POST", "/api/board/members/remove", { email: viewer.email, board: owner.id })).status === 404);
   ok("a member can't change a role", (await call(viewer, "POST", "/api/board/members/role", { email: viewer.email, role: "writer", board: owner.id })).status === 404);
-  ok("a member can't invite to the owner's board", (await call(writer, "POST", "/api/board/invites", { email: stranger.email, role: "writer", board: owner.id })).status === 402);
+  ok("a member can't invite to the owner's board", (await call(writer, "POST", "/api/board/invites", { email: stranger.email, role: "writer", board: owner.id })).status === 404);
   ok("a member can't revoke the owner's invite", (await call(writer, "POST", "/api/board/invites/revoke", { email: late.email })).status === 404);
   ok("the membership API needs a session", (await call(null, "GET", "/api/board/members")).status === 401 && (await call(null, "GET", "/api/board/audit.csv")).status === 401 && (await call(null, "GET", "/api/boards")).status === 401);
   const tokens = await call(writer, "GET", "/api/tokens");
@@ -3136,7 +3139,7 @@ section("Pro given by an admin");
   ok("an admin invited as a viewer is a viewer", aInv.status === 201 && aAcc.status === 200 && aFirst?.effective === "viewer" && aFirst.role === "viewer", aFirst);
   ok("and can't change a card", (await aView.rpc("addCard", [gLane, "From an admin"])).error === rules.READ_ONLY);
   ok("or get the owner's members list or audit log", !aView.frames.some((f) => f.type === "tasks_members") && !(await call(admin, "GET", "/api/board/members")).text.includes(gMember.email) && !(await call(admin, "GET", "/api/board/audit?limit=200")).text.includes(gMember.email));
-  ok("or invite to it, change a role on it, or remove someone from it", (await call(admin, "POST", "/api/board/invites", { email: stranger.email, role: "viewer", board: gOwner.id })).status === 402
+  ok("or invite to it, change a role on it, or remove someone from it", (await call(admin, "POST", "/api/board/invites", { email: stranger.email, role: "viewer", board: gOwner.id })).status === 404
     && (await call(admin, "POST", "/api/board/members/role", { email: gMember.email, role: "viewer", board: gOwner.id })).status === 404
     && (await call(admin, "POST", "/api/board/members/remove", { email: gMember.email, board: gOwner.id })).status === 404
     && (await call(gOwner, "GET", "/api/board/members")).data.members.some((m) => m.email === gMember.email && m.role === "writer"));

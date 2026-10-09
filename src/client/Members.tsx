@@ -17,6 +17,8 @@ import { sharingFacts } from "./sharing";
 
 export type BoardInfo = {
   id: string; ownerEmail: string; plan: "free" | "pro"; sharing: Sharing;
+  /** "My board" for a first board, else the name its owner gave it (boards.ts). */
+  name: string;
   maxMembers: number; used: number; maxInvitesPerDay: number; invitesToday: number;
   /** Whether "Manage subscription" has a Stripe subscription to open. False for Pro an admin gave, or took back. */
   manage: boolean;
@@ -43,7 +45,8 @@ export async function refreshMembers(userId: string): Promise<void> {
   if (snap.user !== userId) publish({ ...EMPTY, user: userId });
   let next: Snapshot;
   try {
-    const r = await fetch(api("/api/board/members"), { headers: { Accept: "application/json" } });
+    // `userId` is the board's id: your own id for your first board, the board's for another of yours (// BOARDS).
+    const r = await fetch(api(`/api/board/members?board=${encodeURIComponent(userId)}`), { headers: { Accept: "application/json" } });
     const data = (await r.json().catch(() => null)) as { board?: BoardInfo; members?: Member[]; error?: string } | null;
     if (!r.ok || !data?.board || !Array.isArray(data.members)) throw new Error(r.status === 401 ? SIGNED_OUT : "The members list didn't load. Try again in a minute.");
     next = { user: userId, state: "ready", board: data.board, members: data.members, error: null };
@@ -229,16 +232,18 @@ function price(p: NonNullable<Plans["pro"]>["price"]): string {
 type Note = { kind: "ok" | "error"; text: string };
 type Props = {
   me: { id: string; email: string };
+  /** The board on screen: `me.id` for your first board, or the id of another board of yours (// BOARDS). */
+  board: string;
   onClose(): void;
   /** Open the Encryption dialog instead (an encrypted board's way back to sharing). */
   onEncryption(): void;
 };
 
-export function MembersDialog({ me, onClose, onEncryption }: Props) {
+export function MembersDialog({ me, board: boardId, onClose, onEncryption }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   // Opened from the account menu, whose item is gone by the time this closes: go back to the menu's button.
   useModal(ref, { focus: (d) => d.focus(), fallback: () => document.querySelector<HTMLElement>(".account-btn") });
-  const { state, board, members, error: loadError } = useBoardMembers(me.id);
+  const { state, board, members, error: loadError } = useBoardMembers(boardId);
   const [tab, setTab] = useState<"people" | "audit">("people");
   const ids = useId();
 
@@ -246,8 +251,8 @@ export function MembersDialog({ me, onClose, onEncryption }: Props) {
   // something changed (membersChanged, above), and that's what refreshes it; this once-a-minute
   // look is for the case where the socket was down when it happened.
   useEffect(() => {
-    void refreshMembers(me.id);
-    const t = setInterval(() => { if (document.visibilityState === "visible") void refreshMembers(me.id); }, 60_000);
+    void refreshMembers(boardId);
+    const t = setInterval(() => { if (document.visibilityState === "visible") void refreshMembers(boardId); }, 60_000);
     return () => clearInterval(t);
   }, [me.id]);
 
@@ -300,7 +305,7 @@ export function MembersDialog({ me, onClose, onEncryption }: Props) {
         )}
         {tab === "audit" && (
           <div className="mem-panel" role="tabpanel" id={`${ids}-panel-audit`} aria-labelledby={`${ids}-tab-audit`}>
-            <AuditLog me={me} />
+            <AuditLog me={me} board={boardId} />
           </div>
         )}
       </div>
@@ -378,7 +383,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
     if (have) { setFormError(`${to} already has a pending invite as ${a(have.role)}. Use Resend below to send a new link.`); return; }
 
     setBusy("invite");
-    const r = await post<{ member: Member; devLink?: string; changed?: boolean }>("/api/board/invites", { email: to, role });
+    const r = await post<{ member: Member; devLink?: string; changed?: boolean }>("/api/board/invites", { board: board.id, email: to, role });
     setBusy(null);
     if (!r.ok) {
       setFormError(explain(r, board, to));
@@ -401,7 +406,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
   async function resend(m: Member) {
     setBusy(`resend:${m.email}`);
     setDevLink(null);
-    const r = await post<{ member: Member; devLink?: string }>("/api/board/invites/resend", { email: m.email });
+    const r = await post<{ member: Member; devLink?: string }>("/api/board/invites/resend", { board: board.id, email: m.email });
     setBusy(null);
     if (!r.ok) tell({ kind: "error", text: explain(r, board, m.email) });
     else {
@@ -417,7 +422,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
     setArmed(null);
     setBusy(key);
     const pending = m.status === "pending";
-    const r = await post<{ ok: true }>(pending ? "/api/board/invites/revoke" : "/api/board/members/remove", { email: m.email });
+    const r = await post<{ ok: true }>(pending ? "/api/board/invites/revoke" : "/api/board/members/remove", { board: board.id, email: m.email });
     setBusy(null);
     if (devLink?.email === m.email) setDevLink(null);
     if (!r.ok) tell({ kind: "error", text: explain(r, board, m.email) }, true);
@@ -428,7 +433,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
   async function changeRole(m: Member, next: MemberRole) {
     if (next === m.role) return;
     setBusy(`role:${m.email}`);
-    const r = await post<{ member: Member; changed: boolean }>("/api/board/members/role", { email: m.email, role: next });
+    const r = await post<{ member: Member; changed: boolean }>("/api/board/members/role", { board: board.id, email: m.email, role: next });
     setBusy(null);
     if (!r.ok) tell({ kind: "error", text: explain(r, board, m.email) });
     else if (m.status === "pending") tell({ kind: "ok", text: `${m.email}'s invite is for ${a(next)} now. The link they have still works.` });
@@ -744,7 +749,7 @@ export function foldAudit(entries: AuditEntry[]): AuditRow[] {
   return rows;
 }
 
-function AuditLog({ me }: { me: Props["me"] }) {
+function AuditLog({ me, board }: { me: Props["me"]; board: string }) {
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -768,7 +773,7 @@ function AuditLog({ me }: { me: Props["me"] }) {
       // lane is hundreds of them), so keep reading until the run is over, in bigger pages.
       for (let hop = 0; ; hop++) {
         const query = `limit=${hop ? RUN_PAGE : AUDIT_PAGE}${cursor ? `&before=${cursor}` : ""}${who ? `&who=${encodeURIComponent(who)}` : ""}${kind ? `&kind=${kind}` : ""}`;
-        const r = await fetch(api(`/api/board/audit?${query}`), { headers: { Accept: "application/json" } });
+        const r = await fetch(api(`/api/board/audit?board=${encodeURIComponent(board)}&${query}`), { headers: { Accept: "application/json" } });
         const data = (await r.json().catch(() => null)) as { entries?: AuditEntry[]; next?: number | null; people?: string[] } | null;
         if (!r.ok || !Array.isArray(data?.entries)) throw new Error(r.status === 401 ? SIGNED_OUT : "The audit log didn't load. Try again in a minute.");
         // A slower answer for a filter that's since been changed is dropped.
@@ -828,8 +833,8 @@ function AuditLog({ me }: { me: Props["me"] }) {
         the account is.
       </p>
       <div className="mem-actions audit-actions">
-        <a className="btn" href={api("/api/board/audit.csv")} download>Download CSV</a>
-        <a className="btn" href={api("/api/board/audit.json")} download>Download JSON</a>
+        <a className="btn" href={api(`/api/board/audit.csv?board=${encodeURIComponent(board)}`)} download>Download CSV</a>
+        <a className="btn" href={api(`/api/board/audit.json?board=${encodeURIComponent(board)}`)} download>Download JSON</a>
         <button type="button" className="btn ghost" disabled={busy} onClick={() => { paged.current = false; void load(null); }}>Refresh</button>
         <span className="mem-foot">Downloads hold the whole log, oldest first, numbered from 1 with no gaps, with times in UTC (ISO 8601).</span>
       </div>

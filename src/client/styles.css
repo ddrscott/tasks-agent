@@ -1321,6 +1321,14 @@ a.att-name:hover { color: var(--accent-text); }
 }
 .sealed-chip svg { width: 13px; height: 13px; }
 label.check, .dialog-body label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; font: 13px var(--font-ui); color: var(--ink); }
+/* Which board a card is on, on the All boards screen (AllBoards.tsx). */
+.chip.board-chip { border: 1px solid var(--accent); color: var(--accent-text); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Name a board (BoardDialog.tsx, // BOARDS). */
+.board-dialog { width: min(440px, calc(100vw - 32px)); }
+.board-dialog .dialog-body p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.board-dialog .dialog-foot { justify-content: flex-end; gap: 8px; }
+
 .enc-dialog { width: min(560px, calc(100vw - 32px)); }
 .enc-dialog .dialog-body p { margin: 0; font-size: 14px; line-height: 1.55; }
 .enc-dialog .dialog-body h3.h { margin-top: 8px; }

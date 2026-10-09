@@ -25,7 +25,8 @@
     "db:migrate:remote": "wrangler d1 migrations apply todo-agent-auth --remote",
     "dev:local": "LOCAL_ONLY=1 vite dev",
     "bench": "node bench/run.mjs",
-    "bench:needle": "node bench/needle.mjs"
+    "bench:needle": "node bench/needle.mjs",
+    "check:boards": "node scripts/check-boards.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.112",

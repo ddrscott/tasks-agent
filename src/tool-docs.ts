@@ -20,6 +20,12 @@ export const TOOL_DOCS = {
       "coming back for the answer, and finishing. Call it once, before your first card, whenever you're asked to work the board.",
     about: "Read the working rules: which cards are its own, claiming, the status line, asking you, and finishing. The starter prompt has the agent call this first.",
   },
+  list_boards: {
+    description:
+      "List the boards you own, each with its name and id. Every other tool takes `board` (a name or an id) to say which board it's about. " +
+      "Left out, a call about a card finds the card on whichever board has it, a call that adds something goes to your first board, and get_board shows every board.",
+    about: "List your boards. Every tool takes a board name; left out, the agent gets your first board, or every board from get_board.",
+  },
   get_board: {
     description: "Show every lane and card on the board, with ids, due dates, tags, the start of each card's notes, and the names of its files. Pass tag to list only the cards carrying it. Call get_card for a card's full notes and attachments.",
     about: "Read every lane and card: ids, due dates, tags, and the start of each card's notes. Can list just the cards with one tag.",

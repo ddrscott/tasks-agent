@@ -23,6 +23,7 @@ import { getAgentByName } from "agents";
 import { currentUser, type User } from "./auth";
 import { kidOf } from "./sealed";
 import { access, spendBoardCall, tooFast } from "./members";
+import { ownedBoard } from "./boards";
 import { BOARD_ID, errorCode, plainError, SLOW_DOWN, visibleText } from "./member-rules";
 import { isSealed, type Attachment } from "./shared";
 
@@ -68,6 +69,8 @@ async function boardOf(req: Request, env: Env, user: User): Promise<{ ownerId: s
   // In order of cost: an id that can't be a board, then this account's allowance for calls
   // about other people's boards (a 429, with no lookup), and only then the membership read.
   if (!BOARD_ID.test(board)) return null;
+  // Another board of yours (boards.ts) is yours all the same: its files live under its own id.
+  if (await ownedBoard(env, user, board)) return { ownerId: board, member: null, lapsed: false };
   const slow = spendBoardCall(user.id);
   if (slow) return slow;
   const a = await access(env, user, board);

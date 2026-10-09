@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Many boards per account. A board is a project with its own cards, lanes, and members. New board… in the account menu makes one (Pro, up to 20); the board switcher lists yours and the ones shared with you; a board after the first can be renamed and archived from its account menu, and an invite email names the board it's for
+- Agents reach every board you own: `list_boards` names them, every tool takes `board` (a name or an id), and left out, a call about a card finds the card on whichever board has it. `get_board` with no board shows every board at once, each under its name
+- The agent event feed carries every board you own, and says which board each card is on
+- All boards: every board you can reach on one screen, at `/tasks/all` and in the board switcher. Cards from every board are grouped by To do, Doing, and Done, each with a chip saying which board it's on; move a card and it moves on its own board, open it and you get the real card
+
+### Changed
+- `/api/board/*` takes `board` (the query on a GET, the body on a POST), defaulting to your first board; nothing that exists changes its address. A board you don't own there is a 404, the same as one that doesn't exist, where it used to answer with your own board
+
 ## [0.3.0] - 2026-10-08
 
 ### Added

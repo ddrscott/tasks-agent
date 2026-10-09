@@ -11,6 +11,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { getAgentByName } from "agents";
+import { ownedBoards } from "./boards";
 import { doneLaneId } from "./lanes";
 import { AGENT_TAG, forAgent, GAUNTLET_TAG, hasTag, memberTouch, NEEDS_CEO_TAG, oneLine, type Board, type Card, type MemberTouch } from "./shared";
 
@@ -25,7 +26,8 @@ export const EVENTS_PROTOCOL = "tasks-events";
  * file they attached, each with their email and when. Those parts aren't the owner's, whoever
  * made the change this line reports.
  */
-type CardRef = { id: string; title: string; lane: string; tags: string[]; member?: MemberTouch };
+/** `board` and `boardName` say which of the owner's boards the card is on (boards.ts). The board stamps `board` on every event it publishes; `boardName` rides on the hello. */
+type CardRef = { id: string; title: string; lane: string; tags: string[]; member?: MemberTouch; board?: string; boardName?: string };
 /**
  * Who made the change an event reports. `role` is always "owner" on the feed: a member's
  * change never publishes (agentEvents). `via` is "app" for a change made by hand and
@@ -91,13 +93,24 @@ export class TaskEvents extends DurableObject<Env> {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
-  /** The Worker has already checked the token; `x-user` names whose board this is. */
+  /**
+   * The Worker has already checked the token; `x-user` names whose feed this is. The feed is
+   * one per account and carries every board they own (boards.ts): the hello lists the open
+   * agent cards of each, with the board's id and name on each card, and so does every event
+   * after it (TodoAgent.publish). An encrypted board has no feed and contributes nothing.
+   */
   async fetch(req: Request): Promise<Response> {
     const user = req.headers.get("x-user");
     if (!user || req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("Expected a WebSocket", { status: 426 });
-    const agent = await getAgentByName(this.env.TodoAgent, user);
-    const hello = await agent.agentQueue();
-    if (!hello) return new Response("This board is end-to-end encrypted, so it has no event feed.", { status: 409 });
+    const boards = await ownedBoards(this.env, { id: user, email: "" });
+    const hello: TaskEvent = { type: "hello", cards: [] };
+    let sealed = 0;
+    for (const b of boards) {
+      const part = await (await getAgentByName(this.env.TodoAgent, b.id)).agentQueue();
+      if (!part) { sealed += 1; continue; }
+      if (part.type === "hello") hello.cards.push(...part.cards.map((c) => ({ ...c, board: b.id, boardName: b.name })));
+    }
+    if (sealed === boards.length) return new Response("This board is end-to-end encrypted, so it has no event feed.", { status: 409 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     server.send(JSON.stringify(hello));
