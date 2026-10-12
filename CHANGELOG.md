@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The top bar on the board, Pages, and Worksheets screens has Board · Pages · Worksheets beside the board switcher, with the one you're on marked. Pages and Worksheets open a list of what the board has, so a page or a worksheet is one tap from anywhere and nobody types a path. The board switcher is always there now, even with one board
+- Pages show Markdown tables as tables, with column alignment. A wide one scrolls sideways in its own box on a phone. Card notes get tables too
+- A page can link to another page or file on its board with a plain relative link, like `[the spec](spec.md)`, `../notes/x.md`, or `#a-heading`, and the link opens it in place. A link to something that isn't there says `NOT FOUND`
+- A page can show an image file from its board with `![alt](shot.png)`
 
 ### Changed
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
+- Paragraphs on a page reflow: text hard-wrapped in its source reads as one paragraph. End a line with two spaces or a backslash to break it. Card notes keep their line breaks
+- A page that opens with a `---` front matter block shows it folded as `// FRONT_MATTER` instead of as a rule and a paragraph
+- HTML, Word, and PDF exports of a page match the page: tables are tables, links to other pages point at the app, and images are carried inside the HTML and PDF
 - The front page says what Tasks is now: one board for your team and your agents, with kanban, a wiki, and worksheets in one place. It shows the board under the new top bar with a card assigned to a teammate, and a page and a worksheet from the same sample board, drawn with the app's own renderer and grid. Pricing says Pro's board count, read from the server like the member count
 
 ## [0.4.1] - 2026-10-12

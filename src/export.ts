@@ -2,7 +2,10 @@
 // document (.docx), or a PDF; a folder of pages as a zip. One renderer for all of them: the
 // same Markdown component the app draws pages with (src/client/Markdown.tsx) is rendered
 // to static HTML for the HTML and PDF exports, and walked as a React element tree for the
-// DOCX, so what you print is what you saw. The DOCX is written by hand (WordprocessingML in
+// DOCX, so what you print is what you saw: a table is a table in all three. A page's relative
+// links and images go where `ExportLinks` says (docs.ts: the app's own address for a page the
+// board has, an image's bytes carried in the document), and a target the board doesn't have
+// is plain words marked "not found". The DOCX is written by hand (WordprocessingML in
 // a zip: fflate), which keeps a 17 MB library out of the Worker. PDF needs the Browser
 // Rendering binding (BROWSER in wrangler.jsonc); without it the HTML export prints, and
 // the app's Print button opens it and calls print.
@@ -10,7 +13,7 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { strToU8, zipSync } from "fflate";
-import { Markdown } from "./client/Markdown";
+import { Markdown, type PageLinks } from "./client/Markdown";
 
 export type ExportFormat = "html" | "docx" | "pdf";
 export const EXPORT_FORMATS: ExportFormat[] = ["html", "docx", "pdf"];
@@ -19,6 +22,18 @@ export const EXPORT_TYPES: Record<ExportFormat, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pdf: "application/pdf",
 };
+
+/** Where a page's relative links and images go in an export. Without one, nothing on the board is linked. */
+export type ExportLinks = Pick<PageLinks, "link" | "image">;
+const pageOf = (path: string, links?: ExportLinks): PageLinks => ({ path, link: links?.link ?? (() => null), image: links?.image });
+
+/** The board paths a page shows as images (`![alt](shot.png)`), so their bytes can be fetched before the export is made. */
+export function pageImages(path: string, text: string): string[] {
+  const seen = new Set<string>();
+  // The renderer asks for each image as it builds the tree; nothing here is drawn.
+  Markdown({ text, fixed: "", page: { path, link: () => null, image: (p) => { seen.add(p); return null; } } });
+  return [...seen];
+}
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -51,14 +66,40 @@ body { margin: 0; padding: 48px 56px; max-width: 820px; font: 15px/1.6 -apple-sy
 .md .md-task { display: flex; gap: 8px; align-items: baseline; }
 .md .md-task input { margin: 0; accent-color: #E85D00; }
 .md .md-task.done > span { color: #777; text-decoration: line-through; }
+.md .md-table { margin: 0 0 14px; overflow-x: auto; border: 1px solid #cfcfca; }
+.md table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+.md th, .md td { padding: 6px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #dcdcd7; border-right: 1px solid #dcdcd7; }
+.md th:last-child, .md td:last-child { border-right: 0; }
+.md tbody tr:last-child td { border-bottom: 0; }
+.md th { background: #f3f3f1; font: 600 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+.md td.md-num { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.md .md-l { text-align: left; }
+.md .md-c { text-align: center; }
+.md .md-r { text-align: right; }
+.md .md-img { display: block; max-width: 100%; height: auto; margin: 4px 0; }
+.md .md-missing { color: #555; }
+.md .md-missing-note { margin-left: 5px; padding: 0 4px; font: 600 10px/1.5 "JetBrains Mono", ui-monospace, monospace; text-transform: uppercase; color: #b84800; border: 1px solid #E85D00; }
+.md .md-meta { margin: 0 0 16px; border: 1px solid #dcdcd7; font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; }
+.md .md-meta summary { padding: 5px 10px; color: #666; font-weight: 600; }
+.md .md-meta-mark { color: #E85D00; }
+.md .md-meta-count { font-weight: 400; }
+.md .md-meta dl { margin: 0; padding: 6px 10px 8px; border-top: 1px solid #dcdcd7; }
+.md .md-meta dl > div { display: grid; grid-template-columns: 14ch 1fr; column-gap: 12px; }
+.md .md-meta dt { color: #666; }
+.md .md-meta dd { margin: 0; white-space: pre-wrap; }
 .foot { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; font: 11px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #777; }
-@media print { body { padding: 0; max-width: none; } .foot { display: none; } @page { margin: 18mm 20mm; } }
+@media print {
+  body { padding: 0; max-width: none; } .foot, .md .md-meta { display: none; } @page { margin: 18mm 20mm; }
+  /* Paper can't scroll: a wide table wraps its cells to fit (break-word, so a column is never narrower than its longest word unless it has to be), and its header repeats on each sheet. */
+  .md .md-table { overflow: visible; } .md th, .md td { overflow-wrap: break-word; } .md td.md-num { white-space: normal; }
+  .md thead { display: table-header-group; } .md tr { break-inside: avoid; }
+}
 `;
 
 /** The page as one HTML document: the app's renderer, light styles, nothing loaded from anywhere. */
-export function pageHtml(path: string, text: string, source?: { board: string; by: string; at: string }): string {
+export function pageHtml(path: string, text: string, source?: { board: string; by: string; at: string }, links?: ExportLinks): string {
   const title = pageTitle(path, text);
-  const body = renderToStaticMarkup(createElement(Markdown, { text, fixed: "" }));
+  const body = renderToStaticMarkup(createElement(Markdown, { text, fixed: "", page: pageOf(path, links) }));
   const foot = source ? `<div class="foot">${esc(path)} · ${esc(source.board)} · last changed by ${esc(source.by)}, ${esc(source.at)}</div>` : "";
   return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}${foot}</body></html>\n`;
 }
@@ -66,13 +107,15 @@ export function pageHtml(path: string, text: string, source?: { board: string; b
 // ---------- DOCX ----------
 
 type Run = { text: string; b?: boolean; i?: boolean; strike?: boolean; code?: boolean; href?: string; br?: boolean };
-type Para = { style?: string; runs: Run[]; indent?: number; bullet?: string; code?: boolean; rule?: boolean };
+type Cell = { runs: Run[]; align?: "center" | "right" };
+type Para = { style?: string; runs: Run[]; indent?: number; bullet?: string; code?: boolean; rule?: boolean; anchor?: string; table?: { head: boolean; cells: Cell[] }[] };
 
 const x = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
 
 /** The element tree the Markdown component makes, flattened to paragraphs of runs. */
-function paragraphsOf(text: string): Para[] {
-  const root = createElement(Markdown, { text, fixed: "" });
+function paragraphsOf(path: string, text: string, links?: ExportLinks): Para[] {
+  // No `image`: a picture in the page is a link to its file here, not a drawing in the document.
+  const root = createElement(Markdown, { text, fixed: "", page: pageOf(path, links && { link: links.link }) });
   const paras: Para[] = [];
   const kids = (el: ReactElement): ReactNode[] => {
     const c = (el.props as { children?: ReactNode }).children;
@@ -95,6 +138,8 @@ function paragraphsOf(text: string): Para[] {
     if (t === "code") { for (const k of kids(el)) inlineOf(k, { ...fmt, code: true }, out); return; }
     if (t === "a") { for (const k of kids(el)) inlineOf(k, { ...fmt, href: typeof props.href === "string" ? props.href : undefined }, out); return; }
     if (t === "input") { out.push({ ...fmt, text: props.checked ? "☒ " : "☐ " }); return; }
+    if (t === "img") { out.push({ ...fmt, text: typeof props.alt === "string" ? props.alt : "" }); return; }
+    if (props.className === "md-missing-note") { out.push({ ...fmt, text: " (not found)" }); return; }
     for (const k of kids(el)) inlineOf(k, fmt, out);
   };
   const blockOf = (node: ReactNode, depth: number, bullet: string | null) => {
@@ -109,7 +154,28 @@ function paragraphsOf(text: string): Para[] {
       const level = Number((typeof props.className === "string" && /md-h(\d)/.exec(props.className)?.[1]) ?? t[1]);
       const runs: Run[] = [];
       for (const k of kids(el)) inlineOf(k, {}, runs);
-      paras.push({ style: `Heading${level}`, runs });
+      paras.push({ style: `Heading${level}`, runs, anchor: typeof props.id === "string" ? props.id : undefined });
+      return;
+    }
+    // Front matter is folded away on screen and left out of the document.
+    if (t === "details") return;
+    if (t === "table") {
+      const rows: { head: boolean; cells: Cell[] }[] = [];
+      for (const part of kids(el)) {
+        if (!isValidElement(part)) continue;
+        for (const tr of kids(part as ReactElement).flat()) {
+          if (!isValidElement(tr)) continue;
+          const cells = kids(tr as ReactElement).flat().filter(isValidElement).map((c) => {
+            const runs: Run[] = [];
+            const cell = c as ReactElement;
+            const cls = String((cell.props as { className?: string }).className ?? "");
+            for (const k of kids(cell)) inlineOf(k, {}, runs);
+            return { runs, align: cls.includes("md-c") ? "center" as const : cls.includes("md-r") ? "right" as const : undefined };
+          });
+          rows.push({ head: (part as ReactElement).type === "thead", cells });
+        }
+      }
+      paras.push({ runs: [], table: rows });
       return;
     }
     if (t === "p") {
@@ -152,19 +218,38 @@ function paragraphsOf(text: string): Para[] {
   return paras;
 }
 
-/** A Word document of the page: headings, paragraphs, lists as bulleted paragraphs, code, quotes, links. */
-export function pageDocx(path: string, text: string): Uint8Array {
+/** A Word document of the page: headings, paragraphs, lists as bulleted paragraphs, tables, code, quotes, links. */
+export function pageDocx(path: string, text: string, links?: ExportLinks): Uint8Array {
   const title = pageTitle(path, text);
-  const paras = paragraphsOf(text);
+  const paras = paragraphsOf(path, text, links);
+  // A heading's id as a Word bookmark, so a #heading link jumps to it inside the document.
+  const bookmarks = new Map<string, number>();
+  for (const p of paras) if (p.anchor && !bookmarks.has(p.anchor)) bookmarks.set(p.anchor, bookmarks.size + 1);
   const rels: string[] = [];
   const relId = (href: string) => { rels.push(href); return `rId${rels.length + 1}`; };
   const runXml = (r: Run): string => {
     if (r.br) return "<w:r><w:br/></w:r>";
     const pr = [r.b ? "<w:b/>" : "", r.i ? "<w:i/>" : "", r.strike ? "<w:strike/>" : "", r.code ? '<w:rFonts w:ascii="JetBrains Mono" w:hAnsi="JetBrains Mono" w:cs="Courier New"/><w:sz w:val="19"/>' : ""].join("");
     const run = `<w:r>${pr ? `<w:rPr>${pr}</w:rPr>` : ""}<w:t xml:space="preserve">${x(r.text)}</w:t></w:r>`;
-    return r.href ? `<w:hyperlink r:id="${relId(r.href)}"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/>${pr}</w:rPr><w:t xml:space="preserve">${x(r.text)}</w:t></w:r></w:hyperlink>` : run;
+    // A link is a whole address or a heading of this document. Anything else is its words.
+    const to = !r.href ? null : r.href.startsWith("#") ? (bookmarks.has(r.href.slice(1)) ? `w:anchor="md_${bookmarks.get(r.href.slice(1))}"` : null) : /^(https?:|mailto:)/.test(r.href) ? `r:id="${relId(r.href)}"` : null;
+    return to ? `<w:hyperlink ${to}><w:r><w:rPr><w:rStyle w:val="Hyperlink"/>${pr}</w:rPr><w:t xml:space="preserve">${x(r.text)}</w:t></w:r></w:hyperlink>` : run;
+  };
+  // The text width of the page in twips: Letter less the margins in sectPr below.
+  const WIDTH = 12240 - 2 * 1200;
+  const edge = (side: string) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>`;
+  const tableXml = (rows: { head: boolean; cells: Cell[] }[]): string => {
+    const n = Math.max(1, ...rows.map((r) => r.cells.length));
+    const col = Math.floor(WIDTH / n);
+    const rowXml = rows.map((r) => `<w:tr>${r.head ? "<w:trPr><w:cantSplit/><w:tblHeader/></w:trPr>" : "<w:trPr><w:cantSplit/></w:trPr>"}${r.cells.map((c) => {
+      const runs = r.head ? c.runs.map((run) => ({ ...run, b: true })) : c.runs;
+      return `<w:tc><w:tcPr><w:tcW w:w="${col}" w:type="dxa"/>${r.head ? '<w:shd w:val="clear" w:color="auto" w:fill="F3F3F1"/>' : ""}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/>${c.align ? `<w:jc w:val="${c.align}"/>` : ""}</w:pPr>${runs.map(runXml).join("")}</w:p></w:tc>`;
+    }).join("")}</w:tr>`).join("");
+    // Word wants a paragraph after a table; this one is the gap under it.
+    return `<w:tbl><w:tblPr><w:tblW w:w="${col * n}" w:type="dxa"/><w:tblBorders>${["top", "left", "bottom", "right", "insideH", "insideV"].map(edge).join("")}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${col}"/>`.repeat(n)}</w:tblGrid>${rowXml}</w:tbl><w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>`;
   };
   const body = paras.map((p) => {
+    if (p.table) return tableXml(p.table);
     if (p.rule) return '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="BBBBBB"/></w:pBdr></w:pPr></w:p>';
     const ind = (p.indent ?? 0) * 360 + (p.bullet ? 360 : 0);
     const pr = [
@@ -172,7 +257,8 @@ export function pageDocx(path: string, text: string): Uint8Array {
       ind ? `<w:ind w:left="${ind}"${p.bullet ? ` w:hanging="360"` : ""}/>` : "",
     ].join("");
     const bullet = p.bullet ? `<w:r><w:t xml:space="preserve">${x(p.bullet)}\t</w:t></w:r>` : "";
-    return `<w:p>${pr ? `<w:pPr>${pr}</w:pPr>` : ""}${bullet}${p.runs.map(runXml).join("")}</w:p>`;
+    const mark = p.anchor && bookmarks.has(p.anchor) ? `<w:bookmarkStart w:id="${bookmarks.get(p.anchor)}" w:name="md_${bookmarks.get(p.anchor)}"/><w:bookmarkEnd w:id="${bookmarks.get(p.anchor)}"/>` : "";
+    return `<w:p>${pr ? `<w:pPr>${pr}</w:pPr>` : ""}${mark}${bullet}${p.runs.map(runXml).join("")}</w:p>`;
   }).join("");
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1200" w:right="1200" w:bottom="1200" w:left="1200" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`;
@@ -224,12 +310,22 @@ export async function pagePdf(env: Env, html: string): Promise<Uint8Array | null
 
 // ---------- zip ----------
 
-/** A zip of pages. `as` html wraps each page in the HTML export; otherwise the text goes in as is. */
-export function pagesZip(pages: { path: string; text: string }[], as: "md" | "html"): Uint8Array {
+/**
+ * A zip of pages. `as` html wraps each page in the HTML export; otherwise the text goes in as
+ * is, and its relative links work as they are. In the HTML, a link to a page that's in the zip
+ * is a relative link to that page's file beside it; anything else goes where `links` says.
+ */
+export function pagesZip(pages: { path: string; text: string }[], as: "md" | "html", links?: ExportLinks): Uint8Array {
   const files: Record<string, Uint8Array> = {};
+  const htmlName = (path: string) => path.replace(/\.[a-z0-9]+$/i, "") + ".html";
+  const inZip = new Set(pages.map((p) => p.path));
   for (const p of pages) {
-    const name = as === "html" ? p.path.replace(/\.[a-z0-9]+$/i, "") + ".html" : p.path;
-    files[name] = strToU8(as === "html" ? pageHtml(p.path, p.text) : p.text);
+    const name = as === "html" ? htmlName(p.path) : p.path;
+    const up = "../".repeat(p.path.split("/").length - 1);
+    const beside: ExportLinks = {
+      link: (to, id) => (inZip.has(to) ? `${up}${htmlName(to).split("/").map(encodeURIComponent).join("/")}${id ? `#${id}` : ""}` : links?.link(to, id) ?? null),
+    };
+    files[name] = strToU8(as === "html" ? pageHtml(p.path, p.text, undefined, beside) : p.text);
   }
   return zipSync(files, { level: 6 });
 }

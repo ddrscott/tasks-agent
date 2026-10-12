@@ -146,7 +146,8 @@ function pageImage(page: PageLinks, alt: string, raw: string, key: string): Reac
   const to = resolveLink(page.path, raw);
   if (!to || to.path === null) return null;
   const src = page.image?.(to.path) ?? null;
-  if (src) return <img key={key} className="md-img" src={src} alt={alt} loading="lazy" />;
+  // An export carries the image's bytes in the address, and a PDF is made before a lazy image would load.
+  if (src) return <img key={key} className="md-img" src={src} alt={alt} loading={src.startsWith("data:") ? undefined : "lazy"} />;
   // A file that isn't an image we show (or one too big to carry in an export) is a link to it.
   const label = alt || to.path.split("/").pop()!;
   return pageLink(page, raw, label, key) ?? missing(label, to.path, key);
@@ -173,8 +174,10 @@ function inline(src: string, key: string, page?: PageLinks, inLink = false): Rea
     if (g.code !== undefined) {
       node = <code key={k}>{g.code.trim() || g.code}</code>;
     } else if (g.alt !== undefined) {
-      // Only on a page, and only a file of the board. Anything else is read again as a link after its "!".
-      node = (page && !inLink ? pageImage(page, g.alt, g.src, k) : null) ?? "!";
+      const remote = page && !inLink ? safeHref(g.src) : null;
+      // Only on a page, and only a file of the board. A remote image is a link to it, and never loaded.
+      node = remote ? link(remote, g.alt || g.src, k) : (page && !inLink ? pageImage(page, g.alt, g.src, k) : null) ?? "!";
+      // Anything else is read again as a link after its "!", as it always was in a note.
       if (node === "!") end = m.index + 1;
     } else if (g.label !== undefined) {
       const href = inLink ? null : safeHref(g.href);

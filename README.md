@@ -1193,11 +1193,41 @@ and a board that isn't yours answers like one that doesn't exist.
 - **The app** is `/tasks/pages?board=<id>&path=<path>` (`src/client/Pages.tsx`), from Pages in
   the top bar's section nav (or "Pages and files" in the account menu): the list on the left
   grouped by folder, the page on the right
-  rendered with the notes renderer (`Markdown.tsx`, so raw HTML never runs), Edit into a plain
+  rendered with the notes renderer in its page mode (`Markdown.tsx`, below; raw HTML never
+  runs), Edit into a plain
   textarea (⌘Enter saves, Esc cancels), New page (a `.md` with a heading), Upload files (into
   the open page's folder, or `files/`), Rename, Delete (two taps), Download, and Versions: each
   earlier version can be read and put back into the editor. A viewer sees none of the buttons
   that change anything.
+- **What a page renders** on top of what a card's notes do. The renderer is still the hand-rolled
+  one, with no Markdown dependency: `<Markdown page={…}>` turns the page mode on, and card
+  notes, which don't pass it, look the way they always did.
+  - **Tables** (in notes too): GitHub pipe tables with a header row, an alignment row (`:---`,
+    `---:`, `:---:`), inline formatting in cells, `\|` for a pipe, and empty header cells. Each
+    sits in its own box that scrolls sideways, so a wide table never widens the page on a
+    phone. A cell that's a number, an amount, or a date is set in JetBrains Mono.
+  - **Paragraphs reflow.** A single line break inside a paragraph or list item is a space, so
+    prose hard-wrapped at 100 columns reads as prose. Two trailing spaces or a backslash before
+    the break keep it. In a card's notes a line break is still a line break.
+  - **Relative links** resolve against the page's own folder and open on the same board, in
+    place: `other.md`, `../notes/x.md`, `/from/the/top.md`, `spec.pdf`, `other.md#heading`,
+    and `#heading` on the page itself (headings get ids, `md-<the heading's words>`). A target
+    the board doesn't have keeps its words and a `NOT FOUND` chip, with no address.
+  - **Images.** `![alt](shot.png)` shows a file of the board when it's a PNG, JPEG, GIF, or
+    WebP, the types the file route serves as an image. Any other file is a link to it. Remote
+    images are never loaded: `![alt](https://…)` is a link.
+  - **Front matter.** A `---` YAML block that opens the page folds into a `// FRONT_MATTER` line
+    that opens to its keys. Its lines are skipped, not cut, so checkbox line numbers still
+    match `toggleTask`.
+- **Links stay closed.** `safeHref` still passes only absolute http, https, and mailto. A link
+  with no scheme goes through `resolveLink`, which answers a path on the page's own board or
+  nothing: a scheme (`javascript:`, `data:`, `C:`), a host (`//x`, `/\x`, `%2F%2Fx`), a
+  control character, or a path that climbs out with `..` (encoded or not) is refused and
+  stays the text that was typed. What comes back is only ever a path; `Pages.tsx` puts it in
+  the `path=` of this board's own page address, or in the file route for an image, and only
+  when the board has a file there. Heading ids are prefixed so a heading called `body` can't
+  shadow anything of the app's. A member's page on a shared board goes through the same
+  code. `npm run check:markdown` has a case for each.
 - **Over MCP**: `list_pages`, `read_page`, `write_page`, `edit_page` (one exact passage,
   refused if it appears zero or more than one times, with the count), and `delete_page`, each
   taking `board` like every other tool, and running as a member on a board shared with you (a
@@ -1206,7 +1236,9 @@ and a board that isn't yours answers like one that doesn't exist.
   (`since=`), reloads the list and an open page that isn't being edited, and tells an editor
   mid-edit who changed the page under them rather than overwriting their draft. The save
   still catches a conflict with the etag.
-- **Not yet**: a page linking to a card and back, and a socket instead of polling.
+- **Not yet**: a page linking to a card and back, a socket instead of polling, and Back
+  returning to the page a link was followed from (a followed link replaces the address, like
+  picking a page from the list).
 - `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
   revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
   tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).
@@ -1224,11 +1256,25 @@ address with `?format=`.
   under a card title; the export's CSS sizes them as a document's headings. React escapes
   everything, and `safeHref` keeps links to http(s), so the document holds no script of
   anyone's; it's served under `default-src 'none'` all the same.
+- **The same parser, so the same page.** Every export renders in the page mode (`// PAGES`):
+  a table is a table in all three, paragraphs reflow, and front matter is folded in the HTML
+  and left out of print, PDF, and Word. On paper a table can't scroll, so its cells wrap to
+  fit and its header row repeats on each sheet.
+- **Relative links** (`exportLinks` in `docs.ts`) become the app's own address for that page
+  or file, `https://…/tasks/pages?board=<id>&path=<path>`, so they work for anyone who can
+  open the board, and only when the board has something at the path. A target it doesn't have
+  is its words marked not found, never a dead link. `#heading` jumps inside the document (a
+  bookmark in Word). In the zip's HTML, a link to a page that's also in the zip is a relative
+  link to the file beside it.
+- **Images** the page shows are read from R2 and carried inside the HTML and PDF as `data:`
+  addresses (up to 20 per page, 4 MB each; past that, and in Word and over MCP, an image is a
+  link to its file), so the document still needs nothing from the network.
 - **Word.** `pageDocx` walks the same component's element tree (not its HTML) and writes
   WordprocessingML by hand: headings as `Heading1`–`6`, paragraphs, lists as bulleted or
   numbered paragraphs with hanging indents, code blocks as a `Code` style in JetBrains Mono,
   quotes as a `Quote` style with an orange left rule, checkboxes as ☐/☒, links as real
-  hyperlinks (relationships), bold, italic, strikethrough, inline code. The package is six
+  hyperlinks (relationships), bold, italic, strikethrough, inline code, and tables as real
+  Word tables (`w:tbl`: a shaded header row that repeats across pages, column alignment). The package is six
   XML parts zipped with `fflate`, which keeps the 17 MB `docx` library out of the Worker.
 - **PDF.** `pagePdf` renders the HTML export through Browser Rendering when the Worker has
   the `BROWSER` binding (on in `wrangler.jsonc`, `remote: true` so local dev uses it too;
@@ -2696,7 +2742,7 @@ npm run dev          # http://localhost:5173/tasks/ — Workers AI is always rem
 npm run dev:local    # no Cloudflare login needed; everything works except the assistant
 npm run typecheck
 npm run build && npx vite preview   # the built Worker, for checking status codes: /tasks/nope is a 404
-npm run check:markdown   # the notes renderer: what renders, and that a hostile note can't run script
+npm run check:markdown   # the notes and pages renderer: what renders, that a page's links can't leave its board, and that hostile text can't run script
 npm run check:sort       # lane sorting: each order, and that only the sorted lane moves
 npm run check:lanes      # special lanes: to do, doing, done follow the lane, not its position
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
@@ -2733,8 +2779,8 @@ pass the same `--persist-to`. Under the dev server
 a refused WebSocket upgrade arrives as a dropped connection with no status; the check accepts
 that and checks the status when one comes through.
 
-The `/tasks` base lives in nine places: `src/client/base.ts`, `src/server.ts`,
-`src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
+The `/tasks` base lives in ten places: `src/client/base.ts`, `src/server.ts`,
+`src/docs.ts` (`exportLinks`), `src/mcp.ts` (`MCP_PATH`), `src/oauth.ts` (`AUTHORIZE_PATH`), `src/sso.ts` and
 `src/auth.ts` (redirect and cookie paths), `src/agent-rules.ts` (the default `base`),
 `vite.config.ts` (`build.assetsDir`), and `wrangler.jsonc` (`routes`, `run_worker_first`).
 

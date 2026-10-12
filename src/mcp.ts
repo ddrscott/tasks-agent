@@ -21,7 +21,7 @@ import { findOwnedBoard, ownedBoards, type BoardRef } from "./boards";
 import { sharedBoards, type SharedBoard } from "./members";
 import { ensureIndexed, reachable, searchAll } from "./search-all";
 import { COLUMN_NAME_MAX, COLUMN_TYPES, COLUMNS_MAX, markdownTable, QUERY_ROWS_DEFAULT, QUERY_ROWS_MAX, ROWS_PER_CALL, SHEET_NAME_MAX, sheetErrorText, toCsv, type ColumnType, type SheetInfo } from "./sheets";
-import { cleanPath, PAGE_MAX_BYTES, type FileInfo } from "./docs";
+import { cleanPath, exportLinks, PAGE_MAX_BYTES, type FileInfo } from "./docs";
 import { pageHtml } from "./export";
 import type { TodoAgent } from "./agent";
 import type { Presence } from "./presence";
@@ -643,7 +643,8 @@ export async function handleMcp(req: Request, env: Env, ctx: ExecutionContext, u
       if (!path) return badPath();
       const page = await docsOf(here).readPage(path);
       if (!page) return refusedPage({ code: "missing", info: null });
-      if (input.format === "html") return text(pageHtml(path, page.text, { board: here.board.name, by: page.info.updatedBy, at: page.info.updatedAt }));
+      // Relative links come back as the app's own addresses. Images stay links: their bytes as base64 are no use to an agent.
+      if (input.format === "html") return text(pageHtml(path, page.text, { board: here.board.name, by: page.info.updatedBy, at: page.info.updatedAt }, exportLinks(new URL(req.url).origin, here.board.id, (await docsOf(here).list()).files)));
       const link = `${new URL(req.url).origin}/tasks/api/files/${path.split("/").map(encodeURIComponent).join("/")}?board=${here.board.id}&format=${input.format}`;
       if (input.format === "pdf" && !env.BROWSER) return text(`PDF export isn't set up on this server. The HTML export prints to PDF from a browser: ${link.replace("format=pdf", "format=html&inline=1")} (open it signed in, then print).`, true);
       return text(`${input.format === "docx" ? "Word document" : "PDF"} of ${path}: ${link}\nOpen it in a browser signed in as ${user.email}, or fetch it with that session's cookie. It's made fresh each time from the page as it is now.`);
