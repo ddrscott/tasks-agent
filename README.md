@@ -1184,8 +1184,9 @@ and a board that isn't yours answers like one that doesn't exist.
   rest as a download, every one under a sandboxing CSP like attachments), `PUT`, `DELETE`,
   `POST /api/files/move`, and `GET /api/files/<path>/revisions?board=` (`&rev=<etag>` for one).
   Pages share a 64 MB ceiling per board; files share `ATTACHMENT_MAX_MB` per file.
-- **The app** is `/tasks/pages?board=<id>&path=<path>` (`src/client/Pages.tsx`), from "Pages
-  and files" in the account menu: the list on the left grouped by folder, the page on the right
+- **The app** is `/tasks/pages?board=<id>&path=<path>` (`src/client/Pages.tsx`), from Pages in
+  the top bar's section nav (or "Pages and files" in the account menu): the list on the left
+  grouped by folder, the page on the right
   rendered with the notes renderer (`Markdown.tsx`, so raw HTML never runs), Edit into a plain
   textarea (⌘Enter saves, Esc cancels), New page (a `.md` with a heading), Upload files (into
   the open page's folder, or `files/`), Rename, Delete (two taps), Download, and Versions: each
@@ -2286,8 +2287,13 @@ address or a guess, and nothing on screen offers a change the server would refus
   you out and brings you back to the same invite after you sign in again.
 - **The board switcher** (`src/client/BoardSwitcher.tsx`) sits next to the wordmark: My board,
   then each board shared with you as its owner's email and your role, with "view only: the
-  owner's plan lapsed" when that's so. It isn't drawn for someone with no shared boards, so a
-  solo board's top bar is unchanged. On a phone, and when the top bar is tight, it's an icon.
+  owner's plan lapsed" when that's so. It's always drawn, even on a solo board: it names the
+  board the section nav beside it is about. On a phone, and when the top bar is tight, it's an icon.
+- **The section nav** (`src/client/SectionNav.tsx`), after the switcher on the board, Pages,
+  and Worksheets screens: `Board · Pages · Worksheets` for the board on screen, the current one
+  marked `$`. Pages and Worksheets each open a menu listing what the board has (read from
+  `/api/files` or `/api/sheets` when the menu opens), and one tap lands on that page or sheet,
+  so nobody types a path. Switching boards from Pages or Worksheets stays on that screen.
   Picking a board puts it in the address (`/tasks/?board=<owner id>`), so reload, Back, and
   bookmarks work, and the board id survives signing in. `BoardHost` in `App.tsx` remounts
   the whole workspace per board, so nothing from one leaks into the next. A board you can't

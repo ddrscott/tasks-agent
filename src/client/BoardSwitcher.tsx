@@ -1,9 +1,9 @@
 // The board switcher, in the top bar next to the wordmark: your boards (the first, then the
 // ones you made, // BOARDS in the README), and each board someone shared with you, as its
-// owner's email and your role (// TEAM_BOARDS). It isn't drawn at all for someone with one
-// board and nothing shared, so a solo board's top bar is the one it always had; the account
-// menu is where a second board gets made. The list comes from `GET /api/boards` and is read
-// again each time the menu opens. Which board is open lives in the address
+// owner's email and your role (// TEAM_BOARDS). It's always drawn, even for someone with one
+// board and nothing shared: it names the board the section nav beside it (SectionNav.tsx) is
+// about, and New board… is in it. The list comes from `GET /api/boards` and is read again
+// each time the menu opens. Which board is open lives in the address
 // (`/tasks/?board=<id>`), so a reload or a bookmark comes back to it; the id opens nothing by itself.
 
 import { useState } from "react";
@@ -39,7 +39,6 @@ export function BoardSwitcher({ boards, myId, access, own, onSwitch, onOpen, onN
   const [open, setOpen] = useState(false);
   const shared = boards?.shared ?? [];
   const mine = (boards?.mine ?? []).filter((b) => !b.archived || b.board === own);
-  if (!all && !access && !own && !shared.length && !mine.length) return null;
   const current = all ? "all" : access?.board ?? own ?? null;
   const name = all ? "All boards" : access ? access.ownerEmail : boardName(boards, own, myId);
   // The open board's row uses what its socket last said, which can be newer than the list.

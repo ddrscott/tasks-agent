@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The top bar on the board, Pages, and Worksheets screens has Board · Pages · Worksheets beside the board switcher, with the one you're on marked. Pages and Worksheets open a list of what the board has, so a page or a worksheet is one tap from anywhere and nobody types a path. The board switcher is always there now, even with one board
+
+### Changed
+- Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
+
 ## [0.4.1] - 2026-10-12
 
 ### Fixed

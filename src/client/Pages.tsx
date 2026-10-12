@@ -10,7 +10,9 @@ import type { FileInfo, Revision } from "../docs";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
 import { Markdown } from "./Markdown";
-import { boardName, type Boards } from "./member";
+import { BoardSwitcher } from "./BoardSwitcher";
+import { type Boards } from "./member";
+import { SectionNav } from "./SectionNav";
 import { useTitle } from "./title";
 
 type Props = {
@@ -18,7 +20,17 @@ type Props = {
   /** The board, or null for your first. */
   board: string | null;
   boards: Boards | null;
-  /** Back to the board itself. */
+  /** The board list is about to be shown: read it again. */
+  onBoards(): void;
+  /** Open another board on this same screen (null is your first). */
+  onSwitch(board: string | null): void;
+  /** Make a board: the dialog is on the board screen. */
+  onNew(): void;
+  /** The All boards screen. */
+  onAll(): void;
+  /** The other section of this board: Worksheets from Pages, Pages from Worksheets. */
+  onSheets(sheet?: string): void
+  /** The board itself. */
   onBoard(): void;
 };
 
@@ -32,7 +44,7 @@ const q = (board: string | null, more = "") => `?board=${encodeURIComponent(boar
 const pathUrl = (board: string | null, path: string | null) =>
   `${BASE}/pages${board ? `?board=${board}` : ""}${path ? `${board ? "&" : "?"}path=${encodeURIComponent(path)}` : ""}`;
 
-export function Pages({ me, board, boards, onBoard }: Props) {
+export function Pages({ me, board, boards, onBoards, onBoard, onSwitch, onNew, onAll, onSheets }: Props) {
   useTitle("Pages");
   const id = board ?? me.id;
   const [files, setFiles] = useState<FileInfo[] | null>(null);
@@ -233,7 +245,6 @@ export function Pages({ me, board, boards, onBoard }: Props) {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([folder, list]) => [folder, list.sort((a, b) => a.path.localeCompare(b.path))] as const);
   }, [files]);
 
-  const name = boardName(boards, board, me.id);
   const text = viewingRev ? viewingRev.text : loaded?.text ?? null;
   const isMd = loaded?.info.type === "text/markdown";
 
@@ -242,8 +253,8 @@ export function Pages({ me, board, boards, onBoard }: Props) {
       <div className="main">
         <header className="topbar pages-bar">
           <h1 className="wordmark">tasks<span>.</span></h1>
-          <button className="btn" onClick={onBoard} title="Back to the board">← {name}</button>
-          <span className="pages-crumb">pages</span>
+          <BoardSwitcher boards={boards} myId={me.id} access={boards?.shared.find((b) => b.board === board) ?? null} own={board && boards?.mine.some((b) => b.board === board) ? board : null} onSwitch={onSwitch} onOpen={onBoards} onNew={onNew} onAll={onAll} />
+          <SectionNav board={board} myId={me.id} current="pages" onBoard={onBoard} onPages={(path) => void open(path ?? null)} onSheets={onSheets} />
           <span className="spacer" />
           {files && files.some((f) => f.page) && <a className="btn" href={api(`/api/files${q(id, "&format=zip")}`)} download title="Every page, as written, in one zip">Download all</a>}
           {canWrite && <button className="btn" onClick={() => upload.current?.click()}>Upload files</button>}

@@ -1341,7 +1341,6 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
 .pages-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pages-title { margin: 0; font: 600 16px/1.3 var(--font-mono); overflow-wrap: anywhere; }
 .pages-meta { font: 12px/1.3 var(--font-mono); color: var(--muted); }
-.pages-crumb { font: 12px/1 var(--font-mono); color: var(--muted); }
 .pages-rename { display: flex; gap: 6px; flex: 1 1 auto; }
 .pages-export { display: inline-flex; gap: 0; }
 .pages-export .btn { border-radius: 0; }
@@ -1362,8 +1361,9 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
   /* One column, rows at their own height (not stretched to fill the screen), and a header that wraps instead of clipping. */
   .pages { grid-template-columns: 1fr; align-content: start; }
   .pages-list { max-height: 40dvh; }
-  .pages-crumb { display: none; }
   .topbar.pages-bar { flex-wrap: wrap; row-gap: 6px; }
+  .topbar.pages-bar .section-nav .label { display: none; }
+  .topbar.pages-bar .section-nav .btn[aria-current="page"] svg { display: block; }
 }
 
 /* Worksheets (Sheets.tsx, // WORKSHEETS): a grid of typed cells, JetBrains Mono for the data, hard edges. */
@@ -1677,6 +1677,24 @@ dialog.members-dialog { width: min(960px, calc(100vw - 32px)); height: min(780px
    on someone else's has the switcher and a question in one row, and the account button
    would fall off the end. The wordmark gives up its place; screen readers still get the heading. */
 .topbar[data-tight~="mark"]:has(.board-switch) .wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* The section nav (SectionNav.tsx): Board · Pages · Worksheets as one strip, the current one marked `$`. */
+.section-nav { display: flex; flex: none; }
+.section-nav .btn { border-radius: 0; padding: 0 10px; gap: 6px; font: 500 12px var(--font-mono); color: var(--muted); }
+.section-nav .btn svg { width: 14px; height: 14px; }
+.section-nav > :not(:first-child) > .btn, .section-nav > .btn:not(:first-child) { margin-left: calc(-1 * var(--border-w)); }
+.section-nav .btn:hover:not(:disabled), .section-nav .btn[aria-expanded="true"] { color: var(--ink); position: relative; z-index: 1; }
+.section-nav .btn[aria-current="page"] { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); position: relative; z-index: 1; }
+.section-nav .btn[aria-current="page"]::before { content: "$"; color: var(--accent); font-weight: 600; }
+.section-nav .btn[aria-current="page"] svg { display: none; }
+.section-caret { font-size: 10px; color: var(--muted); }
+.section-nav .anchor > .popover { left: 0; right: auto; }
+.section-menu { min-width: 240px; max-width: min(380px, calc(100vw - 32px)); max-height: min(70dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
+.section-menu > * { flex: none; }
+.section-menu .section-item { display: flex; align-items: baseline; gap: 10px; font: 13px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.section-item-sub { margin-left: auto; font-size: 11px; color: var(--muted); }
+.section-note { padding: 8px 10px; font: 12px/1.4 var(--font-mono); color: var(--muted); }
+.topbar[data-tight~="labels"] .section-nav .label { display: none; }
+.topbar[data-tight~="labels"] .section-nav .btn[aria-current="page"] svg { display: block; }
 .board-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); max-height: min(70dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
 .board-menu > * { flex: none; }
 .menu.board-menu [role="menuitemradio"] { display: flex; align-items: baseline; gap: 8px; }

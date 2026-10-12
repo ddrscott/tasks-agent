@@ -8,13 +8,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { COLUMN_TYPES, type Cell, type Column, type ColumnType, type QueryResult, type Row, type SheetInfo } from "../sheets-shared";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
-import { boardName, type Boards } from "./member";
+import { BoardSwitcher } from "./BoardSwitcher";
+import { type Boards } from "./member";
+import { SectionNav } from "./SectionNav";
 import { useTitle } from "./title";
 
 type Props = {
   me: { id: string; email: string };
   board: string | null;
   boards: Boards | null;
+  /** The board list is about to be shown: read it again. */
+  onBoards(): void;
+  /** Open another board on this same screen (null is your first). */
+  onSwitch(board: string | null): void;
+  /** Make a board: the dialog is on the board screen. */
+  onNew(): void;
+  /** The All boards screen. */
+  onAll(): void;
+  /** The other section of this board: Worksheets from Pages, Pages from Worksheets. */
+  onPages(path?: string): void
+  /** The board itself. */
   onBoard(): void;
 };
 
@@ -35,7 +48,7 @@ function show(c: Column, v: Cell): string {
   return String(v);
 }
 
-export function Sheets({ me, board, boards, onBoard }: Props) {
+export function Sheets({ me, board, boards, onBoards, onBoard, onSwitch, onNew, onAll, onPages }: Props) {
   useTitle("Worksheets");
   const id = board ?? me.id;
   const [sheets, setSheets] = useState<SheetInfo[] | null>(null);
@@ -275,7 +288,6 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
     return rows.filter((r) => sheet.columns.some((c) => show(c, r[c.name] ?? null).toLowerCase().includes(f)));
   }, [rows, filter, sheet]);
 
-  const name = boardName(boards, board, me.id);
   const toggleSort = (col: Column) => {
     const next = sort?.col === col.name ? (sort.desc ? null : { col: col.name, desc: true }) : { col: col.name, desc: false };
     setSort(next);
@@ -315,8 +327,8 @@ export function Sheets({ me, board, boards, onBoard }: Props) {
       <div className="main">
         <header className="topbar pages-bar">
           <h1 className="wordmark">tasks<span>.</span></h1>
-          <button className="btn" onClick={onBoard} title="Back to the board">← {name}</button>
-          <span className="pages-crumb">worksheets</span>
+          <BoardSwitcher boards={boards} myId={me.id} access={boards?.shared.find((b) => b.board === board) ?? null} own={board && boards?.mine.some((b) => b.board === board) ? board : null} onSwitch={onSwitch} onOpen={onBoards} onNew={onNew} onAll={onAll} />
+          <SectionNav board={board} myId={me.id} current="sheets" onBoard={onBoard} onPages={onPages} onSheets={(sheet) => void open(sheet ?? null)} />
           <span className="spacer" />
           {canWrite && <button className="btn" onClick={() => upload.current?.click()}>Import CSV</button>}
           <input ref={upload} type="file" accept=".csv,text/csv" hidden onChange={(e) => { void importCsv(e.target.files); e.target.value = ""; }} />

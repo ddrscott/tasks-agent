@@ -35,6 +35,7 @@ import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskMeContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
+import { SectionNav } from "./SectionNav";
 import { TagFilter, useTagFilters } from "./TagFilter";
 import { MemberChat } from "./MemberChat";
 import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, boardName, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
@@ -54,6 +55,9 @@ const pageFromPath = (): Page => pageAt(location.pathname, BASE) ?? "board";
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [page, setPage] = useState<Page>(pageFromPath);
+  // Bumped when the address changes under the Pages or Worksheets screen (another board, or
+  // history), so the screen is remade for what the address says now (their hosts take it as a key).
+  const [nav, setNav] = useState(0);
 
   // `hash` names a section of the page, like "#events" on Connect, which scrolls to it once it's drawn.
   const go = useCallback((p: Page, hash = "") => {
@@ -75,6 +79,7 @@ export function App() {
     if (path) q.set("path", path);
     history.pushState(null, "", `${BASE}/pages${q.size ? `?${q}` : ""}`);
     setPage("pages");
+    setNav((n) => n + 1);
     scrollTo(0, 0);
   }, []);
   /** A board's worksheets (// WORKSHEETS). */
@@ -85,11 +90,12 @@ export function App() {
     if (row) q.set("row", row);
     history.pushState(null, "", `${BASE}/sheets${q.size ? `?${q}` : ""}`);
     setPage("sheets");
+    setNav((n) => n + 1);
     scrollTo(0, 0);
   }, []);
 
   useEffect(() => {
-    const onPop = () => setPage(pageFromPath());
+    const onPop = () => { setPage(pageFromPath()); setNav((n) => n + 1); };
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
@@ -123,30 +129,37 @@ export function App() {
   // Every board you can reach on one screen (// ALL_BOARDS).
   if (page === "all") return <AllBoardsHost me={me} goBoard={goBoard} />;
   // A board's pages and files (// PAGES).
-  if (page === "pages") return <PagesHost me={me} goBoard={goBoard} />;
+  // `nav` counts board changes made by the top bar on those screens, so the screen is made afresh for the new board.
+  if (page === "pages") return <PagesHost key={nav} me={me} goBoard={goBoard} goPages={goPages} goSheets={goSheets} goAll={() => go("all")} />;
   // A board's worksheets (// WORKSHEETS).
-  if (page === "sheets") return <SheetsHost me={me} goBoard={goBoard} />;
+  if (page === "sheets") return <SheetsHost key={nav} me={me} goBoard={goBoard} goPages={goPages} goSheets={goSheets} goAll={() => go("all")} />;
   return <BoardHost me={me} onSignOut={() => setMe(null)} onConnect={(hash) => go("connect", hash)} onAdmin={() => go("admin")} onAll={() => go("all")} onPages={goPages} onSheets={goSheets} />;
 }
 
-/** The Pages screen for the board in the address (Pages.tsx), with the board list for its name. */
-function PagesHost({ me, goBoard }: { me: Me; goBoard(board: string | null): void }) {
+/** What the Pages and Worksheets screens need to draw the top bar's board switcher and section nav. */
+type SectionHostProps = { me: Me; goBoard(board: string | null): void; goPages(board: string | null, path?: string): void; goSheets(board: string | null, sheet?: string): void; goAll(): void };
+
+/** The Pages screen for the board in the address (Pages.tsx), with the board list for its name and the switcher. */
+function PagesHost({ me, goBoard, goPages, goSheets, goAll }: SectionHostProps) {
   const board = boardFromUrl(me.id);
   const [boards, setBoards] = useState<Boards | null>(null);
-  useEffect(() => {
+  const loadBoards = useCallback(() => {
     fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
   }, []);
-  return <Pages me={me} board={board} boards={boards} onBoard={() => goBoard(board)} />;
+  useEffect(() => { loadBoards(); }, [loadBoards]);
+  // New board… lives in the dialog on the board screen; switching boards stays on this screen.
+  return <Pages me={me} board={board} boards={boards} onBoards={loadBoards} onBoard={() => goBoard(board)} onSwitch={(b) => goPages(b)} onNew={() => goBoard(null)} onAll={goAll} onSheets={(sheet) => goSheets(board, sheet)} />;
 }
 
 /** The Worksheets screen for the board in the address (Sheets.tsx). */
-function SheetsHost({ me, goBoard }: { me: Me; goBoard(board: string | null): void }) {
+function SheetsHost({ me, goBoard, goPages, goSheets, goAll }: SectionHostProps) {
   const board = boardFromUrl(me.id);
   const [boards, setBoards] = useState<Boards | null>(null);
-  useEffect(() => {
+  const loadBoards = useCallback(() => {
     fetch(api("/api/boards")).then(async (r) => { if (r.ok) setBoards((await r.json()) as Boards); }).catch(() => {});
   }, []);
-  return <Sheets me={me} board={board} boards={boards} onBoard={() => goBoard(board)} />;
+  useEffect(() => { loadBoards(); }, [loadBoards]);
+  return <Sheets me={me} board={board} boards={boards} onBoards={loadBoards} onBoard={() => goBoard(board)} onSwitch={(b) => goSheets(b)} onNew={() => goBoard(null)} onAll={goAll} onPages={(path) => goPages(board, path)} />;
 }
 
 /** The All boards page with its board list (AllBoards.tsx). New board… goes to the first board, where the dialog lives. */
@@ -940,6 +953,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
           <BoardSwitcher boards={boards} myId={me.id} access={access} own={own} onSwitch={onSwitch} onOpen={onBoards} onNew={() => setNaming("new")} onAll={onAll} />
+          <SectionNav board={sharedBoard ?? own} myId={me.id} current="board" onBoard={() => {}} onPages={(path) => onPages(sharedBoard ?? own, path)} onSheets={(sheet) => onSheets(sharedBoard ?? own, sheet)} />
           <TagFilter board={board} where={where} onChange={setWhere} />
           {board.sealed && !sharedBoard && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
