@@ -25,7 +25,7 @@ export function pageAt(pathname: string, base: string): Page | null {
 export const SITE = "https://askscottpierce.com/tasks";
 
 /** The front page's title, and the tab title before any page sets its own. */
-export const DEFAULT_TITLE = "Tasks · A task board your AI agents work over MCP";
+export const DEFAULT_TITLE = "Tasks · One board for your team and your AI agents";
 
 /**
  * `name` is the page's short name: "Connect an agent" makes the title "Connect an agent · Tasks".
