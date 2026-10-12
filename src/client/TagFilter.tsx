@@ -2,26 +2,48 @@
 // clause keeps rows out of a result. Pick one tag or several and every card without them is gone
 // from its lane until the filter is cleared. That's the difference from clicking a tag on a
 // card, which only fades the others (README, Tags). Type to narrow the list, arrows to move,
-// Enter to tick. `f` opens it from anywhere on the board. The filter belongs to the tab and
-// isn't saved, and it isn't drawn at all on a board with no tags.
+// Enter to tick. `f` opens it from anywhere on the board. The filter lives in the address
+// (`?tags=agent,shop-api&match=all`), so a filtered board can be linked to and a reload keeps it.
+// It isn't drawn at all on a board with no tags.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { tagsByUse, type Board, type TagWhere } from "../shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { tagQueryFrom, tagQueryInto, tagsByUse, type Board, type TagQuery, type TagWhere } from "../shared";
 import { Popover } from "./Board";
 import { IconCheck, IconSearch } from "./icons";
 
 export const NO_TAGS: TagWhere = { tags: [], all: false };
 
-/** The filter's state for a board. A picked tag that's left the board drops out, so it can't hide everything with no row to untick. */
-export function useTagWhere(board: Board | null): [TagWhere, (w: TagWhere) => void] {
-  const [picked, setPicked] = useState<TagWhere>(NO_TAGS);
+const fromUrl = () => tagQueryFrom(location.search);
+
+/**
+ * Both tag filters for a board, kept in the address: the combo box's pick (`where`) and the tag
+ * clicked on a card (`fade`). A change replaces the address instead of adding to history, so Back
+ * still leaves the board. A picked tag that's left the board drops out of what's shown, so it
+ * can't hide everything with no row to untick.
+ */
+export function useTagFilters(board: Board | null): { where: TagWhere; setWhere(w: TagWhere): void; fade: string | null; setFade(t: string | null): void } {
+  const [picked, setPicked] = useState<TagQuery>(fromUrl);
+  useEffect(() => {
+    const onPop = () => setPicked(fromUrl());
+    addEventListener("popstate", onPop);
+    return () => removeEventListener("popstate", onPop);
+  }, []);
+  // Read the address again on each change: something else (a board switch) may have rewritten it.
+  const change = useCallback((part: Partial<TagQuery>) => {
+    const next = { ...fromUrl(), ...part };
+    history.replaceState(history.state, "", location.pathname + tagQueryInto(location.search, next) + location.hash);
+    setPicked(next);
+  }, []);
+  const setWhere = useCallback((where: TagWhere) => change({ where }), [change]);
+  const setFade = useCallback((fade: string | null) => change({ fade }), [change]);
   const where = useMemo(() => {
-    if (!board || !picked.tags.length) return picked;
+    const w = picked.where;
+    if (!board || !w.tags.length) return w;
     const known = new Set(tagsByUse(board));
-    const tags = picked.tags.filter((t) => known.has(t));
-    return tags.length === picked.tags.length ? picked : { ...picked, tags };
-  }, [board, picked]);
-  return [where, setPicked];
+    const tags = w.tags.filter((t) => known.has(t));
+    return tags.length === w.tags.length ? w : { ...w, tags };
+  }, [board, picked.where]);
+  return { where, setWhere, fade: picked.fade, setFade };
 }
 
 type Props = { board: Board; where: TagWhere; onChange(w: TagWhere): void };
