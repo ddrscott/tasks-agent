@@ -1,7 +1,11 @@
-// What a signed-out visitor sees at /tasks/: what Tasks is, a picture of the product, the sign-in
-// form, and what they can check for themselves. The picture is the app's own components and CSS
-// fed sample data, not a bitmap, so it follows the theme and can't drift from what the board
+// What a signed-out visitor sees at /tasks/: what Tasks is, pictures of the product, the sign-in
+// form, and what they can check for themselves. The pictures are the app's own components and CSS
+// fed sample data, not bitmaps, so they follow the theme and can't drift from what the product
 // really looks like. /tasks/pricing is this same page, scrolled to its pricing section.
+//
+// The pitch (// LANDING in the README): one board for a team and the agents they run. Kanban, a
+// wiki, and worksheets in one place, with people and agents working the same cards, pages, and
+// tables, and agents reaching all of it over MCP.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Plans, PlanPrice } from "../billing";
@@ -11,6 +15,7 @@ import { api, BASE } from "./base";
 import { CardFace } from "./Board";
 import { claudeMcpAdd, CopyButton } from "./Connect";
 import { Footer } from "./Footer";
+import { Markdown } from "./Markdown";
 import { sharingFacts } from "./sharing";
 import { useTitle } from "./title";
 
@@ -53,6 +58,7 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
         <span className="spacer" />
         <nav className="landing-nav" aria-label="On this page">
           <a href={DEMO}>Demo</a>
+          <a href="#office">Pages</a>
           <a href="#connect">Connect</a>
           <a href="#pricing">Pricing</a>
           {signedIn
@@ -64,10 +70,11 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
       <main>
         <section className="landing-hero">
           <div className="landing-pitch">
-            <h1>The task board your coding agents work from.</h1>
+            <h1>One board for your team and your agents.</h1>
             <p className="landing-sub">
-              Claude Code, Cursor, Codex, or anything else that speaks MCP picks up cards and claims them.
-              When one needs a decision it asks on the card, and you answer with one tap.
+              Kanban, a wiki, and worksheets in one place. The people on your team and the AI agents they
+              run work the same cards, pages, and tables. Agents reach all of it over MCP, and when one
+              needs a call from you, it asks on the card and you answer with one tap.
             </p>
             <p className="landing-try">
               <a className="btn primary" href={DEMO}>Try the demo board</a>
@@ -83,40 +90,62 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
           <h2 className="h" id="different-h">WHATS_DIFFERENT</h2>
           <ol className="landing-points">
             <li>
+              <h3>Your team and your agents, on the same board.</h3>
+              <p>
+                A board is a project. Invite people to it by email as viewers or writers, and assign a card
+                to a teammate: their agent can claim it, work it, and ask on it. Each person's agent sees
+                what that person can see, and no more. One card, one agent: a second agent that tries for
+                a claimed card is turned away.
+              </p>
+            </li>
+            <li>
+              <h3>A wiki and worksheets, next to the cards.</h3>
+              <p>
+                Every board has pages: Markdown your team and your agents write together, with every
+                earlier version kept. And worksheets: typed tables you edit in a grid, import from CSV, and
+                export to CSV. Pages export as HTML, Word, or PDF. The plan, the numbers, and the work live
+                in one place instead of three tools.
+              </p>
+            </li>
+            <li>
+              <h3>Agents reach everything you can.</h3>
+              <p>
+                Over MCP the same agent reads and writes pages, fills worksheets and queries them with SQL,
+                and searches every board you can reach by keyword and by meaning. Claude Code takes one
+                command. Claude, ChatGPT, Cursor, VS Code, and Codex have their steps on the Connect page.
+                There's no server for you to run.
+              </p>
+            </li>
+            <li>
               <h3>Agents ask. You answer in one tap.</h3>
               <p>
                 An agent that needs a call from you puts the question on the card with two to four options
-                and can mark the one it would pick. Tap one and the answer goes on the card. The agent
-                is waiting on it and picks it up within a few seconds, in any MCP client. An agent that gets
+                and can mark the one it would pick. Tap one and the answer goes on the card; the agent is
+                waiting on it and picks it up within a few seconds, in any MCP client. An agent that gets
                 stuck asks the same way instead of stopping quietly.
               </p>
             </li>
-            <li>
-              <h3>One card, one agent.</h3>
-              <p>
-                An agent claims a card before it starts, and a second agent that tries for the same card
-                is turned away. The claim lets go when the card is done, when the agent gives it back,
-                or 15 minutes after the agent goes quiet, so a crashed run never keeps a card.
-              </p>
-            </li>
-            <li>
-              <h3>Any MCP client can connect.</h3>
-              <p>
-                It's a plain MCP server over HTTP with OAuth sign-in. Claude Code takes one command. Claude,
-                ChatGPT, Cursor, VS Code, and Codex each have their steps on the Connect page. There's no
-                server for you to run or host.
-              </p>
-            </li>
-            <li>
-              <h3>End-to-end encryption, if you want it.</h3>
-              <p>
-                Set a passphrase and every lane name, title, note, tag, and file is encrypted in your browser
-                before it's sent. The server holds that as ciphertext in an open format (JWE). The trade-off:
-                an encrypted board is closed to outside agents, because the server can't read it either.
-              </p>
-              <p className="landing-aside"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
-            </li>
           </ol>
+          <p className="landing-note">
+            <b>End-to-end encryption, if you want it.</b> Set a passphrase and every lane name, title, note,
+            tag, and file is encrypted in your browser before it's sent; the server holds ciphertext in an
+            open format (JWE). The trade-off: an encrypted board is closed to outside agents, because the
+            server can't read it either.
+          </p>
+          <p className="landing-aside"><span className="prompt">$</span> Forgot your passphrase? <b>#sorry-not-sorry</b> We can't get your data back either.</p>
+        </section>
+
+        <section className="landing-section" id="office" aria-labelledby="office-h">
+          <h2 className="h" id="office-h">PAGES_AND_WORKSHEETS</h2>
+          <p className="landing-lede">The documents and the numbers, where the work is.</p>
+          <p className="landing-note">
+            Business planning happens in the product, with your team and with Claude alike. A page is
+            Markdown, rendered the way card notes are; a worksheet is a real table with typed columns. Your
+            agent writes the plan with <code>write_page</code>, fills the table with <code>write_rows</code>,
+            and totals it with <code>query_sheet</code>, a read-only SQL <code>SELECT</code> with every worksheet
+            as a table. You see each change within seconds, and your draft is never overwritten.
+          </p>
+          <OfficeShot />
         </section>
 
         <section className="landing-section" id="connect" aria-labelledby="connect-h">
@@ -158,7 +187,8 @@ export function Landing({ signIn, signedIn = false }: { signIn: ReactNode; signe
           <p className="landing-note">
             Then run <code>/mcp</code> in Claude Code, pick <b>tasks</b>, and choose <b>Authenticate</b>. Your browser
             opens here to sign in and allow it. Tag a card <code>#agent</code> and paste in the starter prompt.
-            Cursor, VS Code, Codex, ChatGPT, and Claude have their own steps on
+            Teammates do the same once, and their agents reach the boards shared with them. Cursor, VS Code,
+            Codex, ChatGPT, and Claude have their own steps on
             the <a href={`${BASE}/connect`}>Connect page</a>. You can read it all before you sign up.
           </p>
         </section>
@@ -227,7 +257,7 @@ function Proof() {
           </div>
           <div>
             <dt>Source</dt>
-            <dd>The code is public: the Worker, the client, and the MCP tools your agent calls.</dd>
+            <dd>The code is public: the Worker, the client, and every MCP tool your agent calls, cards, pages, worksheets, and search included.</dd>
             <dd className="proof-go"><a href={REPO} {...out}>Read the code</a></dd>
           </div>
           <div>
@@ -236,8 +266,8 @@ function Proof() {
             <dd className="proof-go"><a href={`${REPO}/blob/main/CHANGELOG.md`} {...out}>Read the changelog</a></dd>
           </div>
           <div>
-            <dt>Encryption</dt>
-            <dd>An encrypted board is standard JWE (RFC 7516). Download a backup and any JOSE library opens it with your passphrase. Without the passphrase, nobody does.</dd>
+            <dt>Formats</dt>
+            <dd>Pages are Markdown files and export as HTML, Word (.docx), and PDF; worksheets export as CSV. An encrypted board is standard JWE (RFC 7516): any JOSE library opens a backup with your passphrase, and without it, nobody does.</dd>
             <dd className="proof-go"><a href={`${REPO}#-end_to_end_encryption`} {...out}>See the format</a></dd>
           </div>
           <div>
@@ -263,9 +293,9 @@ function Proof() {
   );
 }
 
-// ---------- the picture ----------
+// ---------- the pictures ----------
 
-// One fixed moment, so the picture reads the same on every load: "4s ago" stays 4s ago.
+// One fixed moment, so the pictures read the same on every load: "4s ago" stays 4s ago.
 const NOW = Date.parse("2026-10-01T15:04:05Z");
 const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 
@@ -275,7 +305,7 @@ const card = (id: string, title: string, more: Partial<Card> = {}): Card => ({
 
 const TODO: Card[] = [
   card("s1", "Write the 1.4 release notes", { tags: ["agent"] }),
-  card("s2", "Flaky test in the checkout spec", { tags: ["agent"], notes: "Fails about one run in ten on CI." }),
+  card("s2", "Flaky test in the checkout spec", { tags: ["agent"], notes: "Fails about one run in ten on CI.", assignee: "dana@example.com" }),
   card("s3", "Renew the staging TLS cert"),
 ];
 
@@ -289,7 +319,7 @@ const DOING: Card[] = [
       askedAt: at(120_000),
     },
   }),
-  card("s5", "Move the orders table to D1", { tags: ["agent"] }),
+  card("s5", "Q4 pipeline review: fill the worksheet", { tags: ["agent"], assignee: "dana@example.com" }),
 ];
 
 const DONE: Card[] = [
@@ -315,21 +345,35 @@ function SampleLane({ name, index, cards, done = false }: { name: string; index:
   );
 }
 
+/** The top bar as the app draws it: the board switcher and the section nav (SectionNav.tsx), with `current` marked. */
+function SampleBar({ board, current, right }: { board: string; current: "board" | "pages" | "sheets"; right?: ReactNode }) {
+  return (
+    <div className="topbar">
+      <span className="wordmark">tasks<span>.</span></span>
+      <span className="btn board-switch-btn"><span className="board-switch-name">{board}</span><span className="board-switch-caret">▾</span></span>
+      <span className="section-nav">
+        <span className="btn" aria-current={current === "board" ? "page" : undefined}><span className="label">Board</span></span>
+        <span className="btn" aria-current={current === "pages" ? "page" : undefined}><span className="label">Pages</span><span className="section-caret">▾</span></span>
+        <span className="btn" aria-current={current === "sheets" ? "page" : undefined}><span className="label">Worksheets</span><span className="section-caret">▾</span></span>
+      </span>
+      <span className="spacer" />
+      {right}
+    </div>
+  );
+}
+
 /**
- * A small board with sample data: a question waiting on a card, the count of what needs you, and
- * finished work in Done. It's `inert`, so nothing in it takes a click or a tab stop; the demo
- * board is the one to play with. Screen readers get one sentence instead of a pile of dead buttons.
+ * A small board with sample data: a question waiting on a card, a card assigned to a teammate,
+ * the count of what needs you, and finished work in Done. It's `inert`, so nothing in it takes a
+ * click or a tab stop; the demo board is the one to play with. Screen readers get one sentence
+ * instead of a pile of dead buttons.
  */
 function Shot() {
   return (
     <figure className="shot">
-      <div className="shot-frame" role="img" aria-label="A sample board with three lanes. A card in Doing carries an agent's question, Limit by IP or by account, with three options and one marked recommended. The top bar says one needs you. Done holds two finished cards.">
+      <div className="shot-frame" role="img" aria-label="A sample board called Shop API with three lanes, under a top bar that offers Board, Pages, and Worksheets. A card in Doing carries an agent's question, Limit by IP or by account, with three options and one marked recommended. Two cards are assigned to a teammate, Dana. The top bar says one needs you. Done holds two finished cards.">
         <div className="shot-inner" inert aria-hidden="true">
-          <div className="topbar">
-            <span className="wordmark">tasks<span>.</span></span>
-            <span className="spacer" />
-            <span className="btn asks-btn"><span className="asks-count">?{NEED_YOU}</span><span className="label">need{NEED_YOU === 1 ? "s" : ""} you</span></span>
-          </div>
+          <SampleBar board="Shop API" current="board" right={<span className="btn asks-btn"><span className="asks-count">?{NEED_YOU}</span><span className="label">need{NEED_YOU === 1 ? "s" : ""} you</span></span>} />
           <div className="shot-body">
             <SampleLane name="To do" index={0} cards={TODO} />
             <SampleLane name="Doing" index={1} cards={DOING} />
@@ -339,6 +383,88 @@ function Shot() {
       </div>
       <figcaption>
         Sample data, drawn with the app's own components. <a href={DEMO}>Try the demo board</a> to click around.
+      </figcaption>
+    </figure>
+  );
+}
+
+// A page and a worksheet from the same sample board, drawn with the app's renderer and grid.
+const SAMPLE_PAGE = `# Q4 plan
+
+Ship the orders API by the end of October, then spend November on the pipeline.
+
+## This month
+
+- [x] Rate limit the login endpoint
+- [ ] Move the orders table to D1
+- [ ] Write the 1.4 release notes
+
+## Pipeline
+
+The numbers are in the **Pipeline** worksheet. Dana's agent fills it from the CRM export each Monday; \`query_sheet\` totals it for the Friday review.
+`;
+
+const SAMPLE_COLUMNS = [
+  { name: "Account", type: "text" },
+  { name: "Stage", type: "text" },
+  { name: "Amount", type: "number" },
+  { name: "Close", type: "date" },
+] as const;
+
+const SAMPLE_ROWS: [string, string, string, string][] = [
+  ["Northwind", "Proposal", "24,000", "2026-10-30"],
+  ["Contoso", "Negotiation", "61,500", "2026-11-14"],
+  ["Fabrikam", "Qualified", "9,800", "2026-12-02"],
+  ["Tailspin", "Proposal", "18,250", "2026-11-21"],
+];
+
+function OfficeShot() {
+  return (
+    <figure className="shot office-shot">
+      <div className="office-shots">
+        <div className="shot-frame" role="img" aria-label="A page called Q4 plan on the sample board, rendered as Markdown: a heading, a paragraph, a checklist with one item done, and a note that the numbers are in the Pipeline worksheet.">
+          <div className="shot-inner" inert aria-hidden="true">
+            <SampleBar board="Shop API" current="pages" />
+            <div className="office-body">
+              <div className="pages-head"><h3 className="pages-title">docs/q4-plan.md</h3><span className="pages-meta">changed by dana, 2 min ago</span></div>
+              <div className="pages-body"><Markdown text={SAMPLE_PAGE} fixed="Sample page" /></div>
+            </div>
+          </div>
+        </div>
+        <div className="shot-frame" role="img" aria-label="A worksheet called Pipeline on the sample board: a grid with Account, Stage, Amount, and Close columns and four rows of deals.">
+          <div className="shot-inner" inert aria-hidden="true">
+            <SampleBar board="Shop API" current="sheets" />
+            <div className="office-body">
+              <div className="pages-head"><h3 className="pages-title">Pipeline</h3><span className="pages-meta">{SAMPLE_ROWS.length} rows · changed by dana's agent, 5 min ago</span></div>
+              <div className="sheet-scroll">
+                <table className="sheet-table">
+                  <thead>
+                    <tr>
+                      <th className="sheet-rownum">#</th>
+                      {SAMPLE_COLUMNS.map((c) => (
+                        <th key={c.name} className={c.type === "number" ? "num" : ""}>
+                          <div className="sheet-th"><span className="sheet-sort">{c.name}</span><span className="sheet-type">{c.type}</span></div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SAMPLE_ROWS.map((r, i) => (
+                      <tr key={r[0]}>
+                        <td className="sheet-rownum">{i + 1}</td>
+                        {r.map((v, j) => <td key={j} className={SAMPLE_COLUMNS[j].type === "number" ? "num" : ""}><span className={`sheet-cell-btn${SAMPLE_COLUMNS[j].type === "number" ? " num" : ""}`}>{v}</span></td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="office-query"><span className="prompt">$</span> SELECT Stage, SUM(Amount) FROM Pipeline GROUP BY Stage</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption>
+        The same sample board's page and worksheet, drawn with the app's own renderer and grid.
       </figcaption>
     </figure>
   );
@@ -375,11 +501,11 @@ function Pricing() {
   return (
     <section className="landing-section" id="pricing" aria-labelledby="pricing-h">
       <h2 className="h" id="pricing-h">PRICING</h2>
-      <p className="landing-lede">The board and MCP are free and never capped.</p>
+      <p className="landing-lede">The board, the pages, the worksheets, and MCP are free and never capped.</p>
       <p className="landing-note">
-        Your own agents can read and change the board as much as they like on either plan. The one thing
+        Your own agents can read and change your board as much as they like on either plan. The one thing
         with a daily limit is the assistant built into the board, because that's the part that runs on our model bill.
-        Pro raises that limit and lets you share your board with other people.
+        Pro raises that limit, adds boards, and lets you share them with other people.
       </p>
       {plans === "failed" ? (
         <p className="landing-note" role="alert">The plan details didn't load. Refresh to try again.</p>
@@ -393,8 +519,8 @@ function Pricing() {
             </p>
             <ul>
               <li><b>{chats(loaded?.free.dailyChats)}</b> assistant messages a day</li>
-              <li>Unlimited cards, lanes, and MCP calls</li>
-              <li>Questions, claims, search, attachments, encryption</li>
+              <li>One board. Unlimited cards, lanes, pages, worksheets, and MCP calls</li>
+              <li>Questions, claims, search across it all, attachments, export, encryption</li>
               <li>Join boards other people share with you</li>
             </ul>
           </div>
@@ -408,7 +534,8 @@ function Pricing() {
               </p>
               <ul>
                 <li><b>{chats(loaded.pro.dailyChats)}</b> assistant messages a day</li>
-                <li>Team boards: invite up to <b>{loaded.pro.members}</b> people to your board by email, as viewers or writers. They join free</li>
+                <li>A board per project: up to <b>{loaded.pro.boards}</b> boards, each with its own cards, pages, and worksheets</li>
+                <li>Team boards: invite up to <b>{loaded.pro.members}</b> people to a board by email, as viewers or writers. They join free, and their agents come with them</li>
                 <li>An audit log of who was invited, who joined or left, and who deleted which card</li>
                 <li>Everything in Free, same as it is there</li>
                 <li>Upgrade or cancel from the account menu, through Stripe</li>

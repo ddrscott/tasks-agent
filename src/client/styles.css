@@ -951,6 +951,25 @@ a.att-name:hover { color: var(--accent-text); }
 .shot figcaption { font: 11px/1.5 var(--font-mono); color: var(--muted); }
 .shot figcaption a, .landing-note a { color: var(--accent-text); text-underline-offset: 3px; }
 
+/* The sample top bar carries the real board switcher and section nav, as spans. */
+.shot .board-switch-btn, .shot .section-nav .btn { height: 30px; cursor: default; }
+.shot .section-nav .btn[aria-current="page"]::before { content: "$"; color: var(--accent); font-weight: 600; }
+
+/* // PAGES_AND_WORKSHEETS: a page and a worksheet from the same sample board, side by side. */
+.office-shots { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+.office-body { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.office-body .pages-head { gap: 10px; }
+.office-body .pages-title { font-size: 14px; }
+.office-body .pages-body { padding: 16px 18px; }
+.office-body .pages-body .md { font-size: 14px; line-height: 1.55; }
+.office-body .sheet-scroll { max-height: none; overflow: hidden; }
+.office-body .sheet-table { min-width: 0; width: 100%; font-size: 12.5px; }
+.office-body .sheet-th { min-width: 0; }
+.office-body .sheet-cell-btn { min-height: 28px; }
+.office-query { font: 12px/1.6 var(--font-mono); color: var(--muted); padding: 6px 10px; border: var(--border-w) solid var(--line); background: var(--surface); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-query .prompt { color: var(--accent); font-weight: 600; margin-right: 6px; }
+.landing-section > .landing-aside { margin: -6px 0 0; font: 12px/1.6 var(--font-mono); }
+
 .landing-section { display: flex; flex-direction: column; gap: 14px; padding: 40px 0; border-top: var(--border-w) solid var(--line); scroll-margin-top: 8px; }
 .landing-section p { margin: 0; }
 .landing-lede { font: 700 clamp(20px, 2.4vw, 26px)/1.2 var(--font-display); letter-spacing: -.01em; }
@@ -1016,6 +1035,7 @@ a.att-name:hover { color: var(--accent-text); }
 }
 @media (max-width: 900px) {
   .landing main { padding: 0 16px; }
+  .office-shots { grid-template-columns: minmax(0, 1fr); }
   .landing-hero { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "pitch" "shot" "signin"; gap: 20px; padding: 24px 0 32px; }
   .landing-pitch, .landing-signin { max-width: 520px; }
   .proof { grid-template-columns: minmax(0, 1fr); gap: 24px; }
@@ -1032,6 +1052,13 @@ a.att-name:hover { color: var(--accent-text); }
      Done as well would push the sign-in form a screen further down. */
   .shot-body > .lane:last-child { display: none; }
   .shot .asks-btn .label { display: none; }
+  /* The sample nav keeps only the current section on a phone; the real one shows icons instead, which the sample doesn't draw. */
+  .shot .section-nav .btn:not([aria-current]) { display: none; }
+  .shot .section-nav .btn { padding: 0 8px; }
+  /* The sample worksheet drops its last column instead of clipping it. */
+  .office-body .sheet-table th:nth-child(3), .office-body .sheet-table td:nth-child(3),
+  .office-body .sheet-table th:nth-child(5), .office-body .sheet-table td:nth-child(5) { display: none; }
+  .office-body .sheet-cell-btn, .office-body .sheet-th { padding-left: 6px; padding-right: 6px; }
   .proof-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .plans { grid-template-columns: minmax(0, 1fr); }
   .landing-try .btn { flex: 1 0 auto; justify-content: center; }

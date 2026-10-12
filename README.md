@@ -65,24 +65,30 @@ run ahead of whatever serves the zone.
   descriptions in `src/tool-docs.ts`. The agent
   rejects state pushed directly from clients.
 - **Signed out.** `/tasks/` is the landing page (`src/client/Landing.tsx`), with the sign-in
-  form (`src/client/Login.tsx`) in it. Above the fold at 1280x800: the headline, the form, a
-  "Try the demo board" link to `/tasks/demo`, and a picture of the product. On a phone the
-  order is headline, pitch, demo button, a slice of the picture (the top bar and the Doing
-  lane, without Done), then the form, so the first screen shows the product and the form
-  is one short scroll or the Sign in link away. The form's email field takes focus on load
-  only on a wide screen, because focusing it scrolls to it. The picture is not
-  an image. It's `CardFace` and `AskBlock` fed sample data and marked
-  `inert`, so it follows the theme and changes when the real components do. Keep it showing a
-  question with a `REC` option, with "need you" in its top bar counting the open questions the
-  way the real bar would. Below the fold:
-  `// WHATS_DIFFERENT` (which says the encryption trade-off plainly: an encrypted board is
-  closed to outside agents), the `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the
-  same one the Connect page shows) with a link to the public Connect page,
-  `// CHECK_IT_YOURSELF`, and `// PRICING` (see `// BILLING`). Arriving with `?next=` (an
-  agent's OAuth consent) shows only the form.
+  form (`src/client/Login.tsx`) in it. The pitch is the mission: one board for a team and the
+  agents they run, kanban plus a wiki and worksheets in one place, with agents reaching all of
+  it over MCP and asking on the card when they need a call. Above the fold at 1280x800: the
+  headline, the form, a "Try the demo board" link to `/tasks/demo`, and a picture of the
+  product. On a phone the order is headline, pitch, demo button, a slice of the picture (the
+  top bar and the Doing lane, without Done), then the form, so the first screen shows the
+  product and the form is one short scroll or the Sign in link away. The form's email field
+  takes focus on load only on a wide screen, because focusing it scrolls to it. The pictures
+  are not images. The board is `CardFace` and `AskBlock` fed sample data and marked `inert`,
+  under a top bar drawn with the real board switcher and section nav, so it follows the theme
+  and changes when the real components do. Keep it showing a question with a `REC` option, a
+  card assigned to a teammate, and "need you" in its top bar counting the open questions the
+  way the real bar would. Below the fold: `// WHATS_DIFFERENT` (team and agents on one board;
+  pages and worksheets; agents reach everything; agents ask), with the encryption trade-off
+  said plainly under it (an encrypted board is closed to outside agents);
+  `// PAGES_AND_WORKSHEETS`, a page rendered with `Markdown` and a worksheet drawn with the
+  grid's own classes, from the same sample board (`OfficeShot`); `// CONNECT_AN_AGENT` with the
+  `claude mcp add` command (`claudeMcpAdd` in `Connect.tsx`, the same one the Connect page
+  shows) and a link to the public Connect page; `// CHECK_IT_YOURSELF`; and `// PRICING` (see
+  `// BILLING`), where Pro's board count comes from `/api/plans` (`boards`, `maxBoards`) like
+  its member count. Arriving with `?next=` (an agent's OAuth consent) shows only the form.
 - **Proof on the landing page.** `// CHECK_IT_YOURSELF` (`Proof` in `Landing.tsx`) lists only
   what a visitor can verify, each row with the link that proves it: the demo board, the public
-  repo, the changelog, the encryption format, and the protocol. Beside it
+  repo, the changelog, the formats (page exports and the encryption format), and the protocol. Beside it
   is who makes Tasks and why, in Scott's own words. The changelog numbers (how many changes since
   the newest release, and in all) are counted from `CHANGELOG.md` when the build starts
   (`counts` in `vite.config.ts`); never type one in. Nothing on the page claims users, stars,
