@@ -2402,7 +2402,10 @@ falls back to on an encrypted board.
   over a board with no mark wakes it first (`ensureIndexed` → `TodoAgent.ensureSearch`,
   `Docs.ensureSearch`): the object compares its count of rows with what it holds, rewrites
   them all when they differ, and marks itself. That's one RPC per board per object start,
-  and one cheap D1 read per search after that.
+  and one cheap D1 read per search after that. The same wake sends a board's card vectors to
+  Vectorize once (`pushVectors`, marked `vectors_pushed` in its `board_meta`): a board that
+  embedded its cards before the index existed holds them all, and the refresh only sends
+  fresh ones. Encrypting the board clears the mark with the vectors.
 - **Keyword:** bm25 over the FTS5 table with titles weighted 5x, the same tokenizer and query
   shape as the per-board search (`ftsQuery` is shared), one query with `board IN (…)` over
   the ids the caller may see. Highlighted titles and snippets come from FTS5.
@@ -2898,8 +2901,9 @@ npx wrangler vectorize create-metadata-index tasks-search --property-name=kind -
 
 then the `vectorize` binding in `wrangler.jsonc` points at it. Without the binding search is
 keyword-only and says so. Boards index their cards and pages the first time anyone searches
-after the deploy (`// SEARCH`, **A board that hasn't written yet**); vectors fill in as cards
-and pages change, or all at once for a board when its object next starts.
+after the deploy (`// SEARCH`, **A board that hasn't written yet**). A board's card vectors go
+to the index all at once the first time a search wakes it with the binding on (`vectors_pushed`
+in its `board_meta`), and from then on as cards change; pages are embedded as they're indexed.
 
 **PDF export renders through Browser Rendering**, the `browser` binding in `wrangler.jsonc`.
 Without it, the Print / PDF button prints the HTML export, and `format=pdf` says so (`// EXPORT`).

@@ -669,9 +669,23 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    * (markIndexed) and later searches don't wake it.
    */
   async ensureSearch(): Promise<void> {
-    if (!this.state.sealed && (await countIndexed(this.env, this.name, "card")) !== this.state.cards.length) {
-      await resetEntries(this.env, this.name, "card", this.cardEntries(null, this.state));
-      this.index.refreshVectors(this.state).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+    if (!this.state.sealed) {
+      if ((await countIndexed(this.env, this.name, "card")) !== this.state.cards.length) {
+        await resetEntries(this.env, this.name, "card", this.cardEntries(null, this.state));
+        this.index.refreshVectors(this.state).catch((e) => console.warn("embedding refresh failed", (e as Error).message));
+      }
+      // Once per board, its vectors go to the cross-board index too: a board that embedded its
+      // cards before the index existed holds them all here, and refreshVectors only sends fresh
+      // ones. The search that wakes the board waits for it; a failure leaves it for the next start.
+      if (this.env.VECTORS && !this.sql`SELECT v FROM board_meta WHERE k = 'vectors_pushed'`.length) {
+        try {
+          await this.index.refreshVectors(this.state);
+          await this.index.pushVectors();
+          this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('vectors_pushed', ${new Date().toISOString()})`;
+        } catch (e) {
+          console.warn("pushing a board's vectors failed", (e as Error).message);
+        }
+      }
     }
     await markIndexed(this.env, this.name, "card");
   }
@@ -721,6 +735,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Forget this board's cards in every index: it's being encrypted, reset, or rewritten. */
   private clearIndex() {
     this.index.clear();
+    this.sql`DELETE FROM board_meta WHERE k = 'vectors_pushed'`;
     this.ctx.waitUntil(dropBoard(this.env, this.name, ["card"]).catch((e: Error) => console.warn("search index clear failed", e.message)));
   }
 

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-12
+
+### Fixed
+- Boards from before meaning-based search across boards existed are in it: a board's cards are sent to the index the first time a search wakes it, instead of only as each card changes
+
 ## [0.4.0] - 2026-10-12
 
 ### Added

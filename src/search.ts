@@ -122,6 +122,19 @@ export class CardIndex {
     }
   }
 
+  /**
+   * Send every embedding this board holds to the sink, in batches: a board from before the
+   * cross-board index existed has current vectors here that the index never saw, and
+   * refreshVectors only sends what it embeds afresh.
+   */
+  async pushVectors(): Promise<void> {
+    if (!this.sink) return;
+    const rows = this.sql.exec<{ card_id: string; vec: ArrayBuffer }>("SELECT card_id, vec FROM card_vec").toArray();
+    for (let i = 0; i < rows.length; i += EMBED_BATCH) {
+      await this.sink(rows.slice(i, i + EMBED_BATCH).map((r) => ({ id: r.card_id, vec: new Float32Array(r.vec) })));
+    }
+  }
+
   /** Embed arbitrary texts with this index's model (pages, search queries). */
   embedTexts(texts: string[]): Promise<Float32Array[]> {
     return this.embed(texts);
