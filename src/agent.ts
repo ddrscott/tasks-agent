@@ -21,6 +21,8 @@ import {
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
 const HISTORY_LIMIT = 30;
+/** An attachment's key in R2 after its board's id (attachments.ts). Everything else under a board's prefix is a board file. */
+const ATTACHMENT_KEY = /^a[0-9a-f]{16}$/;
 // Removed attachments stay in R2 while undo could bring them back. Cleanup runs a
 // day after something drops one, and checks again weekly while history still does.
 const ATTACHMENT_GRACE_S = 25 * 60 * 60;
@@ -947,6 +949,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const page = await this.env.ATTACHMENTS.list({ prefix, cursor });
       for (const obj of page.objects) {
         const id = obj.key.slice(prefix.length);
+        // Only attachments are this object's to collect. A board's files live under the same
+        // prefix, at `<board id>/files/<path>` (docs.ts), and are the Docs object's.
+        if (!ATTACHMENT_KEY.test(id)) continue;
         // Skip very new objects: an upload may be between R2 and the board.
         if (!live.has(id) && !inHistory.has(id) && Date.now() - obj.uploaded.getTime() > 60 * 60 * 1000) doomed.push(obj.key);
       }
@@ -1689,7 +1694,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     let cursor: string | undefined;
     do {
       const page = await this.env.ATTACHMENTS.list({ prefix, cursor });
-      for (const obj of page.objects) if (!keep.has(obj.key.slice(prefix.length))) doomed.push(obj.key);
+      // Attachments only: the board's files (`<board id>/files/<path>`, docs.ts) aren't part of the swap.
+      for (const obj of page.objects) { const id = obj.key.slice(prefix.length); if (ATTACHMENT_KEY.test(id) && !keep.has(id)) doomed.push(obj.key); }
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
     for (let i = 0; i < doomed.length; i += 1000) await this.env.ATTACHMENTS.delete(doomed.slice(i, i + 1000));

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
 - The front page says what Tasks is now: one board for your team and your agents, with kanban, a wiki, and worksheets in one place. It shows the board under the new top bar with a card assigned to a teammate, and a page and a worksheet from the same sample board, drawn with the app's own renderer and grid. Pricing says Pro's board count, read from the server like the member count
 
+### Fixed
+- A board's files are no longer deleted by the cleanup that collects removed card attachments. Files and attachments share a storage prefix, and the cleanup (25 hours after any attachment was removed, and on turning encryption on or off, or resetting an encrypted board) took every file that wasn't a live attachment, which included every PDF and image on the Pages screen. The file stayed listed and its bytes were gone. Files lost that way before this fix can't be brought back: upload them again
+
 ## [0.4.1] - 2026-10-12
 
 ### Fixed
