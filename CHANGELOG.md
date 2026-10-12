@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
 ### Added
+- Meaning-based search is on: the search box and `search` over MCP find cards, pages, and rows by what they mean as well as the words they use. PDF exports are made on the server
 - Many boards per account. A board is a project with its own cards, lanes, and members. New board… in the account menu makes one (Pro, up to 20); the board switcher lists yours and the ones shared with you; a board after the first can be renamed and archived from its account menu, and an invite email names the board it's for
 - Agents reach every board you own: `list_boards` names them, every tool takes `board` (a name or an id), and left out, a call about a card finds the card on whichever board has it. `get_board` with no board shows every board at once, each under its name
 - The agent event feed carries every board you own, and says which board each card is on

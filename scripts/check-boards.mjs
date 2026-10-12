@@ -334,8 +334,12 @@ ok("inline=1 serves it to look at (the Print button)", xhi.status === 200 && xhi
 const xd = await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=docx`, { headers: { Cookie: owner.cookie } });
 const xdBytes = new Uint8Array(await xd.arrayBuffer());
 ok("format=docx is a Word document (a zip with word/document.xml)", xd.status === 200 && xd.headers.get("Content-Type")?.includes("wordprocessingml") && xdBytes[0] === 0x50 && xdBytes[1] === 0x4b && new TextDecoder("latin1").decode(xdBytes).includes("word/document.xml"), xd.headers.get("Content-Type"));
-const xpdf = await call(owner, "GET", `/api/files/docs/export.md?board=${B}&format=pdf`);
-ok("format=pdf without the browser binding says to print the HTML (501 no_pdf)", xpdf.status === 501 && xpdf.data?.code === "no_pdf", xpdf.data);
+// PDF depends on the browser binding (wrangler.jsonc): a PDF with it, a 501 that says to print the HTML without.
+const xpdf = await fetch(`${BASE}/tasks/api/files/docs/export.md?board=${B}&format=pdf`, { headers: { Cookie: owner.cookie } });
+const xpdfBytes = new Uint8Array(await xpdf.arrayBuffer());
+const PDF_ON = xpdf.status === 200;
+if (PDF_ON) ok("format=pdf is a PDF made by Browser Rendering, as a download", xpdf.headers.get("Content-Type") === "application/pdf" && xpdf.headers.get("Content-Disposition")?.startsWith("attachment") && new TextDecoder("latin1").decode(xpdfBytes.slice(0, 5)) === "%PDF-", xpdf.headers.get("Content-Type"));
+else ok("format=pdf without the browser binding says to print the HTML (501 no_pdf)", xpdf.status === 501 && JSON.parse(new TextDecoder().decode(xpdfBytes))?.code === "no_pdf", xpdf.status);
 ok("a format nobody has is a 400", (await call(owner, "GET", `/api/files/docs/export.md?board=${B}&format=odt`)).status === 400);
 const xz = await fetch(`${BASE}/tasks/api/files?board=${B}&format=zip&prefix=docs`, { headers: { Cookie: owner.cookie } });
 const xzBytes = new Uint8Array(await xz.arrayBuffer());
@@ -349,7 +353,8 @@ ok("MCP export_page html returns the document", !mx.isError && mx.text.startsWit
 const mxd = await mcp(T, "export_page", { board: "Shop API", path: "docs/export.md", format: "docx" });
 ok("MCP export_page docx returns a link to fetch signed in", !mxd.isError && mxd.text.includes(`/tasks/api/files/docs/export.md?board=${B}&format=docx`), mxd);
 const mxp = await mcp(T, "export_page", { board: "Shop API", path: "docs/export.md", format: "pdf" });
-ok("MCP export_page pdf without the binding points at the HTML", mxp.isError && mxp.text.includes("format=html"), mxp);
+if (PDF_ON) ok("MCP export_page pdf returns a link to the PDF", !mxp.isError && mxp.text.includes(`/tasks/api/files/docs/export.md?board=${B}&format=pdf`), mxp);
+else ok("MCP export_page pdf without the binding points at the HTML", mxp.isError && mxp.text.includes("format=html"), mxp);
 ok("MCP export_page on a page that isn't there", (await mcp(T, "export_page", { board: "Shop API", path: "docs/nope.md", format: "html" })).isError);
 
 // Worksheets (// WORKSHEETS): typed tables over REST, then over MCP, then read-only SQL.

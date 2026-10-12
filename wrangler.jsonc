@@ -46,16 +46,16 @@
   // Card attachments, stored as <user id>/<attachment id>. Created by the first deploy
   // that included them, then pinned here.
   "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "todo-agent-attachments" }],
-  // Meaning-based search across boards (src/search-all.ts, // SEARCH in the README). Off until
-  // the index exists on the account; without it, search is keyword-only and says so. To turn it on:
+  // Meaning-based search across boards (src/search-all.ts, // SEARCH in the README). Needs the index
+  // on the account; without the binding, search is keyword-only and says so. On a fresh account:
   //   npx wrangler vectorize create tasks-search --dimensions=384 --metric=cosine
   //   npx wrangler vectorize create-metadata-index tasks-search --property-name=board --type=string
   //   npx wrangler vectorize create-metadata-index tasks-search --property-name=kind --type=string
-  // then uncomment. Vectorize has no local emulation, so `remote: true` points local dev at the real index.
-  // "vectorize": [{ "binding": "VECTORS", "index_name": "tasks-search", "remote": true }],
-  // PDF exports of pages (src/export.ts, // EXPORT) render through Browser Rendering. Off until
-  // wanted; without it the HTML export prints to PDF from the browser. Uncomment to turn on.
-  // "browser": { "binding": "BROWSER", "remote": true },
+  // Vectorize has no local emulation, so `remote: true` points local dev at the real index.
+  "vectorize": [{ "binding": "VECTORS", "index_name": "tasks-search", "remote": true }],
+  // PDF exports of pages (src/export.ts, // EXPORT) render through Browser Rendering; without
+  // the binding the HTML export prints to PDF from the browser.
+  "browser": { "binding": "BROWSER", "remote": true },
   "durable_objects": {
     "bindings": [
       { "name": "TodoAgent", "class_name": "TodoAgent" },

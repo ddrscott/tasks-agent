@@ -1216,8 +1216,8 @@ address with `?format=`.
   hyperlinks (relationships), bold, italic, strikethrough, inline code. The package is six
   XML parts zipped with `fflate`, which keeps the 17 MB `docx` library out of the Worker.
 - **PDF.** `pagePdf` renders the HTML export through Browser Rendering when the Worker has
-  the `BROWSER` binding (commented out in `wrangler.jsonc`; `@cloudflare/puppeteer` drives
-  it). Without it, `format=pdf` is a 501 `no_pdf` that says to print the HTML, and the app's
+  the `BROWSER` binding (on in `wrangler.jsonc`, `remote: true` so local dev uses it too;
+  `@cloudflare/puppeteer` drives it). Without it, `format=pdf` is a 501 `no_pdf` that says to print the HTML, and the app's
   **Print / PDF** button does exactly that: opens the HTML export inline (`inline=1`) and
   calls `print()` on it, which saves as PDF in any browser.
 - **Zip.** `GET /api/files?board=&prefix=<folder>&format=zip` is every page under the folder
@@ -2402,9 +2402,9 @@ falls back to on an encrypted board.
   vector from `EMBEDDING_MODEL` (the per-board index hands its card vectors over, so a card is
   embedded once; pages are embedded by `Docs`), with the board's id, the kind, and the ref in
   its metadata, so a query filters to the caller's boards (`$in`). The id is a hash of the
-  ref, since Vectorize ids are 64 bytes and a path can be 200. The binding is commented out
-  in `wrangler.jsonc` until the index exists on the account (`// DEPLOY`); without it, or when
-  it fails, the result says `semantic: "unavailable"` and keyword hits stand alone, the same
+  ref, since Vectorize ids are 64 bytes and a path can be 200. The binding is on in
+  `wrangler.jsonc`, pointed at the index `tasks-search` on the account (`// DEPLOY`); without it,
+  or when it fails, the result says `semantic: "unavailable"` and keyword hits stand alone, the same
   as the per-board search without Workers AI. Vectorize has no local emulation: with the
   binding on, local dev talks to the real index (`remote: true`), so the local checks write
   test vectors there under throwaway board ids. Leave it off for `npm run dev:local`.
@@ -2880,7 +2880,7 @@ every search reads; deployed without it, those writes log a failure and searches
 socket connect, every `/api/board*` call, and every MCP call; deployed without it, those fail.
 Both only add tables, so the old Worker runs fine on top of them.
 
-**Meaning-based search across boards is off until you make the index.** Once, on the account:
+**Meaning-based search across boards needs the Vectorize index** `tasks-search`, made 2026-10-12 on the account. On a fresh account, once:
 
 ```sh
 npx wrangler vectorize create tasks-search --dimensions=384 --metric=cosine
@@ -2888,14 +2888,13 @@ npx wrangler vectorize create-metadata-index tasks-search --property-name=board 
 npx wrangler vectorize create-metadata-index tasks-search --property-name=kind --type=string
 ```
 
-then uncomment the `vectorize` binding in `wrangler.jsonc` and deploy. Until then search is
+then the `vectorize` binding in `wrangler.jsonc` points at it. Without the binding search is
 keyword-only and says so. Boards index their cards and pages the first time anyone searches
 after the deploy (`// SEARCH`, **A board that hasn't written yet**); vectors fill in as cards
 and pages change, or all at once for a board when its object next starts.
 
-**PDF export is off until you turn on Browser Rendering.** Uncomment the `browser` binding in
-`wrangler.jsonc` and deploy; until then, the Print / PDF button prints the HTML export, and
-`format=pdf` says so (`// EXPORT`).
+**PDF export renders through Browser Rendering**, the `browser` binding in `wrangler.jsonc`.
+Without it, the Print / PDF button prints the HTML export, and `format=pdf` says so (`// EXPORT`).
 
 Before that, four migrations went out with team boards and the admin page, in
 this order: `0005_users.sql` (the admin page's `users` table), then `0006_team_boards.sql`,
