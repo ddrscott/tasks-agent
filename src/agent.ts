@@ -11,7 +11,8 @@ import { systemPrompt } from "./prompt";
 import { agentEvents, agentQueue, type EventBy, type TaskEvent } from "./events";
 import { endedCards } from "./presence-shared";
 import { CardIndex } from "./search";
-import { countIndexed, dropBoard, dropEntries, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
+import { countFileRows, countIndexed, dropBoard, dropEntries, dropFileRows, dropFileScope, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
+import { extractFromR2, extractKind, Extracts, fileEntries, fileRef, fileRefs, type ExtractState, type Slice } from "./extract";
 import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
 import { boardById } from "./boards";
 import {
@@ -659,6 +660,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS member_deletes (member TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (member, day))`;
     if (!this.state.sealed) this.index.backfill(this.state);
+    // PDFs and Word files attached before text was extracted, and any an earlier run didn't reach.
+    if (!this.state.sealed && this.pendingFiles().length) void this.scheduleExtract();
     // The next search over this board asks it to check its rows in the cross-board index (ensureSearch).
     this.ctx.waitUntil(unmarkIndexed(this.env, this.name, "card").catch((e: Error) => console.warn("search unmark failed", e.message)));
   }
@@ -688,6 +691,16 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
           console.warn("pushing a board's vectors failed", (e as Error).message);
         }
       }
+      // The text of its attached PDFs and Word files, a row per piece. Files from before text
+      // was extracted are read here, the first few while this search waits and the rest after it.
+      for (const id of this.pendingFiles().slice(0, 4)) await this.extractFile(id);
+      const held = this.extracts.all();
+      const live = [...this.liveFiles().keys()].filter((id) => held.get(id)?.status === "text");
+      if ((await countFileRows(this.env, this.name, "a")) !== live.reduce((n, id) => n + held.get(id)!.segs, 0)) {
+        await dropFileScope(this.env, this.name, "a");
+        for (const id of live) await this.indexFile(id);
+      }
+      if (this.pendingFiles().length) void this.scheduleExtract();
     }
     await markIndexed(this.env, this.name, "card");
   }
@@ -718,6 +731,117 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     const gone = (before?.cards ?? []).map((c) => c.id).filter((id) => !now.has(id));
     if (changed.length) this.ctx.waitUntil(indexEntries(this.env, this.name, changed).catch((e: Error) => console.warn("search index write failed", e.message)));
     if (gone.length) this.ctx.waitUntil(dropEntries(this.env, this.name, "card", gone).catch((e: Error) => console.warn("search index delete failed", e.message)));
+    this.syncFiles(before, after);
+  }
+
+  // ---------- text extracted from attached PDFs and Word files (extract.ts) ----------
+
+  private _extracts?: Extracts;
+  private get extracts(): Extracts {
+    return (this._extracts ??= new Extracts(this.ctx.storage.sql));
+  }
+  /** Extractions under way, by attachment id, so two readers of one file wait on the same run. */
+  private extracting = new Map<string, Promise<ExtractState | null>>();
+
+  /** The PDFs and Word files on the board now, by attachment id, each with its card. */
+  private liveFiles(b: Board = this.state): Map<string, { card: Card; att: Attachment }> {
+    const out = new Map<string, { card: Card; att: Attachment }>();
+    if (b.sealed) return out;
+    for (const card of b.cards) for (const att of card.attachments ?? []) if (extractKind(att.type, att.name)) out.set(att.id, { card, att });
+    return out;
+  }
+  /** Ones nobody has tried yet. One that failed isn't tried again here: get_card asks again. */
+  private pendingFiles(): string[] {
+    const held = this.extracts.all();
+    return [...this.liveFiles().keys()].filter((id) => !held.has(id));
+  }
+  private scheduleExtract() {
+    if (this.getSchedules().some((s) => s.callback === "extractPending")) return;
+    return this.schedule(1, "extractPending");
+  }
+  /** Extract what's pending, a few files a run, and come back for the rest. */
+  async extractPending() {
+    const pending = this.pendingFiles();
+    for (const id of pending.slice(0, 4)) await this.extractFile(id);
+    if (pending.length > 4) await this.schedule(1, "extractPending");
+  }
+
+  /**
+   * Extract one attachment's text now, unless it's been done. One that failed for a reason
+   * that could pass (storage or the model was down) is tried again. Null for a file that isn't
+   * on the board, isn't a PDF or a Word file, or is on an encrypted board.
+   */
+  private extractFile(id: string): Promise<ExtractState | null> {
+    const f = this.liveFiles().get(id);
+    if (!f) return Promise.resolve(null);
+    const have = this.extracts.get(id);
+    if (have && !(have.status === "failed" && have.retry)) return Promise.resolve(have);
+    let run = this.extracting.get(id);
+    if (!run) {
+      run = (async () => {
+        const got = await extractFromR2(this.env, `${this.name}/${id}`, extractKind(f.att.type, f.att.name)!, f.att.name);
+        // Encrypted while its text was being read: nothing readable is kept.
+        if (this.state.sealed) return null;
+        const info = this.extracts.put(id, id, got);
+        if (this.liveFiles().has(id)) await this.indexFile(id);
+        return info;
+      })().finally(() => this.extracting.delete(id));
+      this.extracting.set(id, run);
+    }
+    return run;
+  }
+
+  /** Put an attachment's text in both searches: this board's own, and a row per piece plus one vector in the cross-board one. Failures are logged, not thrown. */
+  private async indexFile(id: string): Promise<void> {
+    const f = this.liveFiles().get(id);
+    const segs = f ? this.extracts.segments(id) : [];
+    if (!f || !segs.length) return;
+    this.index.setFile(f.card.id, id, f.att.name, segs.map((s) => s.text));
+    try {
+      await indexEntries(this.env, this.name, fileEntries("a", id, segs, { file: f.att.name, card: f.card.id, att: id }));
+      if (!this.env.VECTORS) return;
+      const [vec] = await embed(this.env, [`${f.att.name}\n${segs[0].text}`]);
+      await upsertVectors(this.env, this.name, [{ kind: "file", ref: fileRef("a", 0, id), vec }]);
+    } catch (e) {
+      console.warn("indexing an attachment's text failed", (e as Error).message);
+    }
+  }
+
+  /**
+   * Keep the file text in search in step with a board change. A file that left the board (its
+   * card deleted, the file removed) leaves search and keeps its text, since undo can bring it
+   * back; one that came back is searchable again; a new one is extracted in a moment.
+   */
+  private syncFiles(before: Board | null, after: Board) {
+    const was = before ? this.liveFiles(before) : new Map<string, { card: Card; att: Attachment }>();
+    const now = this.liveFiles(after);
+    const gone = [...was.keys()].filter((id) => !now.has(id));
+    if (gone.length) {
+      this.index.dropFiles(gone);
+      const refs = gone.flatMap((id) => fileRefs("a", id, this.extracts.get(id)?.segs ?? 0));
+      if (refs.length) this.ctx.waitUntil(dropFileRows(this.env, this.name, refs).catch((e: Error) => console.warn("unindexing a file's text failed", e.message)));
+    }
+    let pending = false;
+    for (const id of now.keys()) {
+      if (was.has(id)) continue;
+      if (this.extracts.get(id)) this.ctx.waitUntil(this.indexFile(id));
+      else pending = true;
+    }
+    if (pending) void this.scheduleExtract();
+  }
+
+  /** What's known of the text of a card's PDFs and Word files, by attachment id, for get_card (mcp.ts). Nothing is extracted here. */
+  fileStates(cardId: string): Record<string, ExtractState> {
+    const out: Record<string, ExtractState> = {};
+    for (const [id, f] of this.liveFiles()) if (f.card.id === cardId) out[id] = this.extracts.get(id) ?? { status: "pending" };
+    return out;
+  }
+
+  /** A stretch of an attachment's extracted text, extracting it first if nobody has. Null when the file isn't a PDF or Word file on this board, or the board is encrypted. */
+  async fileText(id: string, opts: { offset?: number; page?: number } = {}): Promise<{ state: ExtractState; slice: Slice | null } | null> {
+    const state = await this.extractFile(id);
+    if (!state) return null;
+    return { state, slice: state.status === "text" ? this.extracts.slice(id, opts) : null };
   }
 
   /** The cross-board index rows for the cards that differ between two boards (every card, with no `before`). */
@@ -737,8 +861,17 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
   /** Forget this board's cards in every index: it's being encrypted, reset, or rewritten. */
   private clearIndex() {
     this.index.clear();
+    // The text read out of attached files goes too: an encrypted board keeps nothing readable,
+    // and a board that's swapped has other files.
+    this.extracts.clear();
     this.sql`DELETE FROM board_meta WHERE k = 'vectors_pushed'`;
     this.ctx.waitUntil(dropBoard(this.env, this.name, ["card"]).catch((e: Error) => console.warn("search index clear failed", e.message)));
+    this.ctx.waitUntil(dropFileScope(this.env, this.name, "a").catch((e: Error) => console.warn("file text clear failed", e.message)));
+  }
+
+  /** Tell the board's pages and files (docs.ts) that it was encrypted or decrypted: their extracted text goes, or is read again. */
+  private async tellDocs(sealed: boolean) {
+    await this.env.Docs.get(this.env.Docs.idFromName(this.name)).sealChanged(sealed).catch((e: Error) => console.warn("telling the board's files about encryption failed", e.message));
   }
 
   /** Search titles and notes. For the UI (callable), the assistant, and MCP (RPC). */
@@ -958,6 +1091,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
     for (let i = 0; i < doomed.length; i += 1000) await this.env.ATTACHMENTS.delete(doomed.slice(i, i + 1000));
+    // The text read out of a file goes when nothing can bring the file back.
+    this.extracts.drop([...this.extracts.all().keys()].filter((id) => !live.has(id) && !inHistory.has(id)));
     if (inHistory.size) await this.schedule(ATTACHMENT_RECHECK_S, "collectAttachments");
   }
 
@@ -1472,6 +1607,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       if (this.state.cards.some((c) => c.ask)) throw new Error(OPEN_QUESTION_NOTICE);
       await this.swapBoard(next);
       this.sql`INSERT OR REPLACE INTO seal_meta (k, v) VALUES ('check', ${check})`;
+      await this.tellDocs(true);
     } finally {
       this.encrypting = false;
     }
@@ -1543,6 +1679,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     }
     this.clearIndex();
     this.reindex(null, next);
+    await this.tellDocs(false);
   }
 
   /** A new envelope for the same key, under a new passphrase. `previous` guards against two tabs racing. */
@@ -1565,6 +1702,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     await this.swapBoard(ops.keepSettings(ops.newBoard(), settings));
     this.sql`DELETE FROM seal_meta`;
     this.clearIndex();
+    await this.tellDocs(false);
   }
 
   /** What the upload endpoint may accept: files encrypted under `kid`, and plain ones only while turning encryption off. */

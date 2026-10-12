@@ -7,7 +7,7 @@ import { handleMcp, MCP_PATH } from "./mcp";
 import { access, handleMembers, spendBoardCall } from "./members";
 import { BOARD_ID, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, INTERNAL_HEADERS } from "./member-rules";
 import { handleBoards, ownedBoard } from "./boards";
-import { handleFiles } from "./docs";
+import { handleFiles, handleUpload } from "./docs";
 import { handleSearch } from "./search-all";
 import { handleSheets } from "./sheets";
 import { pageAt, pageHead, type Page, type PageHead } from "./routes";
@@ -139,6 +139,8 @@ const app: ExportedHandler<Env> = {
       // GETs stay open: sign-in redirects back from Google and Microsoft arrive cross-site, and
       // a cross-origin page can't read what a GET returns anyway.
       const writes = req.method !== "GET" && req.method !== "HEAD";
+      // An upload ticket (docs.ts) is its own proof and comes from an agent's shell, never with a cookie.
+      if (sub.startsWith("/api/upload/")) return (await handleUpload(req, env, sub)) ?? Response.json({ error: "not found" }, { status: 404 });
       if (writes && !NO_ORIGIN_CHECK.has(sub) && fromElsewhere(req)) return forbidden();
       if (sub === "/api/presence" && req.method === "POST") return handleTokenCheck(req, env);
       return (await handleAuth(req, env, sub)) ?? (await handleSso(req, env, sub))

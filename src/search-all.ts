@@ -1,5 +1,6 @@
 // Search across every board a person can reach: their own boards and the ones shared with
-// them, cards and pages alike (// SEARCH in the README).
+// them: cards, pages, worksheet rows, and the text extracted from PDFs and Word files
+// (extract.ts), alike (// SEARCH in the README).
 //
 // - Keyword: one FTS5 table in D1 (migrations/0010_search.sql) with a row per card and per
 //   page, keyed by board id. Each board's Durable Object writes its own rows as things change
@@ -20,10 +21,11 @@ import { sharedBoards } from "./members";
 import { BOARD_ID } from "./member-rules";
 import { ftsQuery, MARK, RRF_K, SEMANTIC_FLOOR, SEMANTIC_MARGIN } from "./search";
 import type { SearchHit, SearchResult } from "./tools";
+import type { FileMeta } from "./extract";
 
-export type Kind = "card" | "page" | "row";
-/** One thing in the index: a card (ref = its id) or a page (ref = its path). */
-export type Entry = { kind: Kind; ref: string; title: string; body: string; meta?: CardMeta | RowMeta };
+export type Kind = "card" | "page" | "row" | "file";
+/** One thing in the index: a card (ref = its id), a page (ref = its path), a worksheet row, or a piece of a file's extracted text (ref from fileRef in extract.ts). */
+export type Entry = { kind: Kind; ref: string; title: string; body: string; meta?: CardMeta | RowMeta | FileMeta };
 /** What a card hit shows without going back to its board. */
 export type CardMeta = { lane: string; due: string | null; assignee?: string };
 /** What a worksheet row hit shows: which sheet. The ref is `<sheet id>/<row id>`. */
@@ -38,6 +40,8 @@ export const VECTOR_DIMS = 384;
 const BOARDS_MAX = 60;
 const LIMIT_DEFAULT = 10;
 const LIMIT_MAX = 50;
+/** Entries written to D1 in one batch. */
+const ENTRY_BATCH = 40;
 
 /** A board the caller can search: theirs, or shared with them. */
 export type Reachable = { id: string; name: string; ownerEmail: string; shared: boolean };
@@ -50,16 +54,43 @@ async function vectorId(board: string, kind: Kind, ref: string): Promise<string>
 
 const vectors = (env: Env): VectorizeIndex | null => (env.VECTORS as VectorizeIndex | undefined) ?? null;
 
-/** Write (or rewrite) these entries' rows for a board. Vectors are the caller's to send (upsertVectors). */
+/** Write (or rewrite) these entries' rows for a board, a batch of ENTRY_BATCH at a time: a long PDF is hundreds of rows. Vectors are the caller's to send (upsertVectors). */
 export async function indexEntries(env: Env, board: string, entries: Entry[]): Promise<void> {
-  if (!entries.length) return;
-  const stmts: D1PreparedStatement[] = [];
-  for (const e of entries) {
-    stmts.push(env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = ? AND ref = ?").bind(board, e.kind, e.ref));
-    stmts.push(env.DB.prepare("INSERT INTO search_fts (board, kind, ref, meta, title, body) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(board, e.kind, e.ref, e.meta ? JSON.stringify(e.meta) : null, e.title.slice(0, 500), e.body.slice(0, BODY_MAX)));
+  for (let i = 0; i < entries.length; i += ENTRY_BATCH) {
+    const stmts: D1PreparedStatement[] = [];
+    for (const e of entries.slice(i, i + ENTRY_BATCH)) {
+      stmts.push(env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = ? AND ref = ?").bind(board, e.kind, e.ref));
+      stmts.push(env.DB.prepare("INSERT INTO search_fts (board, kind, ref, meta, title, body) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(board, e.kind, e.ref, e.meta ? JSON.stringify(e.meta) : null, e.title.slice(0, 500), e.body.slice(0, BODY_MAX)));
+    }
+    await env.DB.batch(stmts);
   }
-  await env.DB.batch(stmts);
+}
+
+/**
+ * Take a file's rows out, by their refs (fileRefs in extract.ts), and its one vector, which is
+ * on its first piece. dropEntries would ask Vectorize to delete an id per row.
+ */
+export async function dropFileRows(env: Env, board: string, refs: string[]): Promise<void> {
+  for (let i = 0; i < refs.length; i += ENTRY_BATCH * 2) {
+    await env.DB.batch(refs.slice(i, i + ENTRY_BATCH * 2).map((ref) => env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = 'file' AND ref = ?").bind(board, ref)));
+  }
+  const v = vectors(env);
+  if (v && refs.length) await v.deleteByIds([await vectorId(board, "file", refs[0])]).catch((e: Error) => console.warn("vector delete failed", e.message));
+}
+
+/** How many file rows a board has from one of its objects: `f` its board files (Docs), `a` its card attachments (TodoAgent). */
+export async function countFileRows(env: Env, board: string, scope: "f" | "a"): Promise<number> {
+  return (await env.DB.prepare("SELECT COUNT(*) AS n FROM search_fts WHERE board = ? AND kind = 'file' AND ref LIKE ?").bind(board, `${scope}:%`).first<{ n: number }>())?.n ?? 0;
+}
+/** Every file row of one of a board's objects, and their vectors: the board is being encrypted or removed, or its rows are being written again. */
+export async function dropFileScope(env: Env, board: string, scope: "f" | "a"): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT ref FROM search_fts WHERE board = ? AND kind = 'file' AND ref LIKE ?").bind(board, `${scope}:0:%`).all<{ ref: string }>();
+  await env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = 'file' AND ref LIKE ?").bind(board, `${scope}:%`).run();
+  const v = vectors(env);
+  if (!v || !results.length) return;
+  const ids = await Promise.all(results.map((r) => vectorId(board, "file", r.ref)));
+  for (let i = 0; i < ids.length; i += 100) await v.deleteByIds(ids.slice(i, i + 100)).catch((e: Error) => console.warn("vector delete failed", e.message));
 }
 
 /** Take entries out of both indexes. */
@@ -117,7 +148,7 @@ export async function dropPrefix(env: Env, board: string, kind: Kind, prefix: st
 }
 
 /** Everything of a board's: when it's encrypted, reset, or its cards are all rewritten. Vectors of one kind stay unless `kinds` names it. */
-export async function dropBoard(env: Env, board: string, kinds: Kind[] = ["card", "page", "row"]): Promise<void> {
+export async function dropBoard(env: Env, board: string, kinds: Kind[] = ["card", "page", "row", "file"]): Promise<void> {
   await env.DB.batch(kinds.map((k) => env.DB.prepare("DELETE FROM search_fts WHERE board = ? AND kind = ?").bind(board, k)));
   // Vectorize has no delete-by-filter: a board's vectors are found by a query that names it, in rounds.
   const v = vectors(env);
@@ -181,7 +212,16 @@ export async function searchAll(env: Env, boards: Reachable[], input: AllInput):
   const byId = new Map(boards.map((b) => [b.id, b]));
   const key = (r: { board: string; kind: string; ref: string }) => `${r.board}\n${r.kind}\n${r.ref}`;
 
-  const kw = mode === "semantic" ? [] : await keyword(env, boards.map((b) => b.id), input.query, pool, mode === "keyword", input.kind);
+  // A long file is many rows, and one file is one hit: its best piece. So the keyword side
+  // over-fetches, and keeps the first row it sees of each file.
+  const seen = new Set<string>();
+  const oneFile = (r: Row) => {
+    if (r.kind !== "file") return true;
+    const f = `${r.board}\n${r.ref.replace(/^([fa]):\d+:/, "$1:")}`;
+    return seen.has(f) ? false : (seen.add(f), true);
+  };
+  const kw = mode === "semantic" ? [] : (await keyword(env, boards.map((b) => b.id), input.query, pool * 4, mode === "keyword", input.kind)).filter(oneFile).slice(0, pool);
+  const fileOf = (k: string) => { const [board, kind, ref] = k.split("\n"); return kind === "file" ? `${board}\n${ref.replace(/^([fa]):\d+:/, "$1:")}` : null; };
   let sem: { board: string; kind: Kind; ref: string }[] = [];
   let semantic: SearchResult["semantic"] = mode === "keyword" ? "off" : "on";
   if (mode !== "keyword") {
@@ -195,8 +235,12 @@ export async function searchAll(env: Env, boards: Reachable[], input: AllInput):
 
   const score = new Map<string, number>();
   kw.forEach((r, i) => score.set(key(r), (score.get(key(r)) ?? 0) + 1 / (RRF_K + i)));
-  sem.forEach((r, i) => score.set(key(r), (score.get(key(r)) ?? 0) + 1 / (RRF_K + i)));
   const kwRow = new Map(kw.map((r) => [key(r), r]));
+  // A file's vector is on its first piece. When the keyword side found the file by another
+  // piece, the meaning match counts toward that one, so the file is still one hit.
+  const kwFile = new Map(kw.flatMap((r) => (r.kind === "file" ? [[fileOf(key(r))!, key(r)] as const] : [])));
+  sem = sem.map((r) => { const k = kwFile.get(fileOf(key(r)) ?? ""); return k ? { ...r, ref: k.split("\n")[2] } : r; });
+  sem.forEach((r, i) => score.set(key(r), (score.get(key(r)) ?? 0) + 1 / (RRF_K + i)));
   const semSet = new Set(sem.map(key));
   const top = [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k]) => k);
 
@@ -217,19 +261,21 @@ export async function searchAll(env: Env, boards: Reachable[], input: AllInput):
     if (!row) continue; // a vector whose row is gone: the board deleted it a moment ago
     const b = byId.get(row.board);
     if (!b) continue;
-    const meta = (row.meta ? JSON.parse(row.meta) : {}) as Partial<CardMeta & RowMeta>;
+    const meta = (row.meta ? JSON.parse(row.meta) : {}) as Partial<CardMeta & RowMeta & FileMeta>;
     const k2 = kwRow.get(k);
     hits.push({
-      id: row.ref,
+      // A file hit opens what holds the file: the card it's attached to, or its own path.
+      id: row.kind === "file" ? meta.card ?? meta.path ?? row.ref : row.ref,
       title: row.t,
       snippet: k2?.s.includes(MARK[0]) ? k2.s : "",
-      lane: row.kind === "page" ? "page" : row.kind === "row" ? meta.sheet ?? "worksheet" : meta.lane ?? "",
+      lane: row.kind === "page" ? "page" : row.kind === "file" ? "file" : row.kind === "row" ? meta.sheet ?? "worksheet" : meta.lane ?? "",
       due: meta.due ?? null,
       match: k2 && semSet.has(k) ? "both" : k2 ? "keyword" : "semantic",
       board: b.id,
       boardName: b.name,
       kind: row.kind,
       ...(meta.assignee ? { assignee: meta.assignee } : {}),
+      ...(row.kind === "file" ? { file: meta.file ?? "", ...(meta.card ? { card: meta.card, att: meta.att } : {}), ...(meta.page ? { page: meta.page } : {}), offset: meta.offset ?? 0 } : {}),
     });
   }
   return { hits, semantic };
@@ -268,7 +314,7 @@ async function meaning(env: Env, boards: string[], q: string, limit: number, kin
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 /**
- * GET /api/search?q=…[&mode=hybrid|keyword|semantic][&limit=10][&board=<id or name>][&kind=card|page]
+ * GET /api/search?q=…[&mode=hybrid|keyword|semantic][&limit=10][&board=<id or name>][&kind=card|page|row|file]
  * The app's search box. Session only; agents search over MCP (the `search` tool).
  */
 export async function handleSearch(req: Request, env: Env, path: string): Promise<Response | null> {
@@ -290,7 +336,7 @@ export async function handleSearch(req: Request, env: Env, path: string): Promis
     query: q,
     mode: mode === "keyword" || mode === "semantic" ? mode : "hybrid",
     limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
-    kind: kind === "card" || kind === "page" || kind === "row" ? kind : undefined,
+    kind: kind === "card" || kind === "page" || kind === "row" || kind === "file" ? kind : undefined,
   });
   return json(r);
 }

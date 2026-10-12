@@ -42,7 +42,7 @@ export const QUERY_ROWS_DEFAULT = 200;
 export const QUERY_ROWS_MAX = 2000;
 const LOG_KEPT = 5000;
 /** Tables of the Docs object's own that a sheet can't be called, so its table can't collide. */
-const RESERVED = new Set(["files", "pages", "revisions", "log", "meta", "sheets", "sheet_cols", "sheet_log"]);
+const RESERVED = new Set(["files", "pages", "revisions", "log", "meta", "sheets", "sheet_cols", "sheet_log", "_file_extracts", "_file_extract_text"]);
 
 export type SheetCode = "bad_name" | "exists" | "missing" | "bad_column" | "bad_value" | "too_many" | "bad_query";
 /**

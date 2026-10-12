@@ -58,7 +58,8 @@ export function SearchBox({ search, onOpen, inputRef, here }: Props) {
     inputRef.current?.blur();
   }
   const meta = (h: SearchHit) => {
-    const bits = [h.kind === "page" ? "page" : h.kind === "row" ? `row in ` : h.lane];
+    const bits = [h.kind === "page" ? "page" : h.kind === "row" ? `row in ` : h.kind === "file" ? (h.card ? "attached to a card" : h.id) : h.lane];
+    if (h.kind === "file" && h.page) bits.push(`page ${h.page}`);
     if (h.due) bits.push(`due ${h.due}`);
     if (h.assignee) bits.push(`assigned to ${h.assignee}`);
     if (h.match === "semantic") bits.push("similar meaning");
@@ -69,7 +70,7 @@ export function SearchBox({ search, onOpen, inputRef, here }: Props) {
     <div className="search" ref={box}>
       <IconSearch />
       <input
-        ref={inputRef} type="search" value={q} placeholder="Search" aria-label="Search cards and pages"
+        ref={inputRef} type="search" value={q} placeholder="Search" aria-label="Search cards, pages, and files"
         role="combobox" aria-expanded={open && !!q.trim()} aria-controls="search-results"
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
@@ -87,12 +88,13 @@ export function SearchBox({ search, onOpen, inputRef, here }: Props) {
           {result && hits.length === 0 && <div className="search-note">Nothing matches “{q.trim()}”.</div>}
           {hits.map((h, i) => (
             <button
-              key={`${h.board ?? ""}/${h.kind ?? "card"}/${h.id}`} role="option" aria-selected={i === active} className="search-hit"
+              key={`${h.board ?? ""}/${h.kind ?? "card"}/${h.id}/${h.att ?? ""}`} role="option" aria-selected={i === active} className="search-hit"
               onMouseEnter={() => setActive(i)} onClick={() => choose(h)}
             >
               <span className="search-title">
                 {h.kind === "page" && <span className="search-kind">page</span>}
                 {h.kind === "row" && <span className="search-kind">row</span>}
+                {h.kind === "file" && <span className="search-kind">file</span>}
                 <Marked text={h.title} />
               </span>
               {h.snippet && <span className="search-snippet">…<Marked text={h.snippet} />…</span>}

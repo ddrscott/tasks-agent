@@ -5,7 +5,11 @@
 // id and one access check (`access` in members.ts).
 //
 // The API is plain enough for a sync client later (etags, a change cursor), but the way in for
-// agents is MCP (mcp.ts): read_page, write_page, edit_page, list_pages, delete_page.
+// agents is MCP (mcp.ts): read_page, write_page, edit_page, list_pages, delete_page, upload_file.
+//
+// A PDF or Word file has its text extracted once it's stored (extract.ts) and kept in this
+// object beside the file's row, for read_page and for search. Nothing is extracted on an
+// encrypted board.
 //
 //   GET    /tasks/api/files?board=<id>[&prefix=docs/]        list, newest change first
 //   GET    /tasks/api/files/<path>?board=<id>                 a page as JSON (Accept: application/json), or the file's bytes
@@ -13,6 +17,7 @@
 //   DELETE /tasks/api/files/<path>?board=<id>                 If-Match optional
 //   POST   /tasks/api/files/move   {board, from, to}
 //   GET    /tasks/api/files/<path>/revisions?board=<id>       earlier versions of a page, newest first
+//   PUT    /tasks/api/upload/<board id>/<ticket>              body = the file. No session: the ticket is the way in (upload_file over MCP hands one out)
 //
 // A member goes through the membership check the board does: a viewer reads, a writer writes,
 // and a board that isn't theirs answers like one that doesn't exist.
@@ -23,7 +28,8 @@ import { boardById, ownedBoard } from "./boards";
 import { EXPORT_FORMATS, EXPORT_TYPES, pageDocx, pageHtml, pagePdf, pagesZip, pageTitle, type ExportFormat } from "./export";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
-import { countIndexed, dropBoard, dropEntries, dropPrefix, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
+import { countFileRows, countIndexed, dropBoard, dropEntries, dropFileRows, dropFileScope, dropPrefix, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
+import { DOCX_TYPE, extractFromR2, extractKind, Extracts, fileEntries, fileRef, fileRefs, type ExtractState, type Slice } from "./extract";
 import { sheetFromCsv, Sheets, type QueryResult, type Row as SheetRow, type SheetInfo } from "./sheets";
 
 const MB = 1024 * 1024;
@@ -40,7 +46,7 @@ export const PATH_MAX = 200;
 const TEXT_TYPES = new Set(["text/markdown", "text/plain", "text/csv", "application/json", "text/html", "text/yaml", "application/yaml", "text/x-yaml"]);
 const EXT_TYPES: Record<string, string> = {
   md: "text/markdown", markdown: "text/markdown", txt: "text/plain", csv: "text/csv", json: "application/json", yaml: "text/yaml", yml: "text/yaml",
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf", docx: DOCX_TYPE,
 };
 export const isTextType = (t: string) => TEXT_TYPES.has(t);
 export const typeForPath = (path: string, given?: string | null): string => {
@@ -61,6 +67,8 @@ export type FileInfo = {
   createdBy: string;
   updatedAt: string;
   updatedBy: string;
+  /** On a PDF or Word file: what's known of its extracted text (extract.ts). Left off every other file. */
+  extract?: ExtractState;
 };
 export type Revision = { etag: string; at: string; by: string; size: number };
 type Row = { path: string; size: number; type: string; etag: string; is_page: number; created_at: string; created_by: string; updated_at: string; updated_by: string };
@@ -86,6 +94,12 @@ const etagOf = async (bytes: Uint8Array): Promise<string> => {
 };
 const utf8 = new TextEncoder();
 const now = () => new Date().toISOString();
+const baseName = (path: string) => path.split("/").pop() ?? path;
+/** Files the alarm extracts before it sets itself again, and how long an upload ticket is good for. */
+const EXTRACTS_PER_ALARM = 4;
+const TICKET_MS = 10 * 60 * 1000;
+const sha256Hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+type Ticket = { path: string; id: string; email: string; ifMatch: string | null; expires: number };
 /** What a page is called in search hits: its first Markdown heading, else its file name. */
 export function titleOf(path: string, text: string): string {
   const h = text.match(/^#{1,6}[ \t]+(.+?)[ \t#]*$/m);
@@ -94,6 +108,11 @@ export function titleOf(path: string, text: string): string {
 
 export class Docs extends DurableObject<Env> {
   private sql: SqlStorage;
+  private extracts: Extracts;
+  /** The board's id, kept for the alarm, which may run with no name on its id. */
+  private boardId = "";
+  /** Extractions under way, by path, so two readers of one file wait on the same run. */
+  private extracting = new Map<string, Promise<ExtractState | null>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -110,8 +129,16 @@ export class Docs extends DurableObject<Env> {
     // Every change, in order, so a reader can ask "what changed since seq N".
     this.sql.exec(`CREATE TABLE IF NOT EXISTS log (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, action TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, etag TEXT)`);
+    this.extracts = new Extracts(this.sql);
+    this.ctx.blockConcurrencyWhile(async () => {
+      const kept = await ctx.storage.get<string>("board");
+      if (ctx.id.name && kept !== ctx.id.name) await ctx.storage.put("board", ctx.id.name);
+      this.boardId = ctx.id.name ?? kept ?? "";
+    });
     // The next search over this board asks it to check its pages are in the cross-board index (ensureSearch).
     if (this.board) this.ctx.waitUntil(unmarkIndexed(env, this.board, "page").catch((e: Error) => console.warn("search unmark failed", e.message)));
+    // PDFs and Word files from before text was extracted, and any an earlier run didn't reach.
+    if (this.pendingExtracts().length) this.kick();
   }
 
   /**
@@ -129,12 +156,156 @@ export class Docs extends DurableObject<Env> {
     // Worksheet rows ride on the same mark: this object holds both.
     const rowsHeld = this.sheets.list().reduce((n, s) => n + s.rows, 0);
     if ((await countIndexed(this.env, this.board, "row")) !== rowsHeld) await this.indexAllRows();
+    // And the text of its PDFs and Word files, a row per piece. Files from before text was
+    // extracted are read here, the first few while this search waits and the rest by the alarm.
+    // An encrypted board has none: if it was told so and that didn't land (sealChanged), it lands now.
+    const pending = this.pendingExtracts();
+    if (pending.length || this.extracts.all().size) {
+      const sealed = await this.boardSealed();
+      if (sealed) await this.sealChanged(true);
+      else if (sealed === false) {
+        for (const r of pending.slice(0, EXTRACTS_PER_ALARM)) await this.extractNow(r.path);
+        if (pending.length > EXTRACTS_PER_ALARM) this.kick();
+      }
+    }
+    const held = this.extracts.all();
+    if ((await countFileRows(this.env, this.board, "f")) !== [...held.values()].reduce((n, x) => n + x.segs, 0)) {
+      await dropFileScope(this.env, this.board, "f");
+      for (const [path, x] of held) if (x.status === "text") await this.indexFile(path);
+    }
     await markIndexed(this.env, this.board, "page");
   }
 
   /** The board this tree belongs to: the object is named by the board's id. */
   private get board(): string {
-    return this.ctx.id.name ?? "";
+    return this.ctx.id.name ?? this.boardId;
+  }
+
+  // ---------- text extracted from PDFs and Word files (extract.ts) ----------
+
+  private extractState(r: Row, held = this.extracts.get(r.path)): ExtractState | undefined {
+    if (r.is_page || !extractKind(r.type, r.path)) return undefined;
+    return held && held.etag === r.etag ? held : { status: "pending" };
+  }
+  /** PDFs and Word files nobody has tried yet, or that were replaced since. One that failed isn't tried again here: read_page asks again. */
+  private pendingExtracts(): Row[] {
+    const held = this.extracts.all();
+    return this.sql.exec<Row>("SELECT * FROM files WHERE is_page = 0").toArray().filter((r) => this.extractState(r, held.get(r.path))?.status === "pending");
+  }
+  /** Set the alarm that extracts what's pending, unless it's set. */
+  private kick() {
+    this.ctx.waitUntil(this.ctx.storage.getAlarm().then((a) => (a === null ? this.ctx.storage.setAlarm(Date.now() + 250) : undefined)).catch((e: Error) => console.warn("setting the extract alarm failed", e.message)));
+  }
+  /** An encrypted board's files aren't read. Null when the board can't be asked: nothing is extracted that time, and nothing is thrown away either. */
+  private async boardSealed(): Promise<boolean | null> {
+    try {
+      return await this.env.TodoAgent.get(this.env.TodoAgent.idFromName(this.board)).isSealed();
+    } catch (e) {
+      console.warn("asking whether a board is encrypted failed", (e as Error).message);
+      return null;
+    }
+  }
+  async alarm() {
+    if (!this.board) return;
+    const pending = this.pendingExtracts();
+    if (!pending.length || (await this.boardSealed()) !== false) return;
+    for (const r of pending.slice(0, EXTRACTS_PER_ALARM)) await this.extractNow(r.path);
+    if (pending.length > EXTRACTS_PER_ALARM) await this.ctx.storage.setAlarm(Date.now() + 500);
+  }
+
+  /**
+   * Extract one file's text now, unless it's been done for the bytes it has. One that failed
+   * for a reason that could pass (storage or the model was down) is tried again. Null for a
+   * file that isn't a PDF or a Word file. The caller has checked the board isn't encrypted.
+   */
+  extractNow(path: string): Promise<ExtractState | null> {
+    const r = this.row(path);
+    const kind = r && !r.is_page ? extractKind(r.type, r.path) : null;
+    if (!r || !kind) return Promise.resolve(null);
+    const have = this.extracts.get(path);
+    if (have && have.etag === r.etag && !(have.status === "failed" && have.retry)) return Promise.resolve(have);
+    let run = this.extracting.get(path);
+    if (!run) {
+      run = (async () => {
+        const got = await extractFromR2(this.env, fileKey(this.board, path), kind, baseName(path));
+        // Replaced, moved, or deleted while its text was being read: what came out isn't this file's.
+        if (this.row(path)?.etag !== r.etag) return { status: "pending" as const };
+        if (have) await this.unindexFile(path);
+        const info = this.extracts.put(path, r.etag, got);
+        await this.indexFile(path);
+        return info;
+      })().finally(() => this.extracting.delete(path));
+      this.extracting.set(path, run);
+    }
+    return run;
+  }
+  /** As extractNow, for a caller that hasn't asked whether the board is encrypted (an upload). Null there. */
+  async extractIfOpen(path: string): Promise<ExtractState | null> {
+    return (await this.boardSealed()) === false ? this.extractNow(path) : null;
+  }
+
+  /** A file's extracted text, a stretch at a time, extracting it first if nobody has. Null for a path with no PDF or Word file. */
+  async readExtract(path: string, opts: { offset?: number; page?: number } = {}): Promise<{ info: FileInfo; state: ExtractState; slice: Slice | null } | null> {
+    const state = await this.extractNow(path);
+    const r = this.row(path);
+    if (!state || !r) return null;
+    return { info: this.info(r), state, slice: state.status === "text" ? this.extracts.slice(path, opts) : null };
+  }
+
+  /** Put a file's text in the cross-board search: a row per piece, and one vector for the file. Failures are logged, not thrown. */
+  private async indexFile(path: string): Promise<void> {
+    const segs = this.extracts.segments(path);
+    if (!segs.length || !this.board) return;
+    try {
+      await indexEntries(this.env, this.board, fileEntries("f", path, segs, { file: baseName(path), path }));
+      if (!this.env.VECTORS) return;
+      const [vec] = await embed(this.env, [`${baseName(path)}\n${segs[0].text}`]);
+      await upsertVectors(this.env, this.board, [{ kind: "file", ref: fileRef("f", 0, path), vec }]);
+    } catch (e) {
+      console.warn("indexing a file's text failed", (e as Error).message);
+    }
+  }
+  private async unindexFile(path: string): Promise<void> {
+    const segs = this.extracts.get(path)?.segs ?? 0;
+    if (segs && this.board) await dropFileRows(this.env, this.board, fileRefs("f", path, segs)).catch((e: Error) => console.warn("unindexing a file's text failed", e.message));
+  }
+  /** A file is gone or replaced: its text goes with it. */
+  private forgetExtract(path: string) {
+    if (!this.extracts.get(path)) return;
+    this.ctx.waitUntil(this.unindexFile(path));
+    this.extracts.drop([path]);
+  }
+
+  /**
+   * The board was encrypted or decrypted (TodoAgent tells this object). Encrypted: every
+   * extracted text and its search rows go, since the server keeps nothing readable of an
+   * encrypted board's files. Decrypted: the files are read again.
+   */
+  async sealChanged(sealed: boolean): Promise<void> {
+    if (!sealed) { if (this.pendingExtracts().length) this.kick(); return; }
+    this.extracts.clear();
+    if (this.board) await dropFileScope(this.env, this.board, "f").catch((e: Error) => console.warn("dropping file text from search failed", e.message));
+  }
+
+  // ---------- upload tickets: a one-time address a file can be PUT to with no session (upload_file in mcp.ts) ----------
+  // Only a hash of the ticket is kept, outside the tables query_sheet can read.
+
+  async ticketNew(t: Omit<Ticket, "expires">): Promise<{ ticket: string; expires: number }> {
+    const live = await this.ctx.storage.list<Ticket>({ prefix: "ticket:" });
+    const dead = [...live].filter(([, v]) => v.expires < Date.now()).map(([k]) => k);
+    if (dead.length) await this.ctx.storage.delete(dead);
+    const ticket = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const expires = Date.now() + TICKET_MS;
+    await this.ctx.storage.put(`ticket:${await sha256Hex(ticket)}`, { ...t, expires } satisfies Ticket);
+    return { ticket, expires };
+  }
+  /** Spend a ticket: it works once. Null when it's unknown, used, or past its time. */
+  async ticketUse(ticket: string): Promise<Ticket | null> {
+    const key = `ticket:${await sha256Hex(ticket)}`;
+    const t = await this.ctx.storage.get<Ticket>(key);
+    if (!t) return null;
+    await this.ctx.storage.delete(key);
+    return t.expires < Date.now() ? null : t;
   }
 
   /** Put pages in the cross-board search (search-all.ts): keyword rows, then a vector each. Failures are logged, not thrown. */
@@ -153,16 +324,19 @@ export class Docs extends DurableObject<Env> {
     if (this.board) this.ctx.waitUntil(dropEntries(this.env, this.board, "page", paths).catch((e: Error) => console.warn("unindexing a page failed", e.message)));
   }
 
-  /** Take every page of this board out of the search index (the board is being removed). */
+  /** Take every page of this board out of the search index (the board is being removed), and its files' text. */
   forgetSearch(): void {
-    if (this.board) this.ctx.waitUntil(dropBoard(this.env, this.board, ["page"]).catch((e: Error) => console.warn("forgetting a board's pages failed", e.message)));
+    if (!this.board) return;
+    this.ctx.waitUntil(dropBoard(this.env, this.board, ["page"]).catch((e: Error) => console.warn("forgetting a board's pages failed", e.message)));
+    this.ctx.waitUntil(dropFileScope(this.env, this.board, "f").catch((e: Error) => console.warn("forgetting a board's file text failed", e.message)));
   }
 
   private row(path: string): Row | null {
     return this.sql.exec<Row>("SELECT * FROM files WHERE path = ?", path).toArray()[0] ?? null;
   }
-  private info(r: Row): FileInfo {
-    return { path: r.path, size: r.size, type: r.type, etag: r.etag, page: !!r.is_page, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by };
+  private info(r: Row, held = this.extracts.get(r.path)): FileInfo {
+    const extract = this.extractState(r, held);
+    return { path: r.path, size: r.size, type: r.type, etag: r.etag, page: !!r.is_page, createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by, ...(extract ? { extract } : {}) };
   }
   private logIt(path: string, action: "put" | "delete" | "move", by: string, etag: string | null) {
     this.sql.exec("INSERT INTO log (path, action, at, by, etag) VALUES (?, ?, ?, ?, ?)", path, action, now(), by, etag);
@@ -174,7 +348,8 @@ export class Docs extends DurableObject<Env> {
       ? this.sql.exec<Row>("SELECT * FROM files WHERE path = ? OR path LIKE ? ORDER BY updated_at DESC", prefix, `${prefix}/%`).toArray()
       : this.sql.exec<Row>("SELECT * FROM files ORDER BY updated_at DESC").toArray();
     const seq = this.sql.exec<{ n: number }>("SELECT COALESCE(MAX(seq), 0) AS n FROM log").one().n;
-    return { files: rows.map((r) => this.info(r)), seq };
+    const held = this.extracts.all();
+    return { files: rows.map((r) => this.info(r, held.get(r.path))), seq };
   }
 
   /** What changed after `seq`: the cursor for a reader keeping a copy. */
@@ -242,10 +417,13 @@ export class Docs extends DurableObject<Env> {
       this.sql.exec("UPDATE files SET size = ?, type = ?, etag = ?, is_page = 0, updated_at = ?, updated_by = ? WHERE path = ?", size, type, etag, at, by, path);
       this.sql.exec("DELETE FROM pages WHERE path = ?", path);
       if (was.is_page) this.unindex([path]);
+      else if (was.etag !== etag) this.forgetExtract(path);
     } else {
       this.sql.exec("INSERT INTO files (path, size, type, etag, is_page, created_at, created_by, updated_at, updated_by) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)", path, size, type, etag, at, by, at, by);
     }
     this.logIt(path, "put", by, etag);
+    // A PDF or a Word file has its text read in a moment (alarm), off the upload's own time.
+    if (extractKind(type, path)) this.kick();
     return { ok: true, info: this.info(this.row(path)!) };
   }
 
@@ -259,7 +437,7 @@ export class Docs extends DurableObject<Env> {
       this.sql.exec("INSERT INTO revisions (path, etag, at, by, size, text) VALUES (?, ?, ?, ?, ?, ?)", path, was.etag, was.updated_at, was.updated_by, was.size, old);
       this.sql.exec("DELETE FROM pages WHERE path = ?", path);
       this.unindex([path]);
-    }
+    } else this.forgetExtract(path);
     this.sql.exec("DELETE FROM files WHERE path = ?", path);
     this.logIt(path, "delete", by, null);
     return { ok: true, info: this.info(was) };
@@ -280,6 +458,11 @@ export class Docs extends DurableObject<Env> {
       this.unindex([from]);
       const text = this.sql.exec<{ text: string }>("SELECT text FROM pages WHERE path = ?", to).toArray()[0]?.text;
       if (text !== undefined) this.ctx.waitUntil(this.indexPages([{ path: to, text }]));
+    } else if (this.extracts.get(from)) {
+      // The text goes with the file: its search rows are written again under the new path.
+      const refs = fileRefs("f", from, this.extracts.get(from)!.segs);
+      this.extracts.move(from, to);
+      this.ctx.waitUntil(dropFileRows(this.env, this.board, refs).catch((e: Error) => console.warn("unindexing a moved file failed", e.message)).then(() => this.indexFile(to)));
     }
     return { ok: true, info: this.info(this.row(to)!) };
   }
@@ -409,25 +592,65 @@ const readOnly = () => fail(403, "read_only", "You can view this board, not chan
 const docsOf = (env: Env, board: string) => env.Docs.get(env.Docs.idFromName(board));
 const fileKey = (board: string, path: string) => `${board}/files/${path}`;
 
+/**
+ * Store a file's bytes at a path: the one way in for the app's upload, an agent's (upload_file
+ * in mcp.ts), and an upload ticket's, so all three have the same size cap and type rules.
+ * Small text becomes a page; anything else is bytes in R2 with a row in the board's Docs.
+ */
+export async function storeFile(env: Env, who: { board: string; email: string }, path: string, bytes: Uint8Array, given: string | null, ifMatch: string | null):
+  Promise<{ ok: true; info: FileInfo; created: boolean } | { ok: false; code: string; info: FileInfo | null; max?: number }> {
+  const max = (Number(env.ATTACHMENT_MAX_MB) > 0 ? Number(env.ATTACHMENT_MAX_MB) : FILE_MAX_MB_DEFAULT) * MB;
+  if (bytes.length > max) return { ok: false, code: "file_too_big", info: null, max: max / MB };
+  const type = typeForPath(path, given);
+  const docs = docsOf(env, who.board);
+  // Small text goes in as a page, whatever the request said: pages are what agents read and edit.
+  if (isTextType(type) && bytes.length <= PAGE_MAX_BYTES) return docs.writePage(path, new TextDecoder().decode(bytes), who.email, ifMatch, type);
+  const etag = await etagOf(bytes);
+  // Refused before the bytes land, so a failed create-only or stale write leaves the file that's there alone.
+  const was = await docs.stat(path);
+  if (ifMatch === "*" && was) return { ok: false, code: "exists", info: was };
+  if (ifMatch && ifMatch !== "*" && (!was || was.etag !== ifMatch)) return { ok: false, code: "conflict", info: was };
+  await env.ATTACHMENTS.put(fileKey(who.board, path), bytes, { httpMetadata: { contentType: type }, customMetadata: { path } });
+  const r = await docs.noteFile(path, bytes.length, type, etag, who.email, ifMatch);
+  return r.ok ? { ...r, created: !was } : r;
+}
+
 async function putFile(req: Request, env: Env, who: { board: string; email: string }, path: string, ifMatch: string | null): Promise<Response> {
   const size = Number(req.headers.get("Content-Length"));
   const max = (Number(env.ATTACHMENT_MAX_MB) > 0 ? Number(env.ATTACHMENT_MAX_MB) : FILE_MAX_MB_DEFAULT) * MB;
   if (!req.body || !Number.isFinite(size) || size < 0) return fail(400, "empty", "Send the file as the request body with its length.");
   if (size > max) return fail(413, "too_big", `Files can be up to ${max / MB} MB.`);
-  const type = typeForPath(path, req.headers.get("Content-Type"));
   const bytes = new Uint8Array(await req.arrayBuffer());
   if (bytes.length !== size) return fail(400, "short", "The body wasn't as long as Content-Length said.");
-  const docs = docsOf(env, who.board);
-  // Small text goes in as a page, whatever the request said: pages are what agents read and edit.
-  if (isTextType(type) && bytes.length <= PAGE_MAX_BYTES) {
-    const r = await docs.writePage(path, new TextDecoder().decode(bytes), who.email, ifMatch, type);
-    return r.ok ? json({ file: r.info }, r.created ? 201 : 200, { ETag: r.info.etag }) : refusal(r);
-  }
-  const etag = await etagOf(bytes);
-  await env.ATTACHMENTS.put(fileKey(who.board, path), bytes, { httpMetadata: { contentType: type }, customMetadata: { path } });
-  const r = await docs.noteFile(path, bytes.length, type, etag, who.email, ifMatch);
-  if (!r.ok) { await env.ATTACHMENTS.delete(fileKey(who.board, path)).catch(() => {}); return refusal(r); }
-  return json({ file: r.info }, 201, { ETag: r.info.etag });
+  const r = await storeFile(env, who, path, bytes, req.headers.get("Content-Type"), ifMatch);
+  if (!r.ok) return r.code === "file_too_big" ? fail(413, "too_big", `Files can be up to ${max / MB} MB.`) : refusal(r);
+  return json({ file: r.info }, r.created || !r.info.page ? 201 : 200, { ETag: r.info.etag });
+}
+
+/**
+ * PUT /api/upload/<board id>/<ticket>: a file sent with an upload ticket (Docs.ticketNew), which
+ * upload_file over MCP hands an agent so it can send bytes a tool call can't carry. No session:
+ * the ticket names the board, the path, and the person, works once, and lasts ten minutes. The
+ * person's access is checked again here, so a member removed in between is refused.
+ */
+export async function handleUpload(req: Request, env: Env, path: string): Promise<Response | null> {
+  const m = /^\/api\/upload\/([^/]+)\/([0-9a-f]{48})$/.exec(path);
+  if (!m) return path.startsWith("/api/upload/") ? fail(404, "not_found", "That upload address isn't one. Ask for a new one with upload_file.") : null;
+  if (req.method !== "PUT" && req.method !== "POST") return fail(405, "bad_method", "Send the file with PUT.");
+  if (!BOARD_ID.test(m[1])) return fail(404, "not_found", "That upload address isn't one. Ask for a new one with upload_file.");
+  const docs = docsOf(env, m[1]);
+  const t = await docs.ticketUse(m[2]);
+  if (!t) return fail(404, "not_found", "That upload address was used already or has run out. Ask for a new one with upload_file.");
+  const w = await fileAccess(env, { id: t.id, email: t.email }, m[1]);
+  if (!w) return notFound();
+  if (w instanceof Response) return w;
+  if (!w.write) return readOnly();
+  const res = await putFile(req, env, w, t.path, t.ifMatch);
+  if (!res.ok) return res;
+  // The answer says what an agent can do with the file, so a PDF's text is read before it's sent.
+  const state = await docs.extractIfOpen(t.path);
+  const body = await res.json<{ file: FileInfo }>();
+  return json({ file: { ...body.file, ...(state ? { extract: state } : {}) } }, res.status, { ETag: body.file.etag });
 }
 
 function refusal(r: { ok: false; code: string; info: FileInfo | null }): Response {

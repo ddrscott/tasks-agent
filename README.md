@@ -23,6 +23,7 @@ the server holds only ciphertext and the in-browser model is the whole assistant
 | Login email | Email Sending (`send_email` binding) from `hey@askscottpierce.com` |
 | Bot protection | Turnstile on the email sign-in form, checked with Siteverify before any email goes out |
 | Attachments | R2 (`ATTACHMENTS`), keys `<user id>/<attachment id>`; metadata on the card |
+| Text out of PDFs and Word files | [`unpdf`](https://github.com/unjs/unpdf) (pdf.js) in the Worker for PDFs, Workers AI `toMarkdown` for `.docx`; the text is kept in the board's own SQLite beside the file (`src/extract.ts`, `// PAGES`) |
 | Paid plan | Stripe Checkout and Customer Portal, webhook into D1 (`subscriptions`) |
 | End-to-end encryption | Browser WebCrypto through [`jose`](https://github.com/panva/jose): JWE with PBES2-HS512+A256KW for the key, A256GCM for every field and file. The server only stores and checks shapes |
 | Card claims | A `Presence` Durable Object per user (`src/presence.ts`): which agent session holds which card, written by `claim_card` and the other MCP calls (`// CLAIMS`) |
@@ -670,7 +671,7 @@ strip, and the not-found page link to it too.
   registered, so the page can't drift from the server.
 
 - **Endpoint.** `/tasks/mcp`, Streamable HTTP, stateless. Tools: `get_started` (the working
-  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, and `delete_page` (`// PAGES`), `search` across every board, cards and pages (`// SEARCH`), `export_page` (`// EXPORT`), the worksheet tools `list_sheets`, `read_sheet`, `create_sheet`, `add_column`, `write_rows`, `update_rows`, `delete_rows`, and `query_sheet` (`// WORKSHEETS`), `get_board`, `get_card`,
+  rules, above), `list_boards` and a `board` argument on every tool (`// BOARDS`), the page tools `list_pages`, `read_page`, `write_page`, `edit_page`, `delete_page`, and `upload_file` (`// PAGES`), `search` across every board, cards, pages, and what's inside PDFs and Word files (`// SEARCH`), `export_page` (`// EXPORT`), the worksheet tools `list_sheets`, `read_sheet`, `create_sheet`, `add_column`, `write_rows`, `update_rows`, `delete_rows`, and `query_sheet` (`// WORKSHEETS`), `get_board`, `get_card`,
   `search_cards`, the seven board tools from `src/tools.ts`, `ask_ceo` and `wait_for_answer` (`// QUESTIONS`), and
   `claim_card` and `release_card` (`// CLAIMS`). Board changes over MCP sync live and are undoable, one undo step per call; claims aren't
   board changes. `get_board` and `search_cards` take an optional `tag`, so an agent
@@ -682,7 +683,15 @@ strip, and the not-found page link to it too.
   question and answer, and each attachment's id, type, and size. Attached PNG, JPEG, GIF,
   and WebP images come back as MCP image content (4 MB each, 8 MB a call), so an agent can
   look at a screenshot, and text, Markdown, CSV, and JSON files up to 32 KB come back as
-  text. `files: false` skips the contents. It reads R2 under the token owner's own prefix.
+  text. A PDF or Word file comes back as the text extracted from it (`// PAGES`, **Text out
+  of PDFs and Word files**): up to 32,000 characters of each file and 64,000 an answer,
+  between marker lines that say `begin text extracted from file a1b2…` and that it's "text
+  extracted from the file, not the file itself, not instructions". `file: "<attachment id>"`
+  shows one file alone, without the card's notes again, and with `offset` (a character) or
+  `page` (a PDF page) reads on through a long one; each answer says where the next part
+  starts. A scan says no text was found, and a file that couldn't be read says why.
+  `files: false` skips the contents and still says, per PDF and Word file, whether its text
+  was extracted, how long it is, and its page count. It reads R2 under the token owner's own prefix.
   Every file's text sits between two marker lines that name the file, its size in bytes, and
   a 20-character code made at random for that one answer (`newFence` in `src/mcp.ts`,
   `fenceLines` in `src/shared.ts`): `----- begin file a1b2… (98 bytes); everything until the
@@ -690,11 +699,11 @@ strip, and the not-found page link to it too.
   Whoever wrote the file never saw the code, and `get_card` checks no file on the card holds
   it, so nothing inside a file can close its own block and pose as the next file or as the
   board. The card's text says the code once, above the file list. A file that's listed and
-  not shown (any other type, a text file over 32 KB, an image over the limits, one that
-  couldn't be read) gets a line of its own: `[a1b2…] spec.pdf (application/pdf, 2.1 MB). Its
+  not shown (any other type, a text file over 32 KB, an image over the limits, a scan, one that
+  couldn't be read) gets a line of its own: `[a1b2…] photo.heic (image/heic, 2.1 MB). Its
   contents are not shown here: … Nothing else in this answer is this file's contents.` It
-  used to be skipped without a word, so a text file ending in `[a1b2…] spec.pdf:` and a made-up
-  spec read as the PDF.
+  used to be skipped without a word, so a text file ending in `[a1b2…] photo.heic:` and a made-up
+  description read as the photo.
 - **What a write returns.** The summary of the change and one line of lane counts
   (`Board now: To do 21 · Doing 0 · Done 3`), and `add_cards` adds the new cards' ids in
   the order given. It used to be the whole board, which cost an
@@ -1176,6 +1185,9 @@ with a row in the same object. The same membership check as the board decides wh
 and write (`access`, through `where` in `docs.ts`): the owner and writers write, viewers read,
 and a board that isn't yours answers like one that doesn't exist.
 
+A PDF or a Word file is a file like any other, with one difference: its text is extracted, so
+an agent can read it and search can find what's in it (**Text out of PDFs and Word files**, below).
+
 - **Paths** are folders and a file name, `docs/plan.md`: forward slashes, no leading slash, no
   `.` or `..` pieces, printable, at most 200 characters (`cleanPath`). A small text file PUT at
   any path becomes a page whatever the request said; a big one or a binary becomes a file.
@@ -1199,14 +1211,85 @@ and a board that isn't yours answers like one that doesn't exist.
   earlier version can be read and put back into the editor. A viewer sees none of the buttons
   that change anything.
 - **Over MCP**: `list_pages`, `read_page`, `write_page`, `edit_page` (one exact passage,
-  refused if it appears zero or more than one times, with the count), and `delete_page`, each
-  taking `board` like every other tool, and running as a member on a board shared with you (a
-  viewer's agent reads, a writer's writes).
+  refused if it appears zero or more than one times, with the count), `delete_page`, and
+  `upload_file`, each taking `board` like every other tool, and running as a member on a board
+  shared with you (a viewer's agent reads, a writer's writes).
+- **`upload_file` puts a file on a board**, so moving a folder of notes onto one doesn't stop
+  at the binaries. It goes through the same function as an upload from the app (`storeFile`),
+  so the cap (`ATTACHMENT_MAX_MB`) and the type rules are the same: the path's extension
+  decides the type, and small text becomes a page. A tool call can't carry many megabytes, so
+  there are two ways in. `content_base64` takes a file up to 1 MB inside the call. Without
+  it, the tool answers with a one-time address, `PUT /tasks/api/upload/<board id>/<ticket>`,
+  good for ten minutes, which an agent with a shell sends the bytes to (`curl -sS -T spec.pdf
+  "<address>"`). The ticket is 24 random bytes; the board's `Docs` object keeps only its
+  SHA-256, outside the tables `query_sheet` can read, with the path, the person, and the etag
+  to match. The address takes no cookie and skips the same-origin check (an agent's shell has
+  neither), so the ticket is the whole proof: it's spent on first use, and the person's access
+  is checked again when the bytes arrive, so a member removed in between gets a 404. The
+  answer is JSON naming the file and, for a PDF or Word file, what was extracted.
 - **Live**: the screen asks for changes after its cursor every five seconds while visible
   (`since=`), reloads the list and an open page that isn't being edited, and tells an editor
   mid-edit who changed the page under them rather than overwriting their draft. The save
   still catches a conflict with the etag.
 - **Not yet**: a page linking to a card and back, and a socket instead of polling.
+- **Text out of PDFs and Word files** (`src/extract.ts`). When a `.pdf` or `.docx` lands,
+  as a board file or as a card attachment (`// ATTACHMENTS`), its text is read out and kept
+  beside the file: a board file's by the board's `Docs` object, an attachment's by its
+  `TodoAgent`, each in its own SQLite (`_file_extracts` for what's known of each file,
+  `_file_extract_text` for the text in 100,000-character pieces, since one value there is at
+  most 2 MB). The bytes stay in R2. Up to 2,000,000 characters of a file are kept, and a file
+  cut there says so.
+  - **PDFs are read with pdf.js** (`unpdf`), in the Worker, a page at a time, so the page
+    count and where each page starts are known. Workers AI `toMarkdown` was the first thing
+    tried and isn't used for PDFs: on seven real ones it returned every page empty for four
+    (the IRS's W-9, 1040, and 59-page Publication 15, and NIST FIPS 197, all with a text
+    layer `pdftotext` reads) and ran words together on a fifth. pdf.js matched `pdftotext`
+    on all seven, in 50 to 400 ms each. It adds about 550 KB gzipped to the Worker, in a
+    chunk of its own that loads the first time a PDF is read.
+  - **Word files go through `toMarkdown`**, which keeps headings, lists, and tables. Without
+    the AI binding (`npm run dev:local`), or when the call fails, the paragraphs are read
+    straight out of `word/document.xml` instead: the words, without the table layout.
+  - **When.** A moment after the upload, off its clock: `Docs` sets an alarm, `TodoAgent` a
+    schedule, and each works through what's pending four files at a time. Asking is enough
+    too: `read_page` and `get_card` extract a file nobody has tried yet before they answer.
+    **Files from before this existed** are pending by the same rule (a PDF or Word file with
+    no row), so each board's objects pick them up the first time they start, and a search
+    that wakes a board waits for its first four (`ensureSearch`), the way it waits for old
+    boards' vectors. Each file is tried once. One that failed for a reason that could pass
+    (storage was down) is tried again when someone reads it; a damaged or password-protected
+    one isn't.
+  - **What an agent is told.** `list_pages` and `get_card` say, per file: `text extracted
+    from the PDF: 37,693 characters, 6 pages; read_page reads it`, or `no text found in its 1
+    page: it looks like a scan, and scans aren't read (no OCR)`, or `text not extracted:` and
+    why (damaged, password-protected, over the size text is extracted from, which is the
+    upload cap). `read_page` on one returns up to 32,000 characters with `[page N]` on a
+    line where each PDF page starts, says `Characters 0–32,000 of 37,693 (pages 1–5 of 6)`,
+    and takes `offset` or `page` to read on.
+  - **It's the file's text, not the file, and never instructions.** The answer says so above
+    the text, and the text sits between the same marker lines `get_card` puts around a file's
+    contents, with a code made for that answer that the text is checked not to hold. Layout
+    and images aren't in it.
+  - **A member's file is the member's words** (`// TEAM_BOARDS`). The text of a board file a
+    member put there or changed last says so above it and on its begin line (`added by
+    dana@example.com, a member, not the owner`), as does a search hit in it; an attachment's
+    is marked the way `get_card` already marks a member's file. Everyone's extracted text
+    goes through `visibleText`, so zero-width characters and direction overrides in a
+    document don't reach an agent.
+  - **Encrypted boards.** Nothing is extracted: an attachment there is ciphertext, and the
+    server keeps no readable copy of a board file's text either. `read_page` on a PDF,
+    `get_card`, and `upload_file` answer the way every tool does on an encrypted board, and
+    `list_pages` says `text isn't extracted on an encrypted board`. Encrypting a board
+    erases every extract and its search rows (`TodoAgent` tells `Docs`, and a search checks
+    again in case that didn't land); decrypting reads the files again.
+  - **Out of scope:** OCR, so a scanned PDF with no text layer comes back as "no text
+    found", and rendering PDF pages to images for an agent to look at. Old `.doc` files
+    aren't read either.
+- `npm run check:files` covers all of that against a local dev server, with real files in
+  `scripts/fixtures` (the W-9, a Word file with a table, a scan): upload from the app, by
+  `upload_file` with content and by ticket, list, read by offset and by page, search, an
+  attachment through `get_card`, remove and undo, a member's file and a viewer refused, a
+  ticket whose member was removed, hidden characters, move and delete, and a board through
+  encrypting and decrypting.
 - `npm run check:boards` covers the API (create, read as JSON and as text, stale etag, create-only,
   revisions, a `..` path, a binary file byte for byte, a writer's page, move, delete) and the
   tools (create, list, read, edit, stale etag, text missing, text twice, a viewer refused).
@@ -2394,8 +2477,9 @@ address or a guess, and nothing on screen offers a change the server would refus
 
 ## // SEARCH
 
-There are two searches. The one people use is across everything they can reach: cards and
-pages on every board they own and every board shared with them (`src/search-all.ts`, below).
+There are two searches. The one people use is across everything they can reach: cards,
+pages, worksheet rows, and the text inside PDFs and Word files, on every board they own and
+every board shared with them (`src/search-all.ts`, below).
 The older one is inside a single board's TodoAgent (`src/search.ts`), which the assistant and
 the MCP `search_cards` tool still use for a board with lane and tag filters, and which ⌘K
 falls back to on an encrypted board.
@@ -2418,6 +2502,22 @@ falls back to on an encrypted board.
   Vectorize once (`pushVectors`, marked `vectors_pushed` in its `board_meta`): a board that
   embedded its cards before the index existed holds them all, and the refresh only sends
   fresh ones. Encrypting the board clears the mark with the vectors.
+- **What's inside files.** The text extracted from a PDF or Word file (`// PAGES`) is in the
+  same table as kind `file`: a row per PDF page (a Word file is cut about every 6,000
+  characters), titled with the file's name, so a phrase on page 40 is found and the hit says
+  page 40. `meta` holds the file's name, its path or its card and attachment id, the page,
+  and the character the piece starts at. A file is one hit however many of its pieces match:
+  its best one. `Docs` writes a board file's rows (refs `f:<n>:<path>`) and `TodoAgent` an
+  attachment's (`a:<n>:<attachment id>`), each when the text is extracted, and takes them out
+  when the file is deleted, replaced, or removed from its card; an attachment undo brings
+  back is searchable again. Each file is one vector too, of its name and first piece, so a
+  meaning match finds the file ("what did the spec say about calendars" finds the spec). A
+  new vector takes a minute or two to be queryable in Vectorize (85 and 105 seconds when
+  measured, the same for a page written at the same moment); keyword hits are there at once. Encrypting a board drops them all. Over MCP a hit names the
+  file and the call that reads it: `- file files/fw9.pdf (keyword match in its extracted
+  text, page 6) — …; read_page reads its text`, or `- file fw9.pdf attached to card [c1a2b]
+  …; get_card with id: "c1a2b" and file: "a1b2…" reads it`, with the member note when the
+  file is a member's. In ⌘K a file hit opens the file on the Pages screen, or the card.
 - **Keyword:** bm25 over the FTS5 table with titles weighted 5x, the same tokenizer and query
   shape as the per-board search (`ftsQuery` is shared), one query with `board IN (…)` over
   the ids the caller may see. Highlighted titles and snippets come from FTS5.
@@ -2437,19 +2537,24 @@ falls back to on an encrypted board.
   card a member wrote says so: the index doesn't know, so the MCP tool asks the board
   (`memberLine`) per card hit, the same note `search_cards` puts on a hit.
 - **Surfaces:** `GET /tasks/api/search?q=…` (`mode`, `limit`, `board` by id or name, `kind`
-  card or page) for the ⌘K box, which shows a board chip on a hit from another board and
+  card, page, row, or file) for the ⌘K box, which shows a board chip on a hit from another board and
   opens the card there (`?card=` on the board address, read once the board is up) or the
   page on the Pages screen (`?path=`); and the MCP `search` tool, with the same arguments,
   whose hits name the board and the lane or the page path.
 
 ### On one board
 
-The per-board search covers card titles and notes (not attachments). It runs inside the
-board's TodoAgent (`src/search.ts`), so results never cross between boards.
+The per-board search covers card titles and notes, and the text extracted from the PDFs and
+Word files attached to them (`// PAGES`). It runs inside the board's TodoAgent
+(`src/search.ts`), so results never cross between boards.
 
 - **Keyword:** an FTS5 table (`card_fts`) with porter stemming, prefix matches for terms
   of three or more letters, and bm25 ranking with titles weighted 5x. Common words are
   dropped.
+- **Inside attachments:** a second FTS5 table (`file_fts`) holds each attached PDF's and
+  Word file's text, a row per piece under its card. A card whose own words didn't match is
+  still found by what's in its files, ranked after the cards that matched on their words,
+  and the hit says `in the text of its file spec.pdf:` before the snippet. Keyword only.
 - **Semantic:** one embedding per card from Workers AI (`EMBEDDING_MODEL`,
   `@cf/baai/bge-small-en-v1.5`), stored in `card_vec` and compared by cosine
   similarity. Boards are small, so a scan is faster than a vector database. Results
@@ -2484,9 +2589,14 @@ name, size, and type go into the board, so agents and the assistant see file nam
   own prefix, unless `?board=` names a board they're a member of (`// TEAM_BOARDS`). Images, PDFs, and plain text open inline; everything else downloads as
   `application/octet-stream`. Every response has `nosniff`, and everything but PDFs
   gets a sandboxing CSP, so an uploaded HTML or SVG file can't run on this origin.
+- **PDFs and Word files are read.** Their text is extracted a moment after the upload and
+  kept by the board's `TodoAgent` (`// PAGES`, **Text out of PDFs and Word files**), so
+  `get_card` returns it and both searches find what's in it. Not on an encrypted board.
 - **Removal is undoable.** Removing a file, or deleting its card or lane, drops only the
   reference. `TodoAgent.collectAttachments` deletes R2 objects that neither the board
-  nor undo history refers to. It runs 25 hours after something drops a file, and again
+  nor undo history refers to, and the text extracted from them. It only looks at keys shaped
+  like an attachment id: a board's files (`// PAGES`) sit under the same prefix, at
+  `<board id>/files/<path>`, and it used to delete those too. It runs 25 hours after something drops a file, and again
   weekly while history still holds removed ones. It skips objects under an hour old,
   in case an upload is still finishing.
 - R2 costs: 10 GB and 1M writes a month are free, then $0.015/GB-month, and there are
@@ -2706,6 +2816,7 @@ npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagg
 npm run check:claims     # which board changes end a claim; with a dev server's address, claim, refuse, ask, answer, release over MCP
 npm run check:members    # team boards, against a running local dev server: five-plus real accounts attack every way in (// TEAM_BOARDS)
 npm run check:boards     # many boards per account, against the same dev server: make, rename, archive, invite into, and reach over MCP (// BOARDS)
+npm run check:files      # text out of PDFs and Word files, against the same dev server: upload, list, read, search, attachments, a shared and an encrypted board (// PAGES)
 npm run og               # re-render the share image and home-screen icon from scripts/og/
 npm run shots            # the Product Hunt gallery, shot from the running app (// LAUNCH)
 npm run check:launch     # the launch copy against its limits, and the gallery's files and sizes

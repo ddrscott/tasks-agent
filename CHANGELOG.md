@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The top bar on the board, Pages, and Worksheets screens has Board · Pages · Worksheets beside the board switcher, with the one you're on marked. Pages and Worksheets open a list of what the board has, so a page or a worksheet is one tap from anywhere and nobody types a path. The board switcher is always there now, even with one board
 
+- Agents can read PDFs and Word files. When a `.pdf` or `.docx` is uploaded, as a board file or a card attachment, its text is extracted and kept beside it. `read_page` on one returns that text, and `get_card` returns it for an attachment, labeled as text extracted from the file and not the file itself, 32,000 characters at a time, with `offset` or `page` to read on. Files already on boards are read the first time the board wakes
+- Search finds what's inside PDFs and Word files: the search box and `search` over MCP name the file and the PDF page the match is on, and `search_cards` finds a card by the text of its attachments
+- `list_pages` and `get_card` say what an agent can do with each PDF and Word file: whether its text was extracted, how long it is, and its page count. A scan with no text layer says "no text found" (there's no OCR), and a damaged or password-protected file says why
+- `upload_file` over MCP puts a file on a board, with the same size limit and type rules as an upload from the app: inside the call for a file up to 1 MB, or to a one-time address the tool hands out for anything bigger
+- On a shared board, text extracted from a file a member added is marked as that member's words, and hidden characters are taken out of everyone's. On an encrypted board nothing is extracted, and encrypting a board erases what was
+
 ### Changed
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
 - The front page says what Tasks is now: one board for your team and your agents, with kanban, a wiki, and worksheets in one place. It shows the board under the new top bar with a card assigned to a teammate, and a page and a worksheet from the same sample board, drawn with the app's own renderer and grid. Pricing says Pro's board count, read from the server like the member count

@@ -26,7 +26,8 @@
     "dev:local": "LOCAL_ONLY=1 vite dev",
     "bench": "node bench/run.mjs",
     "bench:needle": "node bench/needle.mjs",
-    "check:boards": "node scripts/check-boards.mjs"
+    "check:boards": "node scripts/check-boards.mjs",
+    "check:files": "node scripts/check-files.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.112",
@@ -43,6 +44,7 @@
     "jose": "^6.2.12",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "unpdf": "^1.8.1",
     "workers-ai-provider": "^4.0.0",
     "zod": "^4.6.5"
   },

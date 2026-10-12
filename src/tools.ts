@@ -135,8 +135,18 @@ export type SearchHit = {
   /** From the cross-board search (search-all.ts): which board, and whether the hit is a card (id is its id) or a page (id is its path). */
   board?: string;
   boardName?: string;
-  kind?: "card" | "page" | "row";
+  kind?: "card" | "page" | "row" | "file";
   assignee?: string;
+  /**
+   * A hit in the text extracted from a PDF or Word file (extract.ts): the file's name. From the
+   * cross-board search, `id` is then the card it's attached to (with `card` and `att`), or a board
+   * file's path, and `page` and `offset` say where in the text. From the one-board search it's on a card hit.
+   */
+  file?: string;
+  card?: string;
+  att?: string;
+  page?: number;
+  offset?: number;
 };
 export type SearchResult = { hits: SearchHit[]; semantic: "on" | "unavailable" | "off" };
 
@@ -152,7 +162,7 @@ export function describeHits(r: SearchResult): string {
   const strip = (s: string) => s.replace(/[\u0001\u0002]/g, "");
   if (!r.hits.length) return "No matching cards.";
   return r.hits.map((h) => ops.oneLine(
-    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — …${strip(h.snippet)}…` : ""}${h.member ?? ""}`,
+    `- [${h.id}] ${strip(h.title)} (${h.lane}${h.due ? `, due ${h.due}` : ""}; ${h.match} match)${h.snippet ? ` — ${h.file ? `in the text of its file ${h.file}: ` : ""}…${strip(h.snippet)}…` : ""}${h.member ?? ""}`,
   )).join("\n") + (r.semantic === "unavailable" ? "\n(Meaning-based search is unavailable right now; these are keyword matches only.)" : "");
 }
 

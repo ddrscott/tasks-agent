@@ -885,7 +885,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
   /** A search hit: a card on this board opens here; one on another board opens there; a page opens the Pages screen on it. */
   const openHit = useCallback((h: SearchHit) => {
     const board = h.board ?? here;
-    if (h.kind === "page") { onPages(board === me.id ? null : board, h.id); return; }
+    // A hit inside a board file opens the file on the Pages screen; one inside a card's file opens the card (its id is the card's).
+    if (h.kind === "page" || (h.kind === "file" && !h.card)) { onPages(board === me.id ? null : board, h.id); return; }
     if (h.kind === "row") { const [sheet, row] = h.id.split("/"); onSheets(board === me.id ? null : board, sheet, row); return; }
     if (board === here) { setEditing(h.id); return; }
     onSwitch(board === me.id ? null : board, h.id);

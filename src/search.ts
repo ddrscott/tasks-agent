@@ -1,7 +1,8 @@
 // Search over one user's cards, stored beside the board in the agent's SQLite.
 //
 // - Keyword: an FTS5 table of card titles and notes (porter stemming, prefix matches,
-//   bm25 ranking with titles weighted 5x, highlighted snippets).
+//   bm25 ranking with titles weighted 5x, highlighted snippets), and one of the text
+//   extracted from each card's PDFs and Word files (extract.ts), which finds the card.
 // - Semantic: an embedding per card from Workers AI, compared by cosine similarity.
 //   A board is small (hundreds of cards), so a scan beats running a vector database.
 //   Vectors are refreshed after changes and lazily before a search, so a search never
@@ -67,6 +68,19 @@ export class CardIndex {
     this.sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS card_fts USING fts5(
       card_id UNINDEXED, title, notes, tokenize = 'porter unicode61 remove_diacritics 2')`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS card_vec (card_id TEXT PRIMARY KEY, hash TEXT NOT NULL, vec BLOB NOT NULL)`);
+    // The text extracted from a card's PDFs and Word files (extract.ts), a row per piece. Keyword only.
+    this.sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5(
+      card_id UNINDEXED, att_id UNINDEXED, name UNINDEXED, body, tokenize = 'porter unicode61 remove_diacritics 2')`);
+  }
+
+  /** Put (or replace) one attached file's extracted text, in pieces, under its card. */
+  setFile(cardId: string, attId: string, name: string, pieces: string[]) {
+    this.sql.exec("DELETE FROM file_fts WHERE att_id = ?", attId);
+    for (const body of pieces) this.sql.exec("INSERT INTO file_fts (card_id, att_id, name, body) VALUES (?, ?, ?, ?)", cardId, attId, name, body);
+  }
+  /** Take files' text out: they left the board. */
+  dropFiles(attIds: string[]) {
+    for (const id of attIds) this.sql.exec("DELETE FROM file_fts WHERE att_id = ?", id);
   }
 
   /** Index a board for the first time, e.g. one created before search existed. */
@@ -79,6 +93,7 @@ export class CardIndex {
   clear() {
     this.sql.exec("DELETE FROM card_fts");
     this.sql.exec("DELETE FROM card_vec");
+    this.sql.exec("DELETE FROM file_fts");
   }
 
   /** Update the keyword index for what changed between two boards. Only touched cards are rewritten. */
@@ -160,6 +175,19 @@ export class CardIndex {
     return rows.length || !anyWord ? rows : run(ftsQuery(q, " OR ")!);
   }
 
+  /** Cards found by the text of a file attached to them: the best piece of each card's files, with the file's name. */
+  private fileKeyword(q: string, limit: number, anyWord: boolean) {
+    type Row = { card_id: string; name: string; s: string };
+    const run = (m: string) => this.sql.exec<Row>(
+      `SELECT card_id, name, snippet(file_fts, 3, char(1), char(2), '…', 14) AS s FROM file_fts WHERE file_fts MATCH ? ORDER BY bm25(file_fts) LIMIT ?`, m, limit * 4).toArray();
+    const all = ftsQuery(q, " ");
+    if (!all) return [];
+    let rows = run(all);
+    if (!rows.length && anyWord) rows = run(ftsQuery(q, " OR ")!);
+    const seen = new Set<string>();
+    return rows.filter((r) => (seen.has(r.card_id) ? false : (seen.add(r.card_id), true))).slice(0, limit);
+  }
+
   private async semantic(board: Board, q: string, limit: number): Promise<string[]> {
     await this.refreshVectors(board);
     const [qv] = await this.embed([q]);
@@ -184,6 +212,8 @@ export class CardIndex {
     const pool = lane || tag ? Math.max(limit * 4, 50) : limit * 2; // filter after ranking, so over-fetch
 
     const kw = mode === "semantic" ? [] : this.keyword(input.query, pool, mode === "keyword").filter((r) => cards.has(r.card_id));
+    // A card whose own words didn't match can still be found by what's inside its files; those rank after the cards that matched on their words.
+    const inFile = mode === "semantic" ? [] : this.fileKeyword(input.query, pool, mode === "keyword").filter((r) => cards.has(r.card_id) && !kw.some((k) => k.card_id === r.card_id));
     let sem: string[] = [];
     let semantic: SearchResult["semantic"] = mode === "keyword" ? "off" : "on";
     if (mode !== "keyword") {
@@ -197,6 +227,8 @@ export class CardIndex {
 
     const score = new Map<string, number>();
     kw.forEach((r, i) => score.set(r.card_id, (score.get(r.card_id) ?? 0) + 1 / (RRF_K + i)));
+    inFile.forEach((r, i) => score.set(r.card_id, (score.get(r.card_id) ?? 0) + 1 / (RRF_K + kw.length + i)));
+    const fileRow = new Map(inFile.map((r) => [r.card_id, r]));
     sem.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (RRF_K + i)));
     const kwRow = new Map(kw.map((r) => [r.card_id, r]));
     const semSet = new Set(sem);
@@ -208,13 +240,15 @@ export class CardIndex {
       .map(([id]) => {
         const c = cards.get(id)!;
         const k = kwRow.get(id);
+        const f = fileRow.get(id);
         return {
           id,
           title: k?.t ?? c.title,
-          snippet: k?.s.includes(MARK[0]) ? k.s : "",
+          snippet: k?.s.includes(MARK[0]) ? k.s : f?.s ?? "",
+          ...(f && !(k?.s.includes(MARK[0])) ? { file: f.name } : {}),
           lane: laneName.get(c.laneId) ?? c.laneId,
           due: c.due,
-          match: k && semSet.has(id) ? "both" : k ? "keyword" : "semantic",
+          match: (k || f) && semSet.has(id) ? "both" : k || f ? "keyword" : "semantic",
           ...(ops.memberLine(c, owner) ? { member: ops.memberLine(c, owner) } : {}),
         };
       });
