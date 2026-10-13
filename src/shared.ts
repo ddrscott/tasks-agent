@@ -423,9 +423,10 @@ export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
 /**
  * The filter's pick (client/Filter.tsx): which tags, whether a card needs every one of them or
  * any one, and whose cards. `who` holds assignee emails, `me` for whoever is looking, and `none`
- * for cards with no assignee; a card matching any one of them shows. Who and tags narrow together.
+ * for cards with no assignee; a card matching any one of them shows. `text` is words typed to
+ * look for in the cards themselves (`matchesText`). Who, tags, and text narrow together.
  */
-export type Where = { tags: string[]; all: boolean; who: string[] };
+export type Where = { tags: string[]; all: boolean; who: string[]; text: string };
 export const WHO_ME = "me";
 export const WHO_NONE = "none";
 /** True when the picked tags let this card show. No tags picked lets every card through. */
@@ -438,15 +439,60 @@ export function matchesWho(c: Card, who: string[], me?: string | null): boolean 
   if (!who.length) return true;
   return who.some((w) => (w === WHO_NONE ? !c.assignee : w === WHO_ME ? !!me && c.assignee === me : c.assignee === w));
 }
-/** True when the whole filter lets this card show: one of the picked people, and the picked tags. */
-export const matchesWhere = (c: Card, where: Where, me?: string | null) => matchesWho(c, where.who, me) && matchesTags(c, where);
+
+/**
+ * The filter's text, read the way a search box is: every word has to be on the card, a word
+ * matches the start of a word (`invo` finds "invoice"), `"two words"` in quotes have to sit
+ * side by side in that order, and a `-` in front leaves out the cards that have it
+ * (`-draft`, `-"on hold"`). Case, accents, and punctuation don't count.
+ */
+export type TextTerm = { words: string; not: boolean };
+export const MAX_FILTER_TEXT = 200;
+/** Lower case, accents off, and every run of letters and digits one word, with a space on each side: " pay the invoice ". */
+const wordsOf = (s: string) => ` ${(s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ")} `;
+export function textTerms(text: string): TextTerm[] {
+  const terms: TextTerm[] = [];
+  for (const m of text.matchAll(/(-?)"([^"]*)"?|(\S+)/g)) {
+    const quoted = m[3] === undefined;
+    const not = quoted ? m[1] === "-" : m[3].length > 1 && m[3].startsWith("-");
+    const words = wordsOf(quoted ? m[2] : m[3]).trimEnd();
+    if (words === "") continue;
+    // Quoted words stay together. A bare `shop-api` is two words, each looked for on its own.
+    if (quoted) terms.push({ words, not });
+    else for (const w of words.trim().split(" ")) terms.push({ words: ` ${w}`, not });
+  }
+  return terms;
+}
+/** Everything on a card the text filter reads: title, notes, tags, who it's assigned to, and the names of its files. */
+const cardText = new WeakMap<Card, string>();
+function textOf(c: Card): string {
+  let t = cardText.get(c);
+  if (t === undefined) {
+    t = wordsOf([c.title, c.notes, ...(c.tags ?? []), c.assignee ?? "", ...(c.attachments ?? []).map((a) => a.name)].join("\n"));
+    cardText.set(c, t);
+  }
+  return t;
+}
+let lastText = "", lastTerms: TextTerm[] = [];
+/** True when the filter's text lets this card show. No text lets every card through. */
+export function matchesText(c: Card, text: string): boolean {
+  if (!text) return true;
+  if (text !== lastText) { lastTerms = textTerms(text); lastText = text; }
+  if (!lastTerms.length) return true;
+  const hay = textOf(c);
+  return lastTerms.every((t) => hay.includes(t.words) !== t.not);
+}
+/** True when the whole filter lets this card show: one of the picked people, the picked tags, and the text. */
+export const matchesWhere = (c: Card, where: Where, me?: string | null) => matchesWho(c, where.who, me) && matchesTags(c, where) && matchesText(c, where.text);
+/** True when the filter takes any card off the board. */
+export const narrows = (w: Where) => w.who.length + w.tags.length > 0 || !!w.text;
 
 /**
  * The filters as they sit in the address, so a filtered board can be linked to:
  * `?who=me` is cards assigned to whoever opens the link, `?who=dana@example.com,none` names
  * people and the unassigned, `?tags=agent,shop-api` is the picked tags, `&match=all` when a card
- * needs every one of them, and `&fade=agent` is the tag clicked on a card. Anything that isn't a
- * tag, an email, `me`, or `none` is dropped.
+ * needs every one of them, `&q=invoice+-draft` is the text, and `&fade=agent` is the tag clicked
+ * on a card. In `who` and `tags`, anything that isn't a tag, an email, `me`, or `none` is dropped.
  */
 export type FilterQuery = { where: Where; fade: string | null };
 const cleanWho = (s: string) => {
@@ -457,7 +503,8 @@ export function filterQueryFrom(search: string): FilterQuery {
   const q = new URLSearchParams(search);
   const tags = [...new Set((q.get("tags") ?? "").split(",").map(cleanTag).filter(Boolean))];
   const who = [...new Set((q.get("who") ?? "").split(",").map(cleanWho).filter(Boolean))].slice(0, 20);
-  return { where: { tags, all: q.get("match") === "all", who }, fade: cleanTag(q.get("fade") ?? "") || null };
+  const text = (q.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_FILTER_TEXT);
+  return { where: { tags, all: q.get("match") === "all", who, text }, fade: cleanTag(q.get("fade") ?? "") || null };
 }
 /** `search` with the filters written into it and every other parameter left alone. "" when nothing is left. */
 export function filterQueryInto(search: string, { where, fade }: FilterQuery): string {
@@ -466,6 +513,7 @@ export function filterQueryInto(search: string, { where, fade }: FilterQuery): s
   put("who", where.who.join(","));
   put("tags", where.tags.join(","));
   put("match", where.all ? "all" : "");
+  put("q", where.text);
   put("fade", fade ?? "");
   // A comma and an @ are fine in a query as they are, and `who=me&tags=agent,shop-api` is the link a person can read.
   const s = q.toString().replace(/%2C/g, ",").replace(/%40/g, "@");

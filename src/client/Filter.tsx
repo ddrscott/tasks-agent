@@ -3,18 +3,21 @@
 // assigned on this board and "Unassigned", then the board's tags. A picked person or tag takes
 // the other cards off the board, the way a WHERE clause keeps rows out of a result; that's the
 // difference from clicking a tag on a card, which only fades the others (README, Tags). People
-// and tags narrow together. Type to narrow the list, arrows to move, Enter to tick. `f` opens it
-// from anywhere on the board. The filter lives in the address (`?who=me&tags=agent&match=all`),
+// and tags narrow together. Type to narrow the list, arrows to move, Enter to tick. What's typed
+// is also offered as a filter of its own, the last row: cards with those words in the title,
+// notes, tags, assignee, or a file's name (`matchesText` in shared.ts), which narrows with the
+// rest. `f` opens it from anywhere on the board. The filter lives in the address
+// (`?who=me&tags=agent&match=all&q=invoice`),
 // so a filtered board can be linked to and a reload keeps it. It all happens in the browser:
 // nothing here asks the server for anything.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { filterQueryFrom, filterQueryInto, matchesWhere, tagsByUse, WHO_ME, WHO_NONE, type Board, type FilterQuery, type Where } from "../shared";
+import { filterQueryFrom, filterQueryInto, matchesText, matchesWhere, MAX_FILTER_TEXT, narrows, tagsByUse, textTerms, WHO_ME, WHO_NONE, type Board, type FilterQuery, type Where } from "../shared";
 import { Popover } from "./Board";
 import { IconCheck, IconClose, IconFilter, IconSearch } from "./icons";
 
 const fromUrl = () => filterQueryFrom(location.search);
-const isOn = (w: Where, fade: string | null) => w.who.length + w.tags.length + (fade ? 1 : 0);
+const isOn = (w: Where, fade: string | null) => w.who.length + w.tags.length + (w.text ? 1 : 0) + (fade ? 1 : 0);
 
 export type Filters = {
   where: Where; setWhere(w: Where): void;
@@ -46,7 +49,7 @@ export function useFilters(board: Board | null, me: string | null): Filters {
   }, []);
   const setWhere = useCallback((where: Where) => change({ where }), [change]);
   const setFade = useCallback((fade: string | null) => change({ fade }), [change]);
-  const clear = useCallback(() => change({ where: { tags: [], all: false, who: [] }, fade: null }), [change]);
+  const clear = useCallback(() => change({ where: { tags: [], all: false, who: [], text: "" }, fade: null }), [change]);
   const where = useMemo(() => {
     const w = picked.where;
     if (!board || !(w.tags.length || w.who.length)) return w;
@@ -63,7 +66,7 @@ export function useFilters(board: Board | null, me: string | null): Filters {
 const whoName = (w: string) => (w === WHO_ME ? "Mine" : w === WHO_NONE ? "Unassigned" : `→ ${w.split("@")[0]}`);
 
 type Props = { board: Board; me: string | null; filters: Filters };
-type Row = { key: string; kind: "who" | "tag"; value: string; name: string; note?: string; count: number; on: boolean };
+type Row = { key: string; kind: "who" | "tag" | "text"; value: string; name: string; note?: string; count: number; on: boolean };
 
 export function FilterButton({ board, me, filters }: Props) {
   const { where, setWhere, fade, clear } = filters;
@@ -114,14 +117,25 @@ export function FilterButton({ board, me, filters }: Props) {
   // A # in front looks only at tags, the way a tag is typed everywhere else.
   const typed = q.trim().toLowerCase();
   const needle = typed.replace(/^#/, "");
-  const rows = !needle ? all : all.filter((r) => (r.kind === "tag" ? r.value.includes(needle) : !typed.startsWith("#") && r.name.toLowerCase().includes(needle)));
+  const found = !needle ? all : all.filter((r) => (r.kind === "tag" ? r.value.includes(needle) : !typed.startsWith("#") && r.name.toLowerCase().includes(needle)));
+  // What's typed, as a filter on the cards' own words. It's the last row, so Enter still ticks a
+  // person or a tag the typing found, and with none found Enter is this. The text already on
+  // is a row too, to untick.
+  const words = q.replace(/\s+/g, " ").trim().slice(0, MAX_FILTER_TEXT);
+  const textRow = (text: string): Row => ({ key: `text:${text}`, kind: "text", value: text, name: text, count: board.cards.filter((c) => matchesText(c, text)).length, on: where.text === text });
+  const rows = [
+    ...found,
+    ...(where.text ? [textRow(where.text)] : []),
+    ...(words !== where.text && textTerms(words).length ? [textRow(words)] : []),
+  ];
   const at = Math.min(active, Math.max(rows.length - 1, 0));
   const toggle = (r: Row) => {
     const flip = (have: string[]) => (have.includes(r.value) ? have.filter((v) => v !== r.value) : [...have, r.value]);
-    setWhere(r.kind === "who" ? { ...where, who: flip(where.who) } : { ...where, tags: flip(where.tags) });
+    if (r.kind === "text") { setWhere({ ...where, text: r.on ? "" : r.value }); if (!r.on) setQ(""); }
+    else setWhere(r.kind === "who" ? { ...where, who: flip(where.who) } : { ...where, tags: flip(where.tags) });
   };
   const n = isOn(where, fade);
-  const said = [...where.who.map(whoName), ...where.tags.map((t) => `#${t}`), ...(fade ? [`#${fade} (faded)`] : [])].join(", ");
+  const said = [...where.who.map(whoName), ...where.tags.map((t) => `#${t}`), ...(where.text ? [`text ${where.text}`] : []), ...(fade ? [`#${fade} (faded)`] : [])].join(", ");
 
   const row = (r: Row) => {
     const i = rows.indexOf(r);
@@ -136,12 +150,13 @@ export function FilterButton({ board, me, filters }: Props) {
   const mineRow = rows.find((r) => r.value === WHO_ME && r.kind === "who");
   const peopleRows = rows.filter((r) => r.kind === "who" && r !== mineRow);
   const tagRows = rows.filter((r) => r.kind === "tag");
+  const textRows = rows.filter((r) => r.kind === "text");
 
   return (
     <div className="anchor filter">
       <button
         className={`btn filter-btn${n ? " on" : ""}`} aria-haspopup="dialog" aria-expanded={open}
-        title={n ? `Showing only ${said}. Change the filter (f)` : "Show only your cards, one person's, or a tag's (f)"}
+        title={n ? `Showing only ${said}. Change the filter (f)` : "Show only your cards, one person's, a tag's, or the ones with a word in them (f)"}
         aria-label={n ? `Filter, ${n} on: ${said}` : "Filter"}
         onClick={() => setOpen((o) => !o)}
       >
@@ -155,7 +170,7 @@ export function FilterButton({ board, me, filters }: Props) {
             <label className="filter-find">
               <IconSearch />
               <input
-                autoFocus type="text" value={q} placeholder={anyAssigned ? "Find a person or a tag" : "Find a tag"} aria-label="Find a person or a tag" autoComplete="off" spellCheck={false}
+                autoFocus type="text" value={q} placeholder={anyAssigned ? "A person, a tag, or words in a card" : "A tag, or words in a card"} aria-label="Find a person or a tag, or type words to look for in the cards" autoComplete="off" spellCheck={false}
                 role="combobox" aria-expanded="true" aria-controls="filter-list"
                 onChange={(e) => { setQ(e.target.value); setActive(0); }}
                 onKeyDown={(e) => {
@@ -185,7 +200,15 @@ export function FilterButton({ board, me, filters }: Props) {
                   {tagRows.map(row)}
                 </div>
               )}
-              {rows.length === 0 && <div className="search-note">Nothing matches “{q.trim()}”.</div>}
+              {textRows.length > 0 && (
+                <div role="group" aria-label="Text">
+                  <div className="menu-label h">TEXT</div>
+                  {textRows.map(row)}
+                </div>
+              )}
+              {rows.length === 0 && (q.trim()
+                ? <div className="search-note">Nothing matches “{q.trim()}”.</div>
+                : <div className="filter-hint">Type words to show only the cards that have them. "Two words" in quotes stay together, and -word leaves cards out.</div>)}
             </div>
             <div className="filter-foot">
               {tags.length > 0 ? (
@@ -214,7 +237,7 @@ export function FilterLine({ board, me, filters }: Props) {
   if (!isOn(where, fade)) return null;
   const total = board.cards.length;
   const shown = board.cards.filter((c) => matchesWhere(c, where, me)).length;
-  const narrowed = where.who.length + where.tags.length > 0;
+  const narrowed = narrows(where);
   const mine = where.who.includes(WHO_ME) && !!me && !board.cards.some((c) => c.assignee === me);
   return (
     <aside className="filter-line" role="status" aria-label="Filter">
@@ -234,6 +257,11 @@ export function FilterLine({ board, me, filters }: Props) {
             #{t}<IconClose />
           </button>
         ))}
+        {where.text && (
+          <button className="chip tag active" title={`Cards with ${where.text} in the title, notes, tags, assignee, or a file's name. Click to take this off`} onClick={() => setWhere({ ...where, text: "" })}>
+            <span className="filter-join">text</span><span className="filter-chip-text">{where.text}</span><IconClose />
+          </button>
+        )}
         {fade && (
           <button className="chip tag active" title={`Cards without #${fade} are faded. Click to show every card`} onClick={() => setFade(null)}>
             <span className="filter-join">fade</span>#{fade}<IconClose />

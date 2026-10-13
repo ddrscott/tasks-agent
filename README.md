@@ -341,11 +341,22 @@ run ahead of whatever serves the zone.
     doesn't draw these rows.
   - **Tags**: A to Z with how many cards carry each. `tags match any` shows a card with at
     least one of the picked tags (the default) and `all` only a card with every one of them.
-  - People and tags narrow together: a card has to be one of the picked people's and match
-    the picked tags (`matchesWhere` in `src/shared.ts`).
+  - **Text**: whatever is typed in the panel's box is also offered as a filter of its own, the
+    last row, under `// TEXT`, with how many cards it finds. Ticking it shows only the cards
+    with those words in the title, the notes, a tag, the assignee, or the name of an attached
+    file (`matchesText` in `src/shared.ts`). It reads the way a search box does: every word has
+    to be on the card, in any order; a word matches the start of a word, so `invo` finds
+    "invoice" and `voice` doesn't; `"on hold"` in quotes is those words side by side; and a
+    `-` in front leaves cards out (`-draft`, `-"on hold"`). Case, accents, and punctuation
+    don't count. One text is on at a time: ticking another replaces it. It doesn't read
+    what's inside an attached PDF or Word file, which the browser never has; ⌘K does
+    (`// SEARCH`).
+  - People, tags, and text narrow together: a card has to be one of the picked people's, match
+    the picked tags, and have the text (`matchesWhere` in `src/shared.ts`).
   - Press `f` to open it, type to narrow the rows (a leading `#` looks only at tags), arrows
     to move, Enter to tick, Escape to close, which puts focus back on the button. `f` then
-    Enter is Mine.
+    Enter is Mine. The text row is last, so Enter ticks a person or a tag the typing found,
+    and it's the text when the typing found neither.
   - While anything is on, the button is outlined in orange with `$` and a count, and a line
     under the top bar (`FilterLine`) says "3 of 22 cards shown" with a chip per filter that
     one click takes off, the clicked tag's fade chip, and Clear all. Lane counts read shown /
@@ -355,13 +366,13 @@ run ahead of whatever serves the zone.
     what's shown: a card dropped on another lands next to it in the lane's full order.
   - It's the same panel on the demo board (where you're `you@example.com`, with two cards),
     on a board shared with you, and on All boards, where it runs over every card on screen.
-  - It all happens in the browser, on an encrypted board too: an assignee is plain and tags
-    are decrypted there, and picking a filter asks the server for nothing.
+  - It all happens in the browser, on an encrypted board too: an assignee is plain, tags,
+    titles, and notes are decrypted there, and picking a filter asks the server for nothing.
 - **Filters in the address.** The filter lives in the query string, so a filtered board
   can be linked to and a reload keeps it: `/tasks/?who=me` is Mine, and it's whoever opens the
   link, not whoever made it; `?who=dana@example.com,none` names people and the unassigned;
   `?tags=agent,shop-api` is the picked tags, `&match=all` is added when a card needs every
-  tag, and `&fade=agent` is the tag clicked on a card. Links from before `who` existed read
+  tag, `&q=invoice+-draft` is the text, and `&fade=agent` is the tag clicked on a card. Links from before `who` existed read
   the same as they did. They sit beside `?board=<id>` on a shared board and work on
   `/tasks/demo` and `/tasks/all` too. `filterQueryFrom` and `filterQueryInto` in
   `src/shared.ts` read and write them (`npm run check:tags`), and `useFilters` in
@@ -2936,7 +2947,7 @@ npm run check:lanes      # special lanes: to do, doing, done follow the lane, no
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the event feed installer against a temp HOME: fresh, a machine with the old Sessions hooks, run twice
-npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone; and the filter by person and tag, and its address
+npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone; and the filter by person, tag, and text, and its address
 npm run check:claims     # which board changes end a claim; with a dev server's address, claim, refuse, ask, answer, release over MCP
 npm run check:members    # team boards, against a running local dev server: five-plus real accounts attack every way in (// TEAM_BOARDS)
 npm run check:boards     # many boards per account, against the same dev server: make, rename, archive, invite into, and reach over MCP (// BOARDS)

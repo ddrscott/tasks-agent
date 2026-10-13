@@ -14,7 +14,7 @@ const root = new URL("..", import.meta.url).pathname;
 const dir = join(root, "node_modules", ".cache", "check-tags");
 const outfile = join(dir, `shared-${process.pid}.mjs`);
 await build({ entryPoints: [join(root, "src/shared.ts")], outfile, bundle: true, format: "esm", platform: "node", logLevel: "error" });
-const { splitTitleTags, addCard, cleanTag, matchesTags, matchesWhere, filterQueryFrom, filterQueryInto, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
+const { splitTitleTags, addCard, cleanTag, matchesTags, matchesText, matchesWhere, textTerms, filterQueryFrom, filterQueryInto, MAX_TAGS_PER_CARD } = await import(pathToFileURL(outfile).href);
 rmSync(dir, { recursive: true, force: true });
 
 let failed = 0;
@@ -34,7 +34,7 @@ check("all: every picked tag has to be there", [both, one, none].map((c) => matc
 
 console.log("# the filter by person (matchesWhere): mine, a named person, the unassigned, and tags on top");
 const jeff = { assignee: "jeff@example.com", tags: ["agent"] }, dana = { assignee: "dana@example.com" }, free = { tags: ["agent"] };
-const w = (who, tags = []) => ({ who, tags, all: false });
+const w = (who, tags = [], text = "") => ({ who, tags, all: false, text });
 const seen = (where, me) => [jeff, dana, free].map((c) => matchesWhere(c, where, me));
 check("nobody picked shows every card", seen(w([]), "jeff@example.com"), [true, true, true]);
 check("mine is the cards assigned to whoever is looking", seen(w(["me"]), "jeff@example.com"), [true, false, false]);
@@ -45,19 +45,48 @@ check("unassigned", seen(w(["none"]), "jeff@example.com"), [false, false, true])
 check("two people: either one", seen(w(["me", "none"]), "jeff@example.com"), [true, false, true]);
 check("person and tag narrow together", seen(w(["me", "dana@example.com"], ["agent"]), "jeff@example.com"), [true, false, false]);
 
+console.log("# the filter's text (matchesText): words, quoted phrases, and a minus to leave cards out");
+const inv = { title: "Pay the Q3 invoice", notes: "Send to accounting.\nDraft is on hold until Friday", tags: ["shop-api"] };
+const cafe = { title: "Café menu redesign", notes: "", assignee: "dana@example.com", attachments: [{ name: "invoice-template.pdf" }] };
+const bare = { title: "Hold the door", notes: "" };
+const txt = (text) => [inv, cafe, bare].map((c) => matchesText(c, text));
+check("no text shows every card", txt(""), [true, true, true]);
+check("a word in a title, whatever its case", txt("PAY"), [true, false, false]);
+check("a word in the notes", txt("accounting"), [true, false, false]);
+check("the start of a word is enough", txt("invo"), [true, true, false]);
+check("the middle of a word isn't", txt("voice"), [false, false, false]);
+check("every word has to be there, in any order", txt("invoice pay"), [true, false, false]);
+check("a quoted phrase is words side by side", txt('"on hold"'), [true, false, false]);
+check("the same words apart aren't the phrase", txt('"hold on"'), [false, false, false]);
+check("a phrase reaches across punctuation and line ends", txt('"accounting draft"'), [true, false, false]);
+check("an open quote is read to the end", txt('"hold the'), [false, false, true]);
+check("a minus leaves cards out", txt("hold -door"), [true, false, false]);
+check("a minus on a phrase", txt('-"on hold"'), [false, true, true]);
+check("only a minus still filters", txt("-invoice"), [false, false, true]);
+check("accents don't count", txt("cafe"), [false, true, false]);
+check("a tag is read, with or without its #", txt("#shop-api"), [true, false, false]);
+check("an assignee is read", txt("dana"), [false, true, false]);
+check("a file's name is read", txt("template"), [false, true, false]);
+check("punctuation alone is no filter", txt('- "" !!'), [true, true, true]);
+check("text narrows with a person and a tag", [inv, cafe, bare].map((c) => matchesWhere(c, w([], ["shop-api"], "invoice"), null)), [true, false, false]);
+check("how the text is read", textTerms('pay -draft "On Hold" shop-api'), [{ words: " pay", not: false }, { words: " draft", not: true }, { words: " on hold", not: false }, { words: " shop", not: false }, { words: " api", not: false }]);
+
 console.log("# the filters in the address (filterQueryFrom, filterQueryInto)");
-const off = { where: { tags: [], all: false, who: [] }, fade: null };
+const off = { where: { tags: [], all: false, who: [], text: "" }, fade: null };
 check("no query is no filter", filterQueryFrom(""), off);
-check("tags, match, and fade are read", filterQueryFrom("?tags=agent,shop-api&match=all&fade=bug"), { where: { tags: ["agent", "shop-api"], all: true, who: [] }, fade: "bug" });
+check("tags, match, and fade are read", filterQueryFrom("?tags=agent,shop-api&match=all&fade=bug"), { where: { tags: ["agent", "shop-api"], all: true, who: [], text: "" }, fade: "bug" });
 check("an encoded comma reads the same", filterQueryFrom("?tags=agent%2Cshop-api").where.tags, ["agent", "shop-api"]);
-check("what isn't a tag is dropped", filterQueryFrom("?tags=%23Agent,,agent,%3Cb%3E!&match=every&fade=%20"), { where: { tags: ["agent", "b"], all: false, who: [] }, fade: null });
-check("written so a person can read it", filterQueryInto("", { where: { tags: ["agent", "shop-api"], all: true, who: [] }, fade: "bug" }), "?tags=agent,shop-api&match=all&fade=bug");
-check("other parameters stay", filterQueryInto("?board=u_1&tags=old", { where: { tags: ["agent"], all: false, who: [] }, fade: null }), "?board=u_1&tags=agent");
+check("what isn't a tag is dropped", filterQueryFrom("?tags=%23Agent,,agent,%3Cb%3E!&match=every&fade=%20"), { where: { tags: ["agent", "b"], all: false, who: [], text: "" }, fade: null });
+check("written so a person can read it", filterQueryInto("", { where: { tags: ["agent", "shop-api"], all: true, who: [], text: "" }, fade: "bug" }), "?tags=agent,shop-api&match=all&fade=bug");
+check("other parameters stay", filterQueryInto("?board=u_1&tags=old", { where: { tags: ["agent"], all: false, who: [], text: "" }, fade: null }), "?board=u_1&tags=agent");
 check("clearing leaves a bare address", filterQueryInto("?who=me&tags=agent&match=all&fade=bug", off), "");
-check("there and back", filterQueryFrom(filterQueryInto("?board=u_1", { where: { tags: ["été", "v2"], all: true, who: ["me", "dana@example.com"] }, fade: "shop_api" })), { where: { tags: ["été", "v2"], all: true, who: ["me", "dana@example.com"] }, fade: "shop_api" });
+check("there and back", filterQueryFrom(filterQueryInto("?board=u_1", { where: { tags: ["été", "v2"], all: true, who: ["me", "dana@example.com"], text: "" }, fade: "shop_api" })), { where: { tags: ["été", "v2"], all: true, who: ["me", "dana@example.com"], text: "" }, fade: "shop_api" });
 check("who is read: me, none, and emails, lower-cased", filterQueryFrom("?who=Me,Dana%40Example.com,none").where.who, ["me", "dana@example.com", "none"]);
 check("what isn't a person is dropped", filterQueryFrom("?who=everyone,,me,me,%3Cb%3E,a@b").where.who, ["me"]);
-check("who is written so a person can read it", filterQueryInto("?board=u_1", { where: { tags: ["agent"], all: false, who: ["me", "dana@example.com"] }, fade: null }), "?board=u_1&who=me,dana@example.com&tags=agent");
+check("text is read, with its spaces tidied", filterQueryFrom("?q=%20pay%20%20-draft+%22on+hold%22").where.text, 'pay -draft "on hold"');
+check("text is written beside the rest", filterQueryInto("?board=u_1", { where: { tags: ["agent"], all: false, who: ["me"], text: 'pay -draft "on hold"' }, fade: null }), "?board=u_1&who=me&tags=agent&q=pay+-draft+%22on+hold%22");
+check("text there and back", filterQueryFrom(filterQueryInto("", { where: { tags: [], all: false, who: [], text: "a&b=c #x 100%" }, fade: null })).where.text, "a&b=c #x 100%");
+check("who is written so a person can read it", filterQueryInto("?board=u_1", { where: { tags: ["agent"], all: false, who: ["me", "dana@example.com"], text: "" }, fade: null }), "?board=u_1&who=me,dana@example.com&tags=agent");
 
 console.log("# trailing tags come off the title");
 split("Write a haiku #agent", "Write a haiku", ["agent"]);
