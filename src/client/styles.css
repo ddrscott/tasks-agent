@@ -1461,8 +1461,10 @@ label.check, .dialog-body label.check { display: flex; flex-direction: row; alig
   .sheet-filter { width: 100%; }
 }
 
-/* Whose agents work a card (// ASSIGNEE). */
+/* Whose card it is (// ASSIGNEE). Someone who's no longer on the board is struck through. */
 .chip.assignee { font-family: var(--font-mono); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.assignee.left { max-width: 190px; color: var(--muted); }
+.chip.assignee.left .assignee-name { text-decoration: line-through; }
 
 /* Name a board (BoardDialog.tsx, // BOARDS). */
 .board-dialog { width: min(440px, calc(100vw - 32px)); }

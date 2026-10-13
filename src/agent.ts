@@ -13,11 +13,11 @@ import { endedCards } from "./presence-shared";
 import { CardIndex } from "./search";
 import { countFileRows, countIndexed, dropBoard, dropEntries, dropFileRows, dropFileScope, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
 import { extractFromR2, extractKind, Extracts, fileEntries, fileRef, fileRefs, type ExtractState, type Slice } from "./extract";
-import { access, boardShared, clearSealedSharing, logCards, syncSharing, type AuditCard } from "./members";
+import { access, boardPeople, boardShared, clearSealedSharing, logAssigned, logCards, syncSharing, type AuditAssign, type AuditCard } from "./members";
 import { boardById } from "./boards";
 import {
-  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
-  frameCost, memberMoveError, memberTidy, memberTidyCard, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective,
+  ADD_CARDS_MAX, AGENT_CARD, assertMayChange, assigneeError, CLOSE_FLOOD, isAgentCard, CLOSE_NO_ACCESS, CLOSE_TOO_BIG, H_BOARD, H_EMAIL, H_HOLD, H_MEMBER, H_USER, pushFresh, memberCallNeeds, OWNER_ONLY, READ_ONLY, READ_ONLY_LAPSED,
+  frameCost, memberMoveError, memberTidy, memberTidyCard, MEMBER_HTTP_RATE, MEMBER_LIMITS, MEMBER_PUSH_FRESH_MS, MEMBER_RATE, retryAfter, memberRoom, plainError, SLOW_DOWN, spendToken, takeRoom, type Access, type AccessFrame, type AccessReason, type ActivityFrame, type Bucket, type Effective, type PeopleFrame,
 } from "./member-rules";
 import { BOARD_TOOLS, describeHits, SEARCH_TOOL, TOOL_NAMES, type SearchResult, type ToolName, type ToolOutcome } from "./tools";
 
@@ -225,7 +225,71 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
    */
   private guard(before: Board, after: Board) {
     const c = callers.getStore();
-    if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after, c.email ?? undefined);
+    if (c?.kind === "member") assertMayChange(c.effective, c.reason, before, after, c.email ?? undefined, this.people());
+  }
+
+  // ---------- who's on the board (// ASSIGNEE) ----------
+  //
+  // A card can be assigned to the board's owner or to a member who has accepted their invite,
+  // and to nobody else. The members are in D1 and the write guard can't wait on a read, so the
+  // board keeps its own copy: read when membership changes (membersChanged), again at each
+  // sweep while members are connected, and once at startup on a board that was shared before
+  // it kept one.
+
+  private _roster?: { owner: string | null; members: string[] } | null;
+  /** The copy the board keeps, or null when it has never read one. */
+  private roster(): { owner: string | null; members: string[] } | null {
+    if (this._roster !== undefined) return this._roster;
+    const raw = this.sql<{ v: string }>`SELECT v FROM board_meta WHERE k = 'people'`[0]?.v;
+    try { this._roster = raw ? (JSON.parse(raw) as { owner: string | null; members: string[] }) : null; } catch { this._roster = null; }
+    return this._roster;
+  }
+
+  /** Everyone on the board: the owner first, then the accepted members. An encrypted board has only its owner. */
+  private everyone(): string[] {
+    const r = this.roster();
+    const all = [this.ownerEmail() ?? r?.owner, ...(this.state.sealed ? [] : r?.members ?? [])];
+    return [...new Set(all.filter((e): e is string => !!e).map((e) => e.toLowerCase()))];
+  }
+
+  /** Who a card can be assigned to right now. The owner making the change counts, whatever the board has on file for them. */
+  private people(): string[] {
+    const c = callers.getStore();
+    const all = this.everyone();
+    const owner = c?.kind === "owner" ? c.email?.toLowerCase() : null;
+    return owner && !all.includes(owner) ? [owner, ...all] : all;
+  }
+
+  private peopleFrame(): string {
+    const frame: PeopleFrame = { type: "tasks_people", owner: this.everyone()[0] ?? null, people: this.everyone() };
+    return JSON.stringify(frame);
+  }
+
+  /** Read who's on the board from D1 and keep it. Members' open tabs are told when it changed. */
+  private async loadPeople(): Promise<void> {
+    const next = await boardPeople(this.env, this.name);
+    const was = this.peopleFrame();
+    this.sql`INSERT OR REPLACE INTO board_meta (k, v) VALUES ('people', ${JSON.stringify(next)})`;
+    this._roster = next;
+    const now = this.peopleFrame();
+    if (now === was) return;
+    for (const ws of this.ctx.getWebSockets(MEMBER_TAG)) if (memberMeta(ws)) sendTo(ws, now);
+  }
+
+  /**
+   * Refuse a change that assigns a card to someone who isn't on the board. For the owner too:
+   * this is asked of every change, on top of the write guard, which asks it of a member's.
+   * On a shared board that hasn't read its members yet, the answer is to try again, and the
+   * read is started.
+   */
+  private checkAssignees(before: Board, after: Board) {
+    const no = assigneeError(before, after, this.people());
+    if (!no) return;
+    if (this.sharedEver() && !this.roster()) {
+      this.ctx.waitUntil(this.loadPeople().catch((e: Error) => console.warn("reading the board's members failed", e.message)));
+      throw new Error("The board is still reading who's on it. Try that again in a moment.");
+    }
+    throw new Error(no);
   }
 
   /** A member never moves a work order, wherever it's going (memberMoveError), unless it's assigned to them. The two ways to move a card both ask. */
@@ -363,6 +427,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // The same three frames useAgent expects from the SDK, so the client needs no second transport.
     sendTo(pair[1], JSON.stringify({ type: "cf_agent_identity", name: this.name, agent: "todo-agent" }));
     sendTo(pair[1], this.accessFrame(meta));
+    // Who's on the board, for the card editor's Assign to (// ASSIGNEE).
+    sendTo(pair[1], this.peopleFrame());
     sendTo(pair[1], this.memberFrame());
     await this.scheduleSweep();
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -538,6 +604,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.epoch += 1;
     this.markShared();
     await this.recheck(this.ctx.getWebSockets(MEMBER_TAG));
+    // Who a card can be assigned to just changed too (// ASSIGNEE). The members still here are told.
+    await this.loadPeople().catch((e: Error) => console.warn("reading the board's members failed", e.message));
     // `left`: a member who walked out on their own (members.ts). The owner didn't do it, so their tabs say it.
     this.tellOwner(typeof left === "string" ? left : undefined);
   }
@@ -578,6 +646,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (!sockets.length) return;
     const sharing = await syncSharing(this.env, this.name).catch((e: Error) => { console.warn("sharing state check failed", e.message); return null; });
     await this.recheck(sockets);
+    // And for a membership signal that never came: who a card can be assigned to (// ASSIGNEE).
+    await this.loadPeople().catch((e: Error) => console.warn("reading the board's members failed", e.message));
     // A lapse or a return nobody announced: the owner's tabs hear about it here.
     if (sharing?.flipped) this.tellOwner();
     // Buckets of members who are gone or have been quiet don't need keeping.
@@ -659,6 +729,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, chats INTEGER NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS member_deletes (member TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (member, day))`;
+    this.sql`CREATE TABLE IF NOT EXISTS member_assigns (member TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (member, day))`;
+    // A board shared before it kept its own list of who's on it reads one now (// ASSIGNEE).
+    if (this.sharedEver() && !this.roster()) this.ctx.waitUntil(this.loadPeople().catch((e: Error) => console.warn("reading the board's members failed", e.message)));
     if (!this.state.sealed) this.index.backfill(this.state);
     // PDFs and Word files attached before text was extracted, and any an earlier run didn't reach.
     if (!this.state.sealed && this.pendingFiles().length) void this.scheduleExtract();
@@ -900,6 +973,8 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // Before anything is written: a member's change has to be one a writer may make. It's
     // judged twice, as made and as it will be stored (with who made it marked on each card).
     this.guard(before, changed);
+    // An assignee is someone on the board, whoever is assigning (// ASSIGNEE).
+    this.checkAssignees(before, changed);
     // `claim` is the one card whose member mark the owner is taking off (claimWords below).
     const after = ops.stampBy(before, changed, this.by(actor), { member, ...(claim && !member ? { claim } : {}) });
     this.guard(before, after);
@@ -908,6 +983,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     // On any board, the owner is told when their agent deletes one: nobody was at a screen for it.
     const gone = this.goneCards(before, after, actor === "agent");
     if (gone.length) this.spendDeletes(gone.length);
+    // So is an assignment: who gave which card to whom.
+    const assigned = this.assignedCards(before, after);
+    if (assigned.length) this.spendAssigns(assigned.length);
     const top = this.sql<{ grp: string | null }>`SELECT grp FROM history ORDER BY id DESC LIMIT 1`[0];
     if (!group || top?.grp !== group) {
       this.sql`INSERT INTO history (grp, label, board) VALUES (${group ?? null}, ${label}, ${JSON.stringify(before)})`;
@@ -919,6 +997,7 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
       const step = this.sql<{ id: number }>`SELECT id FROM history ORDER BY id DESC LIMIT 1`[0]?.id;
       this.noteCards("card_deleted", gone, this.by(actor), step);
     }
+    if (assigned.length) this.noteAssigned(assigned, this.by(actor));
     this.reindex(before, after);
     const kept = new Set(ops.attachmentIds(after));
     if (ops.attachmentIds(before).some((id) => !kept.has(id))) void this.scheduleCleanup(ATTACHMENT_GRACE_S);
@@ -1013,6 +1092,43 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     this.sql`DELETE FROM member_deletes WHERE day != ${day}`;
     this.sql`INSERT INTO member_deletes (member, day, n) VALUES (${who}, ${day}, ${n})
       ON CONFLICT(member, day) DO UPDATE SET n = n + ${n}`;
+  }
+
+  /**
+   * The cards whose assignee `after` changed, as the log keeps them (// ASSIGNEE): set, moved to
+   * someone else, or cleared, and a new card that came with one. Nothing on an encrypted board
+   * or one that was never shared. A deleted card's entry is its deletion.
+   */
+  private assignedCards(before: Board, after: Board): AuditAssign[] {
+    if (before.sealed || after.sealed || before.cards === after.cards || !this.sharedEver()) return [];
+    const was = new Map(before.cards.map((c) => [c.id, c.assignee]));
+    const lanes = new Map(after.lanes.map((l) => [l.id, l.name]));
+    return after.cards.filter((c) => (was.get(c.id) ?? null) !== (c.assignee ?? null)).map((c) => {
+      const from = was.get(c.id);
+      return { card: c.id, title: c.title.slice(0, 200), lane: lanes.get(c.laneId) ?? "", to: c.assignee ?? null, ...(from ? { was: from } : {}) };
+    });
+  }
+
+  /** Count a member's assignments against their day, the same as their deletions and for the same reason (spendDeletes). */
+  private spendAssigns(n: number) {
+    const c = callers.getStore();
+    if (c?.kind !== "member") return;
+    const who = c.id ?? c.email ?? "member";
+    const day = this.today();
+    const used = this.sql<{ n: number }>`SELECT n FROM member_assigns WHERE member = ${who} AND day = ${day}`[0]?.n ?? 0;
+    if (used + n > MEMBER_LIMITS.assignsPerDay) {
+      throw new Error(`[assign_limit] You've assigned ${used} cards on this board today, and a member can assign ${MEMBER_LIMITS.assignsPerDay} a day. Ask the board's owner, or try again tomorrow (UTC).`);
+    }
+    this.sql`DELETE FROM member_assigns WHERE day != ${day}`;
+    this.sql`INSERT INTO member_assigns (member, day, n) VALUES (${who}, ${day}, ${n})
+      ON CONFLICT(member, day) DO UPDATE SET n = n + ${n}`;
+  }
+
+  /** Record who assigned which cards to whom, in the owner's audit log (logAssigned in members.ts). */
+  private noteAssigned(cards: AuditAssign[], by: { email: string; via?: AuditCard["via"] } | null) {
+    const who = by ?? { email: this.ownerEmail() ?? "the owner" };
+    const rows = cards.map((c) => ({ ...c, ...(who.via ? { via: who.via } : {}) }));
+    this.ctx.waitUntil(logAssigned(this.env, this.name, who.email, rows).catch((e: Error) => console.error("recording an assignment failed", e.message)));
   }
 
   /** Record cards that were deleted or brought back, and tell every open tab. `step` is the undo step that reverses it, for the owner's tabs. */
@@ -1299,6 +1415,9 @@ export class TodoAgent extends AIChatAgent<Env, Board> {
     if (gone.length) this.noteCards("card_deleted", gone, stamp);
     const back = this.goneCards(this.state, before);
     if (back.length) this.noteCards("card_restored", back, stamp);
+    // An undo can hand a card back to whoever had it. That's an assignment like any other.
+    const assigned = this.assignedCards(before, this.state);
+    if (assigned.length) this.noteAssigned(assigned, stamp);
     this.reindex(before, this.state);
     // Undo and redo can finish or remove a card too (redoing a move to Done, undoing "Add card").
     // The other direction brings nothing back: a claim that ended stays ended.

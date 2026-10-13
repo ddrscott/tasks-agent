@@ -129,7 +129,7 @@ export const ASK_HOLDS = (owner: string) => `This card has a question waiting on
 export const agentHeld = (mode: Mode | undefined, card: Card, me?: string | null) => mode === "writer" && isAgentCard(card) && !(me && card.assignee === me);
 /** Said on such a card, in the open card. */
 export const AGENT_HOLDS = (owner: string) =>
-  `This card is a work order for ${owner}'s agents (it's tagged #agent or #gauntlet), so only ${owner} can change, move, or delete it.`;
+  `This card is a work order for ${owner}'s agents (it's tagged #agent or #gauntlet), so only ${owner} can change, move, assign, or delete it.`;
 /** Said when a member's tags would add or remove one of the owner's. */
 export const OWNER_TAG_NOTE = (tag: string, owner: string, typed?: string) =>
   `${typed && typed !== tag ? `#${typed} reads as #${tag}. ` : ""}Only ${owner} can put #${tag} on a card or take it off. Their agents take orders from that tag.`;

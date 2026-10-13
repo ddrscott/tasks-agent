@@ -75,6 +75,7 @@ async function sock(who, board) {
         await Promise.race([new Promise((r) => wake.push(r)), new Promise((r) => setTimeout(r, 200))]);
       }
     },
+    frames,
     close() { try { ws.close(); } catch { /* gone */ } },
   };
 }
@@ -281,6 +282,38 @@ const unassign = await mcp(T, "update_card", { id, assignee: null });
 ok("the owner takes the assignment back", !unassign.isError, unassign);
 const aclaim2 = await mcp(M, "claim_card", { id, session_id: "tasks-member01", agent: "smoke" });
 ok("and the member's agent can't claim it anymore", aclaim2.isError && aclaim2.text.includes("the owner's"), aclaim2);
+
+// A plain card is a writer's to assign: to the owner, to themselves, to nobody. An assignee has
+// to be on the board, for the owner too, and an agent card stays the owner's to hand out (// ASSIGNEE).
+const pcard = await mcp(T, "add_cards", { board: "Shop API", cards: [{ title: "Plain card to hand around" }] });
+const pid = /ids, in the order given: (c[a-z0-9]{4})/.exec(pcard.text)?.[1];
+const offBoard = `sb-nobody-${randomBytes(3).toString("hex")}@example.com`;
+const onBoard = ms.frames.find((f) => f.type === "tasks_people");
+ok("a member's socket is told who's on the board: the owner and the accepted members, nothing else", onBoard?.owner === owner.email && onBoard.people.join() === [owner.email, member.email].join() && Object.keys(onBoard).sort().join() === "owner,people,type", onBoard);
+const toOwner = await mcp(M, "update_card", { id: pid, assignee: owner.email });
+ok("a member's agent assigns a plain card to the owner", !toOwner.isError && (await mcp(T, "get_card", { id: pid })).text.includes(`Assigned to: ${owner.email} (the card is theirs)`), toOwner);
+const toStranger = await mcp(M, "update_card", { id: pid, assignee: offBoard });
+ok("and is refused, in words, for an email that isn't on the board", toStranger.isError && toStranger.text.includes(`${offBoard} isn't on this board`) && (await mcp(T, "get_card", { id: pid })).text.includes(`Assigned to: ${owner.email}`), toStranger);
+const toSelf = await ms.rpc("updateCard", [pid, { assignee: member.email }]);
+ok("a member assigns a plain card to themselves from the app", toSelf.success === true, toSelf);
+const cleared = await ms.rpc("updateCard", [pid, { assignee: null }]);
+ok("and clears it", cleared.success === true && !(await mcp(T, "get_card", { id: pid })).text.includes("Assigned to:"), cleared);
+const mineStranger = await ms.rpc("updateCard", [pid, { assignee: offBoard }]);
+ok("a stranger is refused from the app too", mineStranger.success === false && /^\[not_on_board\]/.test(mineStranger.error ?? ""), mineStranger);
+const ownerStranger = await mcp(T, "update_card", { id: pid, assignee: offBoard });
+const ownerAdd = await mcp(T, "add_cards", { board: "Shop API", cards: [{ title: "For nobody we know", assignee: offBoard }] });
+const ownerSock = await os.rpc("updateCard", [pid, { assignee: offBoard }]);
+ok("the owner is held to it as well: update_card, add_cards, and the app", ownerStranger.isError && ownerStranger.text.includes("isn't on this board") && ownerAdd.isError && ownerAdd.text.includes("isn't on this board") && ownerSock.success === false, { ownerStranger, ownerAdd, ownerSock });
+const agentAssign = await mcp(M, "update_card", { id: oid, assignee: owner.email });
+const agentAssignApp = await ms.rpc("updateCard", [oid, { assignee: member.email }]);
+ok("a member can't assign an agent card, and the refusal says why", agentAssign.isError && agentAssign.text.includes("whoever it's assigned to gets their agents on it") && agentAssignApp.success === false && /^\[agent_card\] Only the board's owner can assign/.test(agentAssignApp.error ?? ""), { agentAssign, agentAssignApp });
+const ownerAssign = await mcp(T, "update_card", { id: pid, assignee: member.email });
+ok("the owner assigns the plain card to the member", !ownerAssign.isError, ownerAssign);
+await new Promise((r) => setTimeout(r, 500));
+const alog = (await call(owner, "GET", `/api/board/audit?board=${B}&limit=200&kind=cards`)).data?.entries?.filter((e) => e.action === "card_assigned" && e.detail?.card === pid) ?? [];
+ok("the audit log says who assigned it to whom, newest first: the owner to the member, the member to nobody, to themselves, to the owner",
+  alog.length === 4 && alog.map((e) => `${e.actor}>${e.target}`).join() === [`${owner.email}>${member.email}`, `${member.email}>null`, `${member.email}>${member.email}`, `${member.email}>${owner.email}`].join()
+  && alog[1].detail.was === member.email && alog[2].detail.was === owner.email && alog[3].detail.via === "agent" && alog[0].detail.title === "Plain card to hand around", alog);
 os.close(); ms.close();
 
 // Search across boards (// SEARCH): the app's endpoint and the MCP tool, over cards and pages

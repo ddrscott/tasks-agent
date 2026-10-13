@@ -107,6 +107,41 @@ section("access rules (pure)");
     const someoneElse = rules.memberChangeError(mineBefore, mineAfter, "eve@example.com");
     return refused === rules.AGENT_CARD && allowed === null && retitled === rules.ASSIGNEE_ONLY && someoneElse === rules.AGENT_CARD;
   })());
+  // Who a card can be assigned to (// ASSIGNEE). The write guard decides; the editor's list is a convenience on top.
+  {
+    const { memberChangeError, assertMayChange, assigneeError } = rules;
+    const code = (m) => rules.errorCode(m ?? "");
+    const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+    const lanes = [{ id: "t", name: "To do", role: "todo" }, { id: "d", name: "Done", role: "done" }];
+    const base = { notes: "", laneId: "t", due: null, createdAt: "x", updatedAt: "x" };
+    const plain = { ...base, id: "c1", title: "Plain" };
+    const order = { ...base, id: "c2", title: "Work order", tags: ["agent"] };
+    const b = { lanes, cards: [plain, order], theme: "auto" };
+    const owner = "scott@example.com", me = "jeff@example.com", third = "dana@example.com", stranger = "mallory@example.com";
+    const people = [owner, me, third];
+    const assign = (board, id, assignee) => shared.updateCard(board, id, { assignee });
+    const asMe = (before, after) => memberChangeError(before, after, me, people);
+    ok("a member assigns a plain card to the owner", asMe(b, assign(b, "c1", owner)) === null && assign(b, "c1", owner).cards[0].assignee === owner);
+    ok("a member assigns a plain card to another member", asMe(b, assign(b, "c1", third)) === null);
+    ok("a member assigns a plain card to themselves, and clears it", asMe(b, assign(b, "c1", me)) === null && asMe(assign(b, "c1", me), assign(assign(b, "c1", me), "c1", null)) === null);
+    ok("a member can't assign a plain card to a stranger", code(asMe(b, assign(b, "c1", stranger))) === "not_on_board" && asMe(b, assign(b, "c1", stranger)).includes(stranger));
+    ok("a member can't add a card that's already a stranger's", code(asMe(b, shared.addCard(b, { title: "New", assignee: stranger }).board)) === "not_on_board" && asMe(b, shared.addCard(b, { title: "New", assignee: owner }).board) === null);
+    ok("a member can't assign an agent card to anyone: the owner, another member, themselves, or a stranger", [owner, third, me, stranger].every((who) => asMe(b, assign(b, "c2", who)) === rules.AGENT_ASSIGN));
+    const theirs = assign(b, "c2", third), mine = assign(b, "c2", me);
+    ok("or change or clear the assignee an agent card has, their own included", asMe(theirs, assign(theirs, "c2", me)) === rules.AGENT_ASSIGN && asMe(theirs, assign(theirs, "c2", null)) === rules.AGENT_ASSIGN && asMe(mine, assign(mine, "c2", owner)) === rules.AGENT_ASSIGN && asMe(mine, assign(mine, "c2", null)) === rules.AGENT_ASSIGN);
+    ok("the refusal on an agent card says why", /whoever it's assigned to gets their agents on it/.test(rules.AGENT_ASSIGN) && code(rules.AGENT_ASSIGN) === "agent_card");
+    ok("a viewer assigns nothing", throws(() => assertMayChange("viewer", null, b, assign(b, "c1", owner), "v@example.com", people)));
+    ok("the same rule holds the owner's change: someone on the board, or nobody", assigneeError(b, assign(b, "c1", stranger), people) !== null && assigneeError(b, assign(b, "c2", third), people) === null && assigneeError(b, assign(b, "c2", stranger), people) !== null);
+    // Someone who left keeps their name on the card. It can still be edited, moved, and handed on.
+    const gone = { lanes, cards: [{ ...plain, assignee: stranger }, order], theme: "auto" };
+    ok("a card assigned to someone who left can be edited and moved as it is", asMe(gone, shared.updateCard(gone, "c1", { notes: "still here" })) === null && asMe(gone, shared.moveCard(gone, "c1", "d", 0)) === null && assigneeError(gone, shared.updateCard(gone, "c1", { title: "Renamed" }), people) === null);
+    ok("and reassigned to someone on the board, or to nobody", asMe(gone, assign(gone, "c1", owner)) === null && asMe(gone, assign(gone, "c1", null)) === null);
+    // A plain card a member gave themselves is theirs in name. It doesn't make its questions theirs to answer.
+    const ask = { question: "Go?", options: ["Yes", "No"], askedAt: "2026-10-12T00:00:00.000Z" };
+    const asked = { lanes, cards: [{ ...plain, assignee: me, ask }], theme: "auto" };
+    const answered = { lanes, cards: [{ ...plain, assignee: me, answer: { question: "Go?", answer: "Yes", at: "y" } }], theme: "auto" };
+    ok("assigning themselves a plain card doesn't let a member answer its question", asMe(asked, answered) === "Questions on a card are the board owner's to answer.");
+  }
   ok("prototype names aren't methods", memberCallNeeds("constructor") === null && memberCallNeeds("__proto__") === null && memberCallNeeds("toString") === null && memberCallNeeds("hasOwnProperty") === null && memberCallNeeds(7) === null);
 
   const { memberChangeError, assertMayChange } = rules;
@@ -1218,7 +1253,7 @@ ok("a viewer connects and gets the board", viewerSock.opened && viewerSock.state
 ok("a member is told their role, the owner, and the plan", writerSock.access()?.role === "writer" && writerSock.access()?.effective === "writer" && writerSock.access()?.reason === null && writerSock.access()?.ownerEmail === owner.email && writerSock.access()?.plan === "pro" && writerSock.access()?.board === owner.id, writerSock.access());
 ok("a viewer is told they're a viewer", viewerSock.access()?.role === "viewer" && viewerSock.access()?.effective === "viewer", viewerSock.access());
 const memberTypes = () => [...new Set([...writerSock.frames, ...viewerSock.frames].map((f) => f.type))].sort();
-ok("a member's socket gets identity, access, and state, and nothing else", memberTypes().join() === "cf_agent_identity,cf_agent_state,tasks_access", memberTypes());
+ok("a member's socket gets identity, access, who's on the board, and state, and nothing else", memberTypes().join() === "cf_agent_identity,cf_agent_state,tasks_access,tasks_people", memberTypes());
 
 {
   const spoof = { "x-tasks-member": encodeURIComponent(JSON.stringify({ id: writer.id, email: writer.email })), "x-tasks-user": owner.id, "x-tasks-email": owner.email, "x-user": owner.id, "x-cf-agents-subagent-url": `${BASE}/tasks/agent/sub/todo-agent/${owner.id}` };
@@ -2408,7 +2443,7 @@ section("an invite and encryption can't both win");
     && entries.some((e) => e.action === "member_removed" && e.target === racee.email && e.actor === "system" && e.why === "encrypted" && e.from === "writer")
     && entries.some((e) => e.action === "invite_revoked" && e.target === ghost && e.actor === "system" && e.why === "encrypted"), entries);
   const csv = (await call(encOwner, "GET", "/api/board/audit.csv")).text;
-  ok("and the export says it too", csv.split("\r\n").some((l) => l.includes(`,system,member_removed,${racee.email},writer,`) && l.endsWith(",board encrypted")), csv.split("\r\n").slice(-4));
+  ok("and the export says it too", csv.split("\r\n").some((l) => l.includes(`,system,member_removed,${racee.email},writer,`) && l.endsWith(",board encrypted,")), csv.split("\r\n").slice(-4));
   const walkIn = await open(racee, { board: encOwner.id });
   ok("so decrypting lets nobody in: the member it removed has no way in afterwards either", refused(walkIn, 404) && (await call(racee, "GET", `/api/board/access?board=${encOwner.id}`)).status === 404 && !JSON.stringify((await call(racee, "GET", "/api/boards")).data).includes(encOwner.id), how(walkIn));
   walkIn.close();
@@ -3067,7 +3102,7 @@ section("Pro given by an admin");
   {
     const csv = (await call(gOwner, "GET", "/api/board/audit.csv")).text.trim().split("\r\n");
     const js = (await call(gOwner, "GET", "/api/board/audit.json")).data.entries;
-    ok("the downloads say it the same way: the admin's address as the actor, and `admin` in the via column", csv[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && csv.some((l) => l.includes(`,${admin.email},sharing_suspended,,,,,,,admin`)) && csv.some((l) => l.includes(`,${admin.email},sharing_restored,,,,,,,admin`))
+    ok("the downloads say it the same way: the admin's address as the actor, and `admin` in the via column", csv[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via,assigned_from" && csv.some((l) => l.includes(`,${admin.email},sharing_suspended,,,,,,,admin`)) && csv.some((l) => l.includes(`,${admin.email},sharing_restored,,,,,,,admin`))
       && js.filter((e) => e.action.startsWith("sharing_")).every((e) => e.actor === admin.email && e.actorRole === "admin") && js.filter((e) => !e.action.startsWith("sharing_")).every((e) => !("actorRole" in e)), csv.filter((l) => l.includes("sharing_")));
     const filtered = (await call(gOwner, "GET", `/api/board/audit?limit=200&who=${encodeURIComponent(admin.email)}`)).data.entries;
     ok("and the Person filter finds the admin's entries", filtered.length >= 2 && filtered.every((e) => e.actor === admin.email || e.target === admin.email), filtered.length);
@@ -3199,7 +3234,7 @@ section("the audit log");
   ok("the log pages, newest first", p1.data.entries.length === 3 && p1.data.next === p1.data.entries[2].id && p2.data.entries.length === 3 && p2.data.entries[0].id < p1.data.entries[2].id, [p1.data.next, p2.data.entries.map((e) => e.id)]);
   const csv = await call(owner, "GET", "/api/board/audit.csv");
   const lines = csv.text.trim().split("\r\n");
-  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via" && lines.length === entries.length + 1, [lines.length, entries.length]);
+  ok("the owner downloads the log as CSV", csv.status === 200 && /attachment; filename="tasks-audit-.*\.csv"/.test(csv.headers.get("content-disposition") ?? "") && lines[0] === "seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via,assigned_from" && lines.length === entries.length + 1, [lines.length, entries.length]);
   const rawCsv = new Uint8Array(await (await fetch(`${BASE}/tasks/api/board/audit.csv`, { headers: { Cookie: owner.cookie } })).arrayBuffer());
   ok("the CSV opens with a UTF-8 byte-order mark, so Excel reads titles that aren't plain ASCII", rawCsv[0] === 0xef && rawCsv[1] === 0xbb && rawCsv[2] === 0xbf && new TextDecoder("utf-8", { ignoreBOM: true }).decode(rawCsv.slice(3, 6)) === "seq" && !new TextDecoder("utf-8", { ignoreBOM: true }).decode(rawCsv.slice(3)).includes("\uFEFF"));
   ok("and still ends every line with CRLF, the last one too", csv.text.endsWith("\r\n") && !/[^\r]\n/.test(csv.text));
@@ -3248,7 +3283,7 @@ section("the audit log");
 
 section("what only the owner hears");
 ok("no member's socket was ever told about the members list", [writerSock, viewerSock, removedSock, removedQuiet, leaverSock].every((s) => !s.frames.some((f) => f.type === "tasks_members")));
-ok("a member's socket only ever got identity, access, the board, card deletions, and replies", [...new Set([writerSock, viewerSock, removedSock, removedQuiet, leaverSock].flatMap((s) => s.frames.map((f) => f.type)))].sort().join() === "cf_agent_identity,cf_agent_state,cf_agent_use_chat_response,rpc,tasks_access,tasks_activity");
+ok("a member's socket only ever got identity, access, who's on the board, the board, card deletions, and replies", [...new Set([writerSock, viewerSock, removedSock, removedQuiet, leaverSock].flatMap((s) => s.frames.map((f) => f.type)))].sort().join() === "cf_agent_identity,cf_agent_state,cf_agent_use_chat_response,rpc,tasks_access,tasks_activity,tasks_people");
 
 for (const s of [ownerSock, writerSock, viewerSock, removedSock, removedQuiet, leaverSock]) s.close();
 rmSync(dir, { recursive: true, force: true });

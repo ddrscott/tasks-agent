@@ -159,6 +159,8 @@ export const MEMBER_LIMITS = {
   boardBytes: 768 * 1024,
   /** Cards one member may delete in a UTC day. Each is a row in the owner's audit log, which nothing prunes. */
   deletesPerDay: 200,
+  /** Assignments one member may make or clear in a UTC day, for the same reason: each is a row in that log. */
+  assignsPerDay: 500,
 } as const;
 
 const utf8 = new TextEncoder();
@@ -481,9 +483,34 @@ function assigneeChangeError(p: Card, c: Card): string | null {
   return null;
 }
 
+/**
+ * Who a card may be assigned to (// ASSIGNEE): the board's owner or a member who has accepted
+ * their invite. `people` is those emails, lower case. Only an assignment this change makes is
+ * judged, so a card that still names someone who has since left can be edited, moved, and
+ * handed to someone else. The board asks this for the owner's changes too (TodoAgent.mutate).
+ */
+export const notOnBoard = (email: string) =>
+  `[not_on_board] ${email.slice(0, 254)} isn't on this board. A card can be assigned to the board's owner or to a member who has accepted their invite.`;
+export function assigneeError(before: Board, after: Board, people: readonly string[]): string | null {
+  if (before.cards === after.cards) return null;
+  const was = new Map(before.cards.map((c) => [c.id, c.assignee]));
+  for (const c of after.cards) {
+    if (c.assignee && c.assignee !== was.get(c.id) && !people.includes(c.assignee)) return notOnBoard(c.assignee);
+  }
+  return null;
+}
+
+/**
+ * Assigning an agent's work order hands the assignee's agents the right to claim it, write its
+ * STATUS, move it, and ask and answer on it. That's a grant, so it's the owner's to make: a
+ * member can't set, change, or clear the assignee on one, whoever it's assigned to now.
+ */
+export const AGENT_ASSIGN = "[agent_card] Only the board's owner can assign an #agent or #gauntlet card, or take the assignment off: whoever it's assigned to gets their agents on it. Ask the owner to assign it.";
+
 /** Why a member can't make this card what it now is, looking at the card alone. `p` is the card before, or undefined for a new one. `me` is the member's email, for a card assigned to them. */
 function memberCardError(p: Card | undefined, c: Card, me?: string): string | null {
   if (p && isAgentCard(p)) {
+    if (p.assignee !== c.assignee) return AGENT_ASSIGN;
     if (!me || p.assignee !== me) return AGENT_CARD;
     return assigneeChangeError(p, c) ?? cardTooBig(p, c);
   }
@@ -575,7 +602,7 @@ function cardTooBig(p: Card | undefined, c: Card): string | null {
  * take back, and so do the tags that direct the owner's agents and the cards that carry them
  * (OWNER_TAGS above). It runs on every change a member makes, whatever path it took.
  */
-export function memberChangeError(before: Board, after: Board, me?: string): string | null {
+export function memberChangeError(before: Board, after: Board, me?: string, people?: readonly string[]): string | null {
   const { cards: _b, ...restBefore } = before;
   const { cards: _a, ...restAfter } = after;
   if (!same(restBefore, restAfter)) return OWNER_ONLY;
@@ -594,11 +621,17 @@ export function memberChangeError(before: Board, after: Board, me?: string): str
     // A question is asked by an agent and answered by the owner. A member's change can't add,
     // edit, answer, or clear one, and can't rewrite the last answer either. The member a card
     // is assigned to is the exception: their agents ask on it, and they answer (// ASSIGNEE).
-    const mine = !!me && (c.assignee === me || p?.assignee === me);
+    // Only on an agent's work order, where the owner made the assignment: a plain card a member
+    // assigned to themselves is theirs in name and gives them nothing here.
+    const mine = !!me && isAgentCard(p ?? c) && (c.assignee === me || p?.assignee === me);
     if (!mine && (!same(p?.ask, c.ask) || !same(p?.answer, c.answer))) return "Questions on a card are the board owner's to answer.";
     // Finishing a card with its question still open ends the agent's wait, the same as taking the question back.
     if (c.ask && done && c.laneId === done && p?.laneId !== done) return "That card has a question waiting on the board's owner.";
   }
+  // A plain card is a writer's to assign, to the owner, another member, or themselves, and to
+  // nobody who isn't on the board (// ASSIGNEE).
+  const stranger = people ? assigneeError(before, after, people) : null;
+  if (stranger) return stranger;
   for (const p of before.cards) {
     if (now.has(p.id)) continue;
     if (isAgentCard(p)) return AGENT_CARD;
@@ -618,10 +651,10 @@ export function memberChangeError(before: Board, after: Board, me?: string): str
 }
 
 /** Throws unless a caller with this effective role may turn `before` into `after`. The owner may do anything. */
-export function assertMayChange(effective: Effective, reason: AccessReason, before: Board, after: Board, me?: string): void {
+export function assertMayChange(effective: Effective, reason: AccessReason, before: Board, after: Board, me?: string, people?: readonly string[]): void {
   if (effective === "owner") return;
   if (effective !== "writer") throw new Error(reason === "plan_lapsed" ? READ_ONLY_LAPSED : READ_ONLY);
-  const why = memberChangeError(before, after, me);
+  const why = memberChangeError(before, after, me, people);
   if (why) throw new Error(why);
 }
 
@@ -730,6 +763,12 @@ export type AccessFrame = { type: "tasks_access" } & Access & {
   /** Set on the last frame before the socket is closed. */
   closed?: "removed" | "encrypted";
 };
+/**
+ * Who's on the board, sent to a member's socket on connect and whenever it changes, so their
+ * card editor can offer them in **Assign to** (// ASSIGNEE): the owner's email and the accepted
+ * members'. Nothing about pending invites, and nobody's role.
+ */
+export type PeopleFrame = { type: "tasks_people"; owner: string | null; people: string[] };
 /** WebSocket close code for a member who lost the board. */
 export const CLOSE_NO_ACCESS = 4403;
 /** Close code for a member's socket that kept sending after it was told to slow down. The app may reconnect. */

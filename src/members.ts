@@ -184,10 +184,16 @@ export async function clearSealedSharing(env: Env, ownerId: string): Promise<num
 export type AuditAction =
   | "invite_sent" | "invite_resent" | "invite_accepted" | "invite_declined" | "invite_revoked" | "invite_expired"
   | "role_changed" | "member_removed" | "member_left" | "sharing_suspended" | "sharing_restored"
-  | "card_deleted" | "card_restored";
+  | "card_deleted" | "card_restored" | "card_assigned";
 
-/** What a card entry says about the card: its id, its title and lane at that moment, and how it was done when not by hand. */
-export type AuditCard = { card: string; title: string; lane: string; via?: "assistant" | "agent" | "undo" | "redo" };
+/**
+ * What a card entry says about the card: its id, its title and lane at that moment, and how it
+ * was done when not by hand. On `card_assigned` the entry's `target` is who the card went to
+ * (null when the assignment was cleared), and `was` is who had it before, when anyone did.
+ */
+export type AuditCard = { card: string; title: string; lane: string; via?: "assistant" | "agent" | "undo" | "redo"; was?: string };
+/** One assignment for the log: the card, and who it went to (null for nobody). */
+export type AuditAssign = AuditCard & { to: string | null };
 
 export type AuditEntry = {
   /** The row's id in the whole table, for paging (`before`). It has gaps: other boards' entries sit between. */
@@ -197,7 +203,7 @@ export type AuditEntry = {
   /** When, as epoch milliseconds, and the same instant as ISO-8601 in UTC. */
   at: number; time: string;
   actor: string; action: AuditAction; target: string | null; from: MemberRole | null; to: MemberRole | null;
-  /** Set on `card_deleted` and `card_restored`, null on membership entries. */
+  /** Set on `card_deleted`, `card_restored`, and `card_assigned`, null on membership entries. */
   detail: AuditCard | null;
   /**
    * Set when `actor` did it as a site admin and not as someone on the board: giving or taking
@@ -229,7 +235,7 @@ function cardDetail(raw: string | null): AuditCard | null {
     const d = JSON.parse(raw) as Partial<AuditCard>;
     if (typeof d.card !== "string" || typeof d.title !== "string") return null;
     const via = d.via === "assistant" || d.via === "agent" || d.via === "undo" || d.via === "redo" ? d.via : undefined;
-    return { card: d.card, title: d.title, lane: typeof d.lane === "string" ? d.lane : "", ...(via ? { via } : {}) };
+    return { card: d.card, title: d.title, lane: typeof d.lane === "string" ? d.lane : "", ...(via ? { via } : {}), ...(typeof d.was === "string" ? { was: d.was } : {}) };
   } catch {
     return null;
   }
@@ -256,6 +262,32 @@ export async function logCards(env: Env, ownerId: string, actor: string, action:
      SELECT ?1, ?2, ?3, ?4, NULL, NULL, NULL, ?5 WHERE EXISTS (SELECT 1 FROM board_sharing WHERE owner_id = ?1)`,
   ).bind(ownerId, at, actor, action, JSON.stringify({ card: c.card, title: c.title.slice(0, 200), lane: c.lane.slice(0, 40), ...(c.via ? { via: c.via } : {}) })));
   for (let i = 0; i < rows.length; i += 50) await env.DB.batch(rows.slice(i, i + 50));
+}
+
+/**
+ * Write down who assigned which card to whom (// ASSIGNEE), under the same rules as `logCards`:
+ * only the board's Durable Object calls it, with the name it took from the connection, and a
+ * board that was never shared writes nothing. `target` is the new assignee, null when the
+ * assignment was cleared; who had the card before is `was` in the detail.
+ */
+export async function logAssigned(env: Env, ownerId: string, actor: string, cards: AuditAssign[]): Promise<void> {
+  const at = Date.now();
+  const rows = cards.map((c) => env.DB.prepare(
+    `INSERT INTO board_audit (owner_id, at, actor, action, target, from_role, to_role, detail)
+     SELECT ?1, ?2, ?3, 'card_assigned', ?4, NULL, NULL, ?5 WHERE EXISTS (SELECT 1 FROM board_sharing WHERE owner_id = ?1)`,
+  ).bind(ownerId, at, actor, c.to, JSON.stringify({ card: c.card, title: c.title.slice(0, 200), lane: c.lane.slice(0, 40), ...(c.via ? { via: c.via } : {}), ...(c.was ? { was: c.was.slice(0, 254) } : {}) })));
+  for (let i = 0; i < rows.length; i += 50) await env.DB.batch(rows.slice(i, i + 50));
+}
+
+/**
+ * Who's on a board: its owner's email and the emails of the members who accepted, lower case.
+ * It's who a card can be assigned to (// ASSIGNEE). Pending invites aren't on it. The board's
+ * Durable Object reads it when membership changes and keeps it (TodoAgent.loadPeople).
+ */
+export async function boardPeople(env: Env, boardId: string): Promise<{ owner: string | null; members: string[] }> {
+  const { results } = await env.DB.prepare("SELECT owner_email, member_email FROM board_members WHERE owner_id = ? AND status = 'accepted' ORDER BY accepted_at, member_email")
+    .bind(boardId).all<Pick<MemberRow, "owner_email" | "member_email">>();
+  return { owner: results[0]?.owner_email.toLowerCase() ?? null, members: results.map((r) => r.member_email.toLowerCase()) };
 }
 
 /** A spreadsheet runs a cell that starts with = + - or @ as a formula. Emails can start with those. */
@@ -638,7 +670,7 @@ async function auditPage(req: Request, env: Env, owner: Owned): Promise<Response
     `SELECT id, (SELECT COUNT(*) FROM board_audit b WHERE b.owner_id = a.owner_id AND b.id <= a.id) AS seq, at, actor, action, target, from_role, to_role, detail
      FROM board_audit a WHERE owner_id = ?1 AND (?2 = 0 OR id < ?2)
        AND (?4 = '' OR actor = ?4 OR target = ?4)
-       AND (?5 = '' OR (?5 = 'cards') = (action IN ('card_deleted', 'card_restored')))
+       AND (?5 = '' OR (?5 = 'cards') = (action IN ('card_deleted', 'card_restored', 'card_assigned')))
      ORDER BY id DESC LIMIT ?3`,
   ).bind(owner.id, first ? 0 : before, limit + 1, who, kind).all<AuditDbRow>();
   const page = results.slice(0, limit);
@@ -661,10 +693,10 @@ async function auditExport(env: Env, owner: Owned, format: "csv" | "json"): Prom
     return new Response(JSON.stringify({ board: owner.id, owner: owner.email, exportedAt: new Date().toISOString(), entries }, null, 2),
       { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
   }
-  const lines = ["seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via"];
+  const lines = ["seq,time,actor,action,target,from_role,to_role,card_id,card_title,lane,via,assigned_from"];
   for (const r of results) {
     const d = cardDetail(r.detail);
-    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? (byAdmin(r.detail) ? "admin" : whyOf(r.detail) ? "board encrypted" : null)].map(csvCell).join(","));
+    lines.push([r.seq, new Date(r.at).toISOString(), r.actor, r.action, r.target, r.from_role, r.to_role, d?.card ?? null, d?.title ?? null, d?.lane ?? null, d?.via ?? (byAdmin(r.detail) ? "admin" : whyOf(r.detail) ? "board encrypted" : null), d?.was ?? null].map(csvCell).join(","));
   }
   // The byte-order mark is what tells Excel on Windows the file is UTF-8 when it's opened with
   // a double-click; without it, a card title that isn't plain ASCII comes out garbled.

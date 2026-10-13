@@ -32,7 +32,7 @@ const define = <S extends z.ZodType>(name: McpToolName, t: Omit<BoardTool<S>, "d
 };
 
 const TAGS_HINT = "Short labels like agent or client, lower case, no #. Only when the user or your own instructions call for one.";
-const ASSIGNEE_HINT = "Email of the person whose agents work this card: a member of a shared board. Their agents can claim it, write its STATUS, move it, and ask on it; they can answer its questions.";
+const ASSIGNEE_HINT = "Email of the person this card belongs to: the board's owner or a member who accepted an invite. Anyone else is refused. On an #agent card it also puts that person's agents on the card (they can claim it, write its STATUS, move it, and ask on it, and the person can answer its questions), so only the board's owner assigns those.";
 
 export const BOARD_TOOLS = {
   add_cards: define("add_cards", {

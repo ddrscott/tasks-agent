@@ -33,7 +33,7 @@ import { Pages } from "./Pages";
 import { Sheets } from "./Sheets";
 import { isUnknownPath, NotFound } from "./NotFound";
 import { applyTheme, readCachedTheme } from "./themes";
-import { AskContext, AskMeContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
+import { AskContext, AskMeContext, AskOwnerContext, AsksButton, BoardPeopleContext, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { SectionNav } from "./SectionNav";
 import { FilterButton, FilterLine, useFilters } from "./Filter";
@@ -43,7 +43,7 @@ import { ThemePicker } from "./ThemePicker";
 import { fitTopbar } from "./topbarFit";
 import { useTitle } from "./title";
 import { pageAt, type Page } from "../routes";
-import { ADD_CARDS_MAX, needsEdit, ownerTagLike, plainError, plainText } from "../member-rules";
+import { ADD_CARDS_MAX, isAgentCard, needsEdit, ownerTagLike, plainError, plainText } from "../member-rules";
 import { Landing, SignedInCard } from "./Landing";
 
 type Me = { email: string; id: string; model: string; /** Shows the Admin link. The admin page's API checks the role itself. */ admin?: boolean };
@@ -345,6 +345,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
   toastKey.current = toast?.key ?? null;
   // A run of deletions by one person, shown as one toast (joinRun in member.tsx).
   const run = useRef<ActivityRun | null>(null);
+  // Who's on someone else's board, as its `tasks_people` frame last said (// ASSIGNEE).
+  const [memberPeople, setMemberPeople] = useState<{ board: string; people: string[] } | null>(null);
 
   const boardRef = useRef<Board | null>(null);
   const dragging = useRef(false);
@@ -575,6 +577,11 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
       try {
         const f = JSON.parse(m.data) as { type?: string };
         if (f.type === "tasks_access" && sharedBoard) onAccess(f);
+        // Who's on the board you were invited to, for Assign to (// ASSIGNEE).
+        else if (f.type === "tasks_people" && sharedBoard) {
+          const list = (f as { people?: unknown }).people;
+          if (Array.isArray(list)) setMemberPeople({ board: sharedBoard, people: list.filter((p): p is string => typeof p === "string") });
+        }
         else if (f.type === "tasks_activity") onActivity(f);
         // Your own board's members or plan changed: Members and "Shared with N" read it again now.
         // The plan may be what changed (Pro bought, lapsed, given or taken back by an admin), so
@@ -740,9 +747,17 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
 
   // For the Tags field in the card dialogs. On an encrypted board this is the decrypted view, so it works there too.
   // A member isn't offered the tags that direct the owner's agents: the server would refuse them.
-  // Who a card can be assigned to (// ASSIGNEE): you and the board's members on your own board; yourself on someone else's.
-  const { members: boardMembers } = useBoardMembers(ownId);
-  const people = useMemo(() => (member ? [me.email] : [me.email, ...boardMembers.filter((m) => m.status === "accepted").map((m) => m.email)]), [member, me.email, boardMembers]);
+  // Who a card can be assigned to (// ASSIGNEE): the board's owner and its accepted members, you
+  // first. Your own board reads its members list; someone else's board sends it (`tasks_people`).
+  // It's a convenience: the server decides (the write guard in member-rules.ts).
+  const { members: boardMembers, state: membersState } = useBoardMembers(ownId);
+  const theirPeople = sharedBoard && memberPeople?.board === sharedBoard ? memberPeople.people : null;
+  const people = useMemo(() => {
+    const others = member ? theirPeople ?? [] : boardMembers.filter((m) => m.status === "accepted").map((m) => m.email);
+    return [...new Set([me.email, ...others])];
+  }, [member, me.email, boardMembers, theirPeople]);
+  // Everyone on the board, for marking a card assigned to someone who left. Null until it's known.
+  const onBoard = useMemo(() => (member ? (theirPeople ? new Set(people) : null) : membersState === "ready" ? new Set(people) : null), [member, theirPeople, membersState, people]);
   const knownTags = useMemo(() => (board ? tagsByUse(board).filter((t) => !member || !ownerTagLike(t)) : []), [board, member]);
 
   const actions: Actions = useMemo(() => ({
@@ -947,6 +962,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
     <AskContext.Provider value={answerAsk}>
     <AskOwnerContext.Provider value={access?.ownerEmail ?? null}>
     <AskMeContext.Provider value={me.email}>
+    <BoardPeopleContext.Provider value={onBoard}>
     <Who me={me.email} on={showWho} own={sharedBoard ? undefined : ownId}>
     <DraftsContext.Provider value={drafts}>
     <NoAgentProvider board={board} onConnect={onConnect} off={member}>
@@ -982,8 +998,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
             </div>
             )}
             {/* On someone else's board, the questions that are yours are the ones on cards assigned to you (// ASSIGNEE). */}
-            {(!member || board.cards.some((c) => c.assignee === me.email)) && (
-              <AsksButton cards={member ? board.cards.filter((c) => c.assignee === me.email) : board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
+            {(!member || board.cards.some((c) => c.assignee === me.email && isAgentCard(c))) && (
+              <AsksButton cards={member ? board.cards.filter((c) => c.assignee === me.email && isAgentCard(c)) : board.cards} open={asksOpen} setOpen={setAsksOpen} onOpenCard={setEditing} />
             )}
             <ThemePicker current={member ? localTheme : board.theme} open={themeOpen} setOpen={setThemeOpen} onPick={(t) => { if (member) setLocalTheme(t as typeof localTheme); else void agent.stub.setTheme(t); }} />
             {canWrite && <button className="btn hide-sm" aria-pressed={chatOpen} onClick={() => setChat(!chatOpen)} title="Assistant (/)" aria-label="Assistant">
@@ -1161,6 +1177,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
     </NoAgentProvider>
     </DraftsContext.Provider>
     </Who>
+    </BoardPeopleContext.Provider>
     </AskMeContext.Provider>
     </AskOwnerContext.Provider>
     </AskContext.Provider>

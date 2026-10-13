@@ -4,6 +4,7 @@
 // the buttons on the card itself take two taps, because the board is where stray taps land.
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { isAgentCard } from "../member-rules";
 import type { Card } from "../shared";
 import { Popover } from "./Board";
 
@@ -20,6 +21,12 @@ export const AskContext = createContext<AnswerFn>(() => {});
 export const AskOwnerContext = createContext<string | null>(null);
 /** The signed-in email. On someone else's board, a question on a card assigned to you is yours to answer (// ASSIGNEE). */
 export const AskMeContext = createContext<string | null>(null);
+/**
+ * Everyone on the board on screen: its owner and its accepted members (// ASSIGNEE). A card
+ * assigned to someone who isn't in it says so. Null where that isn't known (still loading, the
+ * all-boards screen, the demo), and then nothing is marked.
+ */
+export const BoardPeopleContext = createContext<ReadonlySet<string> | null>(null);
 
 // A card is draggable and opens on click, so its buttons keep those to themselves.
 const quiet = {
@@ -45,9 +52,9 @@ type BlockProps = {
 export function AskBlock({ card, compact, before }: BlockProps) {
   const answer = useContext(AskContext);
   const me = useContext(AskMeContext);
-  // Someone else's board: the owner answers, unless this card is assigned to you.
+  // Someone else's board: the owner answers, unless this is an agent card assigned to you.
   const owner = useContext(AskOwnerContext);
-  const theirs = owner && !(me && card.assignee === me) ? owner : null;
+  const theirs = owner && !(me && card.assignee === me && isAgentCard(card)) ? owner : null;
   const [other, setOther] = useState("");
   const ask = card.ask;
   const send = (input: { choice?: number; text?: string }) => { before?.(); answer(card.id, input); };

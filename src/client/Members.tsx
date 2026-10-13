@@ -689,7 +689,7 @@ function People({ me, board, members, plans, stale, onEncryption, onAudit }: {
         </dl>
         <p className="mem-foot">The same answers are in the <a href={`${BASE}/terms#team-boards`} target="_blank" rel="noreferrer">terms</a>.</p>
       </section>
-      <p className="mem-foot">Every invite, role change, removal, and deleted card is written to the <button type="button" className="linkish" onClick={onAudit}>audit log</button>, with who did it and when.</p>
+      <p className="mem-foot">Every invite, role change, removal, deleted card, and card assignment is written to the <button type="button" className="linkish" onClick={onAudit}>audit log</button>, with who did it and when.</p>
     </>
   );
 }
@@ -710,7 +710,10 @@ const ACTIONS: Record<AuditAction, string> = {
   sharing_restored: "Sharing restored: Pro is back, roles apply again",
   card_deleted: "Card deleted",
   card_restored: "Card brought back",
+  card_assigned: "Card assigned",
 };
+/** An assignment says who the card went to and who had it: "Card assigned to dana@example.com (was sam@example.com)". */
+const assignedText = (e: AuditEntry) => `${e.target ? `Card assigned to ${e.target}` : "Card unassigned"}${e.detail?.was ? ` (was ${e.detail.was})` : ""}`;
 /** The same two plan entries when a site admin's switch caused them, not billing. */
 const ADMIN_ACTIONS: Partial<Record<AuditAction, string>> = {
   sharing_suspended: "Sharing paused: an admin took Pro back, members are view only",
@@ -815,7 +818,7 @@ function AuditLog({ me, board }: { me: Props["me"]; board: string }) {
         <span className="audit-utc">entry {e.seq}</span>
       </td>
       <td data-th="Who did it" className="audit-who"><span>{e.actor === "system" ? (e.why === "encrypted" ? "system (encryption was turned off)" : "system (billing or plan change)") : e.actor}{e.actorRole === "admin" && <span className="audit-you"> (a site admin)</span>}{e.actor === me.email && <span className="audit-you"> (you)</span>}</span></td>
-      <td data-th="What"><span>{(e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}{e.why === "encrypted" ? ": the board was encrypted" : ""}</span><span className="audit-code">{e.action}</span></td>
+      <td data-th="What"><span>{e.action === "card_assigned" ? assignedText(e) : (e.actorRole === "admin" && ADMIN_ACTIONS[e.action]) || ACTIONS[e.action] || e.action}{e.detail?.via ? ` ${VIA[e.detail.via]}` : ""}{e.why === "encrypted" ? ": the board was encrypted" : ""}</span><span className="audit-code">{e.action}</span></td>
       {e.detail ? (
         <td data-th="Card" className="audit-card"><span>“{e.detail.title}”</span><span className="audit-code">{e.detail.lane ? `in ${e.detail.lane} · ` : ""}{e.detail.card}</span></td>
       ) : (
