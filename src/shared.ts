@@ -415,34 +415,55 @@ function withTags(c: Card, tags: string[]): Card {
 
 export const hasTag = (c: Card, tag: string) => (c.tags ?? []).includes(tag);
 
-/** The tag filter's pick (client/TagFilter.tsx): which tags, and whether a card needs every one of them or any one. */
-export type TagWhere = { tags: string[]; all: boolean };
-/** True when the tag filter lets this card show. No tags picked lets every card through. */
-export function matchesTags(c: Card, where: TagWhere): boolean {
+/**
+ * The filter's pick (client/Filter.tsx): which tags, whether a card needs every one of them or
+ * any one, and whose cards. `who` holds assignee emails, `me` for whoever is looking, and `none`
+ * for cards with no assignee; a card matching any one of them shows. Who and tags narrow together.
+ */
+export type Where = { tags: string[]; all: boolean; who: string[] };
+export const WHO_ME = "me";
+export const WHO_NONE = "none";
+/** True when the picked tags let this card show. No tags picked lets every card through. */
+export function matchesTags(c: Card, where: Pick<Where, "tags" | "all">): boolean {
   if (!where.tags.length) return true;
   return where.all ? where.tags.every((t) => hasTag(c, t)) : where.tags.some((t) => hasTag(c, t));
 }
+/** True when the picked people let this card show. `me` is the email of whoever is looking. */
+export function matchesWho(c: Card, who: string[], me?: string | null): boolean {
+  if (!who.length) return true;
+  return who.some((w) => (w === WHO_NONE ? !c.assignee : w === WHO_ME ? !!me && c.assignee === me : c.assignee === w));
+}
+/** True when the whole filter lets this card show: one of the picked people, and the picked tags. */
+export const matchesWhere = (c: Card, where: Where, me?: string | null) => matchesWho(c, where.who, me) && matchesTags(c, where);
 
 /**
- * The tag filters as they sit in the address, so a filtered board can be linked to:
- * `?tags=agent,shop-api` is the tag filter's pick, `&match=all` when a card needs every one of
- * them, and `&fade=agent` is the tag clicked on a card. Anything that isn't a tag is dropped.
+ * The filters as they sit in the address, so a filtered board can be linked to:
+ * `?who=me` is cards assigned to whoever opens the link, `?who=dana@example.com,none` names
+ * people and the unassigned, `?tags=agent,shop-api` is the picked tags, `&match=all` when a card
+ * needs every one of them, and `&fade=agent` is the tag clicked on a card. Anything that isn't a
+ * tag, an email, `me`, or `none` is dropped.
  */
-export type TagQuery = { where: TagWhere; fade: string | null };
-export function tagQueryFrom(search: string): TagQuery {
+export type FilterQuery = { where: Where; fade: string | null };
+const cleanWho = (s: string) => {
+  const w = s.trim().toLowerCase();
+  return w === WHO_ME || w === WHO_NONE || (w.length <= 254 && /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(w)) ? w : "";
+};
+export function filterQueryFrom(search: string): FilterQuery {
   const q = new URLSearchParams(search);
   const tags = [...new Set((q.get("tags") ?? "").split(",").map(cleanTag).filter(Boolean))];
-  return { where: { tags, all: q.get("match") === "all" }, fade: cleanTag(q.get("fade") ?? "") || null };
+  const who = [...new Set((q.get("who") ?? "").split(",").map(cleanWho).filter(Boolean))].slice(0, 20);
+  return { where: { tags, all: q.get("match") === "all", who }, fade: cleanTag(q.get("fade") ?? "") || null };
 }
 /** `search` with the filters written into it and every other parameter left alone. "" when nothing is left. */
-export function tagQueryInto(search: string, { where, fade }: TagQuery): string {
+export function filterQueryInto(search: string, { where, fade }: FilterQuery): string {
   const q = new URLSearchParams(search);
   const put = (k: string, v: string) => { if (v) q.set(k, v); else q.delete(k); };
+  put("who", where.who.join(","));
   put("tags", where.tags.join(","));
   put("match", where.all ? "all" : "");
   put("fade", fade ?? "");
-  // A comma is fine in a query as it is, and `tags=agent,shop-api` is the link a person can read.
-  const s = q.toString().replace(/%2C/g, ",");
+  // A comma and an @ are fine in a query as they are, and `who=me&tags=agent,shop-api` is the link a person can read.
+  const s = q.toString().replace(/%2C/g, ",").replace(/%40/g, "@");
   return s ? `?${s}` : "";
 }
 

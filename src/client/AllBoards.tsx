@@ -16,6 +16,7 @@ import { AskContext, AskMeContext } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, type Actions } from "./Board";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { CardEditor } from "./CardEditor";
+import { FilterButton, FilterLine, useFilters } from "./Filter";
 import { Footer } from "./Footer";
 import type { Boards, Mode } from "./member";
 import { useTitle } from "./title";
@@ -71,7 +72,6 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
   const stubs = useRef(new Map<string, Stub>());
   const [toast, setToast] = useState<{ text: string; key: number; ms?: number } | null>(null);
   const [editing, setEditing] = useState<{ board: string; card: string } | null>(null);
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [optimistic, setOptimistic] = useState<Board | null>(null);
 
@@ -123,6 +123,9 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
     return { merged, sealed, labels };
   }, [reaches, states, me.id]);
   const shown = optimistic ?? merged;
+  // The same filter as a single board's, over every card on the screen (Filter.tsx).
+  const filters = useFilters(shown, me.email);
+  const { where, fade: tagFilter, setFade: setTagFilter } = filters;
   const chipFor = useCallback((c: Card) => labels.get(c.id) ?? null, [labels]);
 
   /** The real lane on `board` that a virtual lane stands for, or null with the reason. */
@@ -205,6 +208,7 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
           <BoardSwitcher boards={boards} myId={me.id} access={null} own={null} all onSwitch={onSwitch} onOpen={onBoards} onNew={onNew} onAll={() => {}} />
           <span className="open-count">{openCount} open</span>
           <span className="spacer" />
+          <FilterButton board={shown} me={me.email} filters={filters} />
         </header>
         <aside className="member-line" role="status" aria-label="All boards">
           <span className="member-line-mark" aria-hidden="true">$</span>
@@ -213,9 +217,10 @@ export function AllBoards({ me, boards, onBoards, onSwitch, onNew }: Props) {
             {sealed > 0 && ` ${sealed === 1 ? "One encrypted board isn't shown here: open it on its own." : `${sealed} encrypted boards aren't shown here: open them on their own.`}`}
           </span>
         </aside>
+        <FilterLine board={shown} me={me.email} filters={filters} />
         <BoardView
           board={shown} actions={actions} flash={new Set()} mode="writer"
-          tagFilter={tagFilter} onTag={(t) => setTagFilter((cur) => (cur === t ? null : t))}
+          tagFilter={tagFilter} onTag={(t) => setTagFilter(tagFilter === t ? null : t)} where={where}
           quickAddLane={quickAddLane} setQuickAddLane={setQuickAddLane}
           onNew={(vlane) => setQuickAddLane(vlane)}
           onOpen={(c: Card) => { const at = split(c.id); if (at) setEditing(at); }}

@@ -17,16 +17,16 @@ import { flushSync } from "react-dom";
 import * as ops from "../shared";
 import type { Board, Card } from "../shared";
 import { BASE } from "./base";
-import { AskContext, AsksButton, type AnswerFn } from "./Ask";
+import { AskContext, AskMeContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardView, DESTRUCTIVE_TOAST_MS, localToday, Popover, type Actions } from "./Board";
 import { CardEditor } from "./CardEditor";
-import { allChecked, CLOSED_BY_YOU, PLOT, seedBoard, withStatus, type Beat } from "./demoData";
+import { allChecked, CLOSED_BY_YOU, DEMO_ME, DEMO_PEOPLE, PLOT, seedBoard, withStatus, type Beat } from "./demoData";
 import { Footer } from "./Footer";
-import { IconChat, IconClose, IconRedo, IconUndo } from "./icons";
+import { IconChat, IconRedo, IconUndo } from "./icons";
 import { localSearch } from "./localSearch";
 import { NewCard, type NewCardInput } from "./NewCard";
 import { SearchBox } from "./Search";
-import { TagFilter, useTagFilters } from "./TagFilter";
+import { FilterButton, FilterLine, useFilters } from "./Filter";
 import { ThemePicker } from "./ThemePicker";
 import { readCachedTheme } from "./themes";
 import { useTitle } from "./title";
@@ -140,7 +140,8 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
   const [flash, setFlash] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   // `tagFilter` is the tag clicked on a card: the rest fade back. `where` is the top bar's filter. Both live in the address.
-  const { where, setWhere, fade: tagFilter, setFade: setTagFilter } = useTagFilters(board);
+  const filters = useFilters(board, DEMO_ME);
+  const { where, fade: tagFilter, setFade: setTagFilter } = filters;
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -335,22 +336,18 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
 
   return (
     <AskContext.Provider value={answerAsk}>
+    <AskMeContext.Provider value={DEMO_ME}>
     <div className="app demo">
       <div className="main">
         <header className="topbar" ref={fitTopbar}>
           <h1 className="wordmark">tasks<span>.</span></h1>
-          <TagFilter board={board} where={where} onChange={setWhere} />
           <div className="stats" aria-label="Summary">
             <span><b>{open.length}</b> open</span>
             {dueToday > 0 && <span className="due-today"><b>{dueToday}</b> due today</span>}
             {overdue > 0 && <span className="overdue"><b>{overdue}</b> overdue</span>}
           </div>
-          {tagFilter && (
-            <button className="chip tag active filter-chip" onClick={() => setTagFilter(null)} title="Show every card">
-              #{tagFilter}<IconClose />
-            </button>
-          )}
           <span className="spacer" />
+          <FilterButton board={board} me={DEMO_ME} filters={filters} />
           <SearchBox search={search} onOpen={(h) => setEditing(h.id)} inputRef={searchInput} />
           <div className="actions">
             <div className="btn-pair">
@@ -409,6 +406,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
           </div>
         </aside>
 
+        <FilterLine board={board} me={DEMO_ME} filters={filters} />
         <BoardView
           board={board} actions={actions} flash={flash}
           tagFilter={tagFilter} onTag={(t) => setTagFilter(tagFilter === t ? null : t)} where={where}
@@ -430,7 +428,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
       )}
       {editingCard && (
         <CardEditor
-          key={byAgent.current.has(`${editingCard.id}:${editingCard.updatedAt}`) ? `${editingCard.id}:${editingCard.updatedAt}` : editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={null} filesNote={FILES_NOTE}
+          key={byAgent.current.has(`${editingCard.id}:${editingCard.updatedAt}`) ? `${editingCard.id}:${editingCard.updatedAt}` : editingCard.id} card={editingCard} lanes={board.lanes} knownTags={knownTags} vault={null} filesNote={FILES_NOTE} people={DEMO_PEOPLE}
           onSave={(patch) => void act("Edit card", (b) => ops.updateCard(b, editingCard.id, patch)).catch((e: Error) => say(e.message))}
           onMove={(laneId) => void move(editingCard.id, laneId)}
           onMoveNow={(laneId) => {
@@ -457,6 +455,7 @@ function DemoBoard({ signedIn, onHome, onConnect, onReset }: Props & { onReset()
         </div>
       )}
     </div>
+    </AskMeContext.Provider>
     </AskContext.Provider>
   );
 }

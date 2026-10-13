@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- A Filter button beside search holds every way to limit which cards show. Mine is the first choice: one click shows only the cards assigned to you. Under it, pick anyone who has a card assigned on the board, or Unassigned, and any tags. A person and a tag together narrow the board. Mine goes by who a card is assigned to (Assign to, in the card editor), not by a name written in its title, so a card titled "Jeff — …" with nobody assigned doesn't count as Jeff's until it's assigned to him
+- While a filter is on, the button shows `$` and a count, and a line under the top bar says how many cards are showing, with a chip for each filter that one click takes off and Clear all. A lane whose cards are all filtered out says how many are hidden
+- The filter is in the address (`/tasks/?who=me&tags=sales`), so it can be bookmarked and a reload keeps it. A `who=me` link shows each person their own cards. It works on the demo board, on a board shared with you, on All boards, and on a phone. Press `f` to open it; `f` then Enter is Mine
+
 - The top bar on the board, Pages, and Worksheets screens has Board · Pages · Worksheets beside the board switcher, with the one you're on marked. Pages and Worksheets open a list of what the board has, so a page or a worksheet is one tap from anywhere and nobody types a path. The board switcher is always there now, even with one board
 - Pages show Markdown tables as tables, with column alignment. A wide one scrolls sideways in its own box on a phone. Card notes get tables too
 - A page can link to another page or file on its board with a plain relative link, like `[the spec](spec.md)`, `../notes/x.md`, or `#a-heading`, and the link opens it in place. A link to something that isn't there says `NOT FOUND`
@@ -20,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On a shared board, text extracted from a file a member added is marked as that member's words, and hidden characters are taken out of everyone's. On an encrypted board nothing is extracted, and encrypting a board erases what was
 
 ### Changed
+- The `# Tags` box in the top bar is gone: tags are in the Filter panel now, and they work the way they did, including any or all, clicking a tag on a card to fade the rest, and old links with `tags`, `match`, and `fade`. The clicked tag's chip moved from the top bar to the filter line
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
 - Paragraphs on a page reflow: text hard-wrapped in its source reads as one paragraph. End a line with two spaces or a backslash to break it. Card notes keep their line breaks
 - A page that opens with a `---` front matter block shows it folded as `// FRONT_MATTER` instead of as a rule and a paragraph
@@ -27,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The front page says what Tasks is now: one board for your team and your agents, with kanban, a wiki, and worksheets in one place. It shows the board under the new top bar with a card assigned to a teammate, and a page and a worksheet from the same sample board, drawn with the app's own renderer and grid. Pricing says Pro's board count, read from the server like the member count
 
 ### Fixed
+- Closing a panel that opens with the cursor in a field (the filter) puts keyboard focus back on its button instead of dropping it at the top of the page
 - A board's files are no longer deleted by the cleanup that collects removed card attachments. Files and attachments share a storage prefix, and the cleanup (25 hours after any attachment was removed, and on turning encryption on or off, or resetting an encrypted board) took every file that wasn't a live attachment, which included every PDF and image on the Pages screen. The file stayed listed and its bytes were gone. Files lost that way before this fix can't be brought back: upload them again
 
 ## [0.4.1] - 2026-10-12

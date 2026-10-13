@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { doneLaneId, faceLine, LANE_ROLES, matchesTags, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type TagWhere } from "../shared";
+import { doneLaneId, faceLine, LANE_ROLES, matchesWhere, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type Where } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
@@ -41,8 +41,8 @@ type Props = {
   /** Cards without this tag fade back. */
   tagFilter: string | null;
   onTag(tag: string): void;
-  /** The tag filter in the top bar (TagFilter.tsx). Cards it doesn't match aren't drawn at all. */
-  where?: TagWhere;
+  /** The filter in the top bar (Filter.tsx). Cards it doesn't match aren't drawn at all. */
+  where?: Where;
   /** Open the full New card dialog for a lane. */
   onNew(laneId: string): void;
   quickAddLane: string | null;
@@ -320,9 +320,9 @@ function LaneView(props: Props & {
   const [armed, setArmed] = useState<"clear" | "delete" | null>(null);
   useEffect(() => { if (!menu) setArmed(null); }, [menu]);
   const adding = props.quickAddLane === lane.id;
-  // The tag filter takes cards out of the lane; `cards` stays the whole lane, for the count and the menu.
-  const where = props.where?.tags.length ? props.where : null;
-  const shown = where ? cards.filter((c) => matchesTags(c, where)) : cards;
+  // The filter takes cards out of the lane; `cards` stays the whole lane, for the count and the menu.
+  const where = props.where && (props.where.tags.length || props.where.who.length) ? props.where : null;
+  const shown = where ? cards.filter((c) => matchesWhere(c, where, me)) : cards;
   const matching = props.tagFilter ? shown.filter((c) => hasTag(c, props.tagFilter!)).length : shown.length;
 
   function commitRename(value: string) {
@@ -370,7 +370,7 @@ function LaneView(props: Props & {
         )}
         {/* While a filter is on, the count says how many match, out of how many. */}
         {props.tagFilter || where ? (
-          <span className="lane-count" title={`${matching} of ${cards.length} match ${[...(where?.tags ?? []), ...(props.tagFilter ? [props.tagFilter] : [])].map((t) => `#${t}`).join(", ")}`}>{matching} / {cards.length}</span>
+          <span className="lane-count" title={`${matching} of ${cards.length} match the filter`}>{matching} / {cards.length}</span>
         ) : (
           <span className="lane-count">{cards.length}</span>
         )}
@@ -453,7 +453,7 @@ function LaneView(props: Props & {
               faded={!!props.tagFilter && !hasTag(c, props.tagFilter)} tagFilter={props.tagFilter} onTag={props.onTag}
             />
           ))}
-          {shown.length === 0 && cards.length > 0 && !adding && <div className="lane-empty">No cards match the tag filter</div>}
+          {shown.length === 0 && cards.length > 0 && !adding && <div className="lane-empty">{count(cards.length)} hidden by the filter</div>}
           {cards.length === 0 && !adding && (
             <div className="lane-empty">{!canCards ? "No cards" : props.index === 0 ? (owns ? "Nothing here yet. Add a card, or ask the assistant." : "Nothing here yet. Add a card.") : "Drag cards here"}</div>
           )}
@@ -730,7 +730,8 @@ export function Popover({ children, onClose, label, menu }: PopoverProps) {
     const el = ref.current;
     if (!el) return;
     const at = document.activeElement;
-    const opener = at instanceof HTMLElement && at !== document.body ? at : null;
+    // A field inside with autoFocus has focus already, and it leaves with the panel, so it's no opener.
+    const opener = at instanceof HTMLElement && at !== document.body && !el.contains(at) ? at : null;
     const button = el.parentElement?.querySelector<HTMLElement>(":scope > [aria-expanded]") ?? null;
     // A field with autoFocus already has it. Otherwise: a menu's first item, the option that's
     // already picked (the theme list previews whatever takes focus), or the panel itself, so a
