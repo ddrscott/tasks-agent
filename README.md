@@ -1106,12 +1106,59 @@ the owner's.
 
 ## // ASSIGNEE
 
-Two people on one board, each with their own Claude: whose agents work a card? The owner's, as
-`// TEAM_BOARDS` has it, unless the owner assigns the card to a member. `Card.assignee` is an
-email (`validAssignee` in `src/shared.ts`), set by the owner in the card editor's **Assign to**
-(you and the board's accepted members; a member sees only themselves) or over MCP (`assignee` on
-`add_cards` and `update_card`, `null` to clear). The card face shows `→ dana`, and the card
-line agents read says `(assigned to dana@example.com)`; `get_card` says it under the question.
+An assignee is who a card belongs to. `Card.assignee` is an email (`validAssignee` in
+`src/shared.ts`), set in the card editor's **Assign to** or over MCP (`assignee` on `add_cards`
+and `update_card`, `null` to clear). The card face shows `→ dana`, and the card line agents
+read says `(assigned to dana@example.com)`; `get_card` says it under the question.
+
+On an `#agent` card it means one thing more. Two people on one board, each with their own
+Claude: whose agents work a card? The owner's, as `// TEAM_BOARDS` has it, unless the card is
+assigned to a member, and then that member's.
+
+- **Who can be an assignee**: someone on the board, which is its owner or a member who has
+  accepted their invite (`assigneeError` in `src/member-rules.ts`). Any other email is refused
+  with `[not_on_board] dana@example.com isn't on this board. …`, for the owner too, from the app
+  and over MCP. A pending invite isn't on the board yet. Only an assignment the change makes
+  is judged, so a card naming someone who has since left can still be edited and moved.
+- **Who can assign.** A plain card (no `#agent` or `#gauntlet`): anyone who can write the board,
+  to the owner, to another member, or to themselves, and they can clear it. That's how two
+  partners hand cards to each other in both directions. A viewer can't. An agent card: the
+  owner only. Assigning one hands that person's agents the right to work it, which is a grant,
+  so a member can't set, change, or clear its assignee, their own included (`AGENT_ASSIGN`,
+  code `agent_card`: "Only the board's owner can assign an #agent or #gauntlet card … whoever
+  it's assigned to gets their agents on it"). The owner tagging `#agent` onto a card that's
+  already assigned to a member is the owner making that grant: the chip is on the card's face
+  when they do it.
+- **Assigned to the owner** is ownership and nothing else. The owner already has every right
+  on their own board, so the card shows `→ scott` and nothing about what anyone may do changes.
+  A plain card a member assigned to themselves gives them nothing either: its questions stay
+  the owner's to answer (`mine` in `memberChangeError` is agent cards only).
+- **The write guard decides** (`memberChangeError`, which takes the board's people), and the
+  board asks the same question of the owner's changes in `TodoAgent.mutate`
+  (`checkAssignees`). The editor's list is a convenience on top. Undo and redo aren't asked: an
+  undo can hand a card back to someone who has left.
+- **How the board knows who's on it.** Members live in D1 and the guard can't wait on a read,
+  so the board's object keeps a copy (`board_meta` `people`, read by `boardPeople` in
+  `src/members.ts`): refreshed whenever membership changes (`membersChanged`), at each sweep
+  while members are connected, and once at startup on a board shared before it kept one. On a
+  shared board that hasn't read it yet, an assignment to anyone but the owner answers "The
+  board is still reading who's on it. Try that again in a moment." and starts the read.
+- **A member's app is told who's on the board**: a `tasks_people` frame on connect and whenever
+  it changes, `{ "type": "tasks_people", "owner": "owner@example.com", "people": ["owner@…",
+  "dana@…"] }`. The owner and the accepted members' emails, viewers included, and nothing
+  else: no pending invites, no roles. That's what fills a member's **Assign to**; the owner's
+  comes from their members list.
+- **Someone who leaves or is removed** keeps their name on their cards. The face strikes it
+  through and says `(left)`, the editor lists them as "no longer on this board" with a line
+  saying to pick someone else, and the card can be reassigned or cleared like any other
+  (`BoardPeopleContext`). Nothing is rewritten when they go.
+- **The audit log has it** as `card_assigned`: who did it, the card, who it went to (`target`,
+  empty when the assignment was cleared), and who had it before (`was` in the detail,
+  `assigned_from` in the CSV). One row per card, on a board that has ever been shared, for an
+  assignment made by hand, by the assistant, over MCP, or by undo and redo. A member gets
+  `MEMBER_LIMITS.assignsPerDay` of them (500) on a board, for the same reason deletions are
+  counted: the log is never pruned.
+- An encrypted board has no members, so the only person on it is its owner.
 
 - **What the assignee may do**, on an agent card they'd otherwise only read
   (`assigneeChangeError` in `src/member-rules.ts`): change the notes (the `STATUS:` line),
@@ -1122,7 +1169,8 @@ line agents read says `(assigned to dana@example.com)`; `get_card` says it under
   leaves their card out, so moving it never reads as reordering the owner's.
 - **Over MCP** (`notMine` in `src/mcp.ts`): on a shared board, `claim_card`, `release_card`,
   `ask_ceo`, and `wait_for_answer` work on a card assigned to the caller and are refused in
-  words on any other. The question goes on as the member (`TodoAgent.askCeoAs`, under the
+  words on any other. (Asking still needs it to be an agent card: on a plain one the guard
+  refuses the `#needs-ceo` tag the question brings.) The question goes on as the member (`TodoAgent.askCeoAs`, under the
   guard), and `wait_for_answer` reads the card as a member reads it. The owner answers from
   the app as always; so can the assignee (`answerAsk` is in `MEMBER_CALLS`, and the guard
   allows it only on their card). The working rules say it in one sentence (rule 1).
@@ -1135,7 +1183,11 @@ line agents read says `(assigned to dana@example.com)`; `get_card` says it under
   `wait_for_answer` covers the answer; the feed would cover new assignments.
 - `npm run check:boards` has the whole loop: assign, claim, STATUS, a retitle refused, move,
   ask, wait, the owner answering from the app, the assignee answering, another agent card still
-  refused, and the assignment taken back.
+  refused, and the assignment taken back. Then a plain card handed around: a member's agent
+  assigning it to the owner, a stranger refused for the member and for the owner, an agent
+  card's assignment refused with the reason, the `tasks_people` frame, and the four
+  `card_assigned` entries in the audit log. `check:members` has the same cases against the
+  write guard alone.
 - **The event feed** is one per account and carries every board the account owns: the hello
   lists each board's open agent cards with `board` and `boardName` on each, and every event
   after it carries `board` (`TodoAgent.publish`).
@@ -1675,8 +1727,9 @@ live in the owner's `Presence` object, which only the owner's MCP calls reach.
   sockets they accepted, so none of their broadcasts (chat messages, stream chunks, MCP server
   lists) reach a member, and no frame a member sends reaches their handlers.
 
-**What a member's socket receives.** Four frame types, plus replies to its own calls. Three
-come on connect; `tasks_activity` comes when a card is deleted (**Who deleted it**, below).
+**What a member's socket receives.** Five frame types, plus replies to its own calls. Four
+come on connect: the three below, and `tasks_people`, who's on the board (`// ASSIGNEE`).
+`tasks_activity` comes when a card is deleted (**Who deleted it**, below).
 
 ```jsonc
 { "type": "cf_agent_identity", "name": "<owner id>", "agent": "todo-agent" }
@@ -2333,8 +2386,8 @@ took Pro back". `from` and `to` are the role before and
 after; on `invite_resent`, `from` is set only when the role changed with the resend. Actions: `invite_sent`, `invite_resent`,
 `invite_accepted`, `invite_declined`, `invite_revoked`, `invite_expired` (the link was used too
 late; written once), `role_changed`, `member_removed`, `member_left`, `sharing_suspended`,
-`sharing_restored`, and the two card entries, `card_deleted` and `card_restored` (**Who
-deleted it**, above), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when an admin
+`sharing_restored`, and the three card entries, `card_deleted` and `card_restored` (**Who
+deleted it**, above) and `card_assigned` (`// ASSIGNEE`), which are the only ones with `detail`. The plan entries are written when the webhook arrives, when an admin
 gives or takes back Pro, when the board
 rechecks with members connected, or when the owner opens the members list, whichever is first.
 The log is kept for as long as the account exists; nothing prunes it.
@@ -2349,10 +2402,11 @@ when the file is opened with a double-click), CRLF line ends, and one header row
 | `time` | When, ISO-8601 in UTC with milliseconds: `2026-10-04T20:51:31.853Z` |
 | `actor` | The signed-in email that did it, or `system` for a plan change from billing and for a row taken off because the board was encrypted. A site admin who gave or took back Pro is named here, with `admin` under `via` |
 | `action` | One of the action codes above |
-| `target` | The email it was done to. Empty for plan and card entries |
+| `target` | The email it was done to. On `card_assigned`, who the card went to, empty when the assignment was cleared. Empty for plan entries and the other card entries |
 | `from_role`, `to_role` | `viewer`, `writer`, or empty: the role before and after |
-| `card_id`, `card_title`, `lane` | On `card_deleted` and `card_restored`: the card's id, its title, and the lane it was in. Empty otherwise |
+| `card_id`, `card_title`, `lane` | On card entries: the card's id, its title, and the lane it was in. Empty otherwise |
 | `via` | On card entries, how it was done when not by hand: `assistant`, `agent`, `undo`, `redo`. On a plan entry a site admin caused: `admin`. On a member or invite taken off because the board was encrypted: `board encrypted` |
+| `assigned_from` | On `card_assigned`: who the card was assigned to before, when anyone was. Empty otherwise |
 
 A cell that starts with `=`, `+`, `-`, `@`, a tab, or a return gets a `'` in front, so a
 spreadsheet shows it as text instead of running it. The JSON is

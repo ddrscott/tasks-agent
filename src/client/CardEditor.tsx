@@ -1,7 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanTag, doneLaneId, type Card, type Lane } from "../shared";
 import { isAgentCard, isOwnerTag, ownerTagLike, ownerTagTyped } from "../member-rules";
-import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
+import { AskBlock, AskMeContext, AskOwnerContext, BoardPeopleContext } from "./Ask";
 import { AGENT_HOLDS, agentHeld, ASK_HOLDS, ByLine, ChangedWhileOpen, changer, CLAIM_HOLD_MS, MemberWords, OWNER_TAG_NOTE, ownerTagTouched, WhoContext, type Mode } from "./member";
 import { DraftsContext, hasDraft, Unsaved, type Draft } from "./Unsaved";
 import { NoAgentLine } from "./AgentNudge";
@@ -26,7 +26,7 @@ type Props = {
   filesNote?: string;
   onSave(patch: { title?: string; notes?: string; due?: string | null; tags?: string[]; assignee?: string | null }): void;
   onMove(laneId: string): void;
-  /** Who a card can be assigned to (// ASSIGNEE): you and the board's members. Left out, the field isn't drawn unless the card already has one. */
+  /** Who a card can be assigned to (// ASSIGNEE): the board's owner and its accepted members, you among them. Left out, the field isn't drawn unless the card already has one. */
   people?: string[];
   /** A tap on a Move to button: move right away and say so, with Undo. */
   onMoveNow(laneId: string): void;
@@ -148,7 +148,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const owner = useContext(AskOwnerContext);
   // An agent card assigned to this writer (// ASSIGNEE): the notes, lane, and question are
   // theirs; the title, due date, tags, files, and assignee stay the owner's, so those fields are
-  // greyed out here rather than refused on save.
+  // greyed out here rather than refused on save, and a line says why.
   const myEmail = useContext(AskMeContext);
   const mineOnly = mode === "writer" && isAgentCard(card) && !!myEmail && card.assignee === myEmail;
   const held = mode === "writer" && !!card.ask;
@@ -161,6 +161,10 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
   const [assignee, setAssignee] = useState(card.assignee ?? "");
   // Who the card can go to: the people offered, plus whoever it's on now, so an old name still shows.
   const assignable = [...new Set([...(people ?? []), ...(card.assignee ? [card.assignee] : [])])];
+  // Someone who left the board or was removed is still named on their cards until they're reassigned.
+  const onBoard = useContext(BoardPeopleContext);
+  const leftBoard = (p: string) => !!onBoard && !onBoard.has(p);
+  const personLabel = (p: string) => `${p}${p === myEmail ? " (you)" : p === owner ? " (owner)" : leftBoard(p) ? " (no longer on this board)" : ""}`;
   // A trailing space says the last tag is finished, so the field suggests more tags instead of
   // treating that tag as half typed.
   // The owner's tags on the card (#needs-ceo on a card with a question, #ship-ok) aren't a
@@ -339,7 +343,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
         <NoAgentLine card={card} before={save} />
         {mineOnly && (
           <p className="held-note tag-lock">
-            <span>This card is assigned to you: its notes, lane, and question are yours to work. The title, due date, tags, files, and who it's assigned to are {owner ?? "the board's owner"}'s.</span>
+            <span>This card is assigned to you: its notes, lane, and question are yours to work. The title, due date, tags, files, and who it's assigned to are {owner ?? "the board's owner"}'s. Assigning an #agent card puts that person's agents on it, so only {owner ?? "the owner"} hands it to someone else.</span>
           </p>
         )}
         {lanes.length > 1 && (
@@ -413,13 +417,21 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           {assignable.length > 0 && (
             <label>
               Assign to
-              <select className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={mineOnly} title="Whose agents work this card. They can write its STATUS, move it, and ask and answer on it.">
+              <select
+                className="field" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={mineOnly}
+                title={mineOnly
+                  ? `Only ${owner ?? "the board's owner"} can assign an #agent card: whoever it's assigned to gets their agents on it.`
+                  : "Who this card belongs to: the board's owner or a member. On an #agent card, that person's agents work it: they can claim it, write its STATUS, move it, and ask and answer on it."}
+              >
                 <option value="">Nobody</option>
-                {assignable.map((p) => <option key={p} value={p}>{p}</option>)}
+                {assignable.map((p) => <option key={p} value={p}>{personLabel(p)}</option>)}
               </select>
             </label>
           )}
         </div>
+        {!!card.assignee && assignee === card.assignee && leftBoard(card.assignee) && !mineOnly && (
+          <p className="held-note">{card.assignee} is no longer on this board. Assign the card to someone else, or to nobody.</p>
+        )}
         <TagField value={tags} onChange={(v) => { setTags(v); if (error) setError(""); }} known={knownTags} onEnter={save} placeholder={mode === "writer" ? "client urgent" : undefined} disabled={mineOnly} />
         {locked.length > 0 && (
           <p className="held-note tag-lock">

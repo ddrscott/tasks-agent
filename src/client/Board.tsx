@@ -7,7 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { doneLaneId, faceLine, LANE_ROLES, matchesTags, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type TagWhere } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
-import { AskBlock, AskMeContext, AskOwnerContext } from "./Ask";
+import { AskBlock, AskMeContext, AskOwnerContext, BoardPeopleContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
@@ -505,6 +505,9 @@ export function CardFace(p: {
   const status = !p.isDone && !card.ask ? faceLine(card) : null;
   const boardOwner = useContext(AskOwnerContext);
   const chip = useContext(CardChipContext)?.(card) ?? null;
+  // Someone who left or was removed keeps their name on the card until it's reassigned (// ASSIGNEE).
+  const onBoard = useContext(BoardPeopleContext);
+  const left = !!card.assignee && !!onBoard && !onBoard.has(card.assignee);
   const cls = ["card", p.isDone && "is-done", p.flash && "flash", p.overlay && "overlay", p.dragging && "dragging", p.faded && "faded"].filter(Boolean).join(" ");
   return (
     <div className={cls}>
@@ -529,8 +532,12 @@ export function CardFace(p: {
         <div className="card-meta">
           {/* On a screen that mixes boards (AllBoards.tsx), which board this card is on. */}
           {chip && <span className="chip board-chip" title={`On ${chip}`}>{chip}</span>}
-          {/* Whose agents work this card (// ASSIGNEE): the part of the email before the @, the whole on hover. */}
-          {card.assignee && <span className="chip assignee" title={`Assigned to ${card.assignee}`}>→ {card.assignee.split("@")[0]}</span>}
+          {/* Whose card this is (// ASSIGNEE): the part of the email before the @, the whole on hover. */}
+          {card.assignee && (
+            <span className={`chip assignee${left ? " left" : ""}`} title={left ? `Assigned to ${card.assignee}, who's no longer on this board` : `Assigned to ${card.assignee}`}>
+              → <span className="assignee-name">{card.assignee.split("@")[0]}</span>{left && " (left)"}
+            </span>
+          )}
           {card.tags?.map((t) => (
             <button
               key={t} className={`chip tag${p.tagFilter === t ? " active" : ""}`} tabIndex={-1}

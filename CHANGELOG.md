@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `list_pages` and `get_card` say what an agent can do with each PDF and Word file: whether its text was extracted, how long it is, and its page count. A scan with no text layer says "no text found" (there's no OCR), and a damaged or password-protected file says why
 - `upload_file` over MCP puts a file on a board, with the same size limit and type rules as an upload from the app: inside the call for a file up to 1 MB, or to a one-time address the tool hands out for anything bigger
 - On a shared board, text extracted from a file a member added is marked as that member's words, and hidden characters are taken out of everyone's. On an encrypted board nothing is extracted, and encrypting a board erases what was
+- A member who can write a shared board can assign a plain card to the owner, to another member, or to themselves, and clear it. Their **Assign to** lists everyone on the board. Before, it listed only themselves
+- The audit log records every assignment as `card_assigned`: who gave which card to whom, and who had it before. The CSV export gains an `assigned_from` column
+- A card assigned to someone who has left the board or been removed shows their name struck through with `(left)`, and the editor says to pick someone else
 
 ### Changed
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
@@ -25,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A page that opens with a `---` front matter block shows it folded as `// FRONT_MATTER` instead of as a rule and a paragraph
 - HTML, Word, and PDF exports of a page match the page: tables are tables, links to other pages point at the app, and images are carried inside the HTML and PDF
 - The front page says what Tasks is now: one board for your team and your agents, with kanban, a wiki, and worksheets in one place. It shows the board under the new top bar with a card assigned to a teammate, and a page and a worksheet from the same sample board, drawn with the app's own renderer and grid. Pricing says Pro's board count, read from the server like the member count
+- An assignee is who a card belongs to. On an `#agent` card that also puts their agents on it, so those stay the owner's to assign: a member who tries is told why, in the editor and over MCP
+- An assignee has to be on the board: its owner or a member who accepted an invite. Any other email is refused with a plain message, from the app and over MCP (`add_cards`, `update_card`), for the owner too. The server used to take any email
+- Assigning yourself a plain card on someone else's board doesn't make its questions yours to answer. That needs an agent card the owner assigned to you
 
 ### Fixed
 - A board's files are no longer deleted by the cleanup that collects removed card attachments. Files and attachments share a storage prefix, and the cleanup (25 hours after any attachment was removed, and on turning encryption on or off, or resetting an encrypted board) took every file that wasn't a live attachment, which included every PDF and image on the Pages screen. The file stayed listed and its bytes were gone. Files lost that way before this fix can't be brought back: upload them again
