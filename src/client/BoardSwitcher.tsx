@@ -1,6 +1,6 @@
 // The board switcher, in the top bar next to the wordmark: your boards (the first, then the
 // ones you made, // BOARDS in the README), and each board someone shared with you, as its
-// owner's email and your role (// TEAM_BOARDS). It's always drawn, even for someone with one
+// name and your role, or its owner's email when it's their first board (// TEAM_BOARDS). It's always drawn, even for someone with one
 // board and nothing shared: it names the board the section nav beside it (SectionNav.tsx) is
 // about, and New board… is in it. The list comes from `GET /api/boards` and is read again
 // each time the menu opens. Which board is open lives in the address
@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { Popover } from "./Board";
-import { boardName, roleWord, type Boards, type MemberAccess } from "./member";
+import { boardName, roleWord, sharedName, type Boards, type MemberAccess } from "./member";
 
 const IconBoards = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true">
@@ -40,7 +40,9 @@ export function BoardSwitcher({ boards, myId, access, own, onSwitch, onOpen, onN
   const shared = boards?.shared ?? [];
   const mine = (boards?.mine ?? []).filter((b) => !b.archived || b.board === own);
   const current = all ? "all" : access?.board ?? own ?? null;
-  const name = all ? "All boards" : access ? access.ownerEmail : boardName(boards, own, myId);
+  const name = all ? "All boards" : access ? sharedName(boards, access) : boardName(boards, own, myId);
+  // A named board says its name; a first board has only its owner's email, so it reads as theirs.
+  const named = !!access && name !== access.ownerEmail;
   // The open board's row uses what its socket last said, which can be newer than the list.
   const rows = shared.map((b) => (access && b.board === access.board ? { ...b, ...access } : b));
   if (access && !rows.some((b) => b.board === access.board)) rows.push({ ...access, name: "", plan: "pro", since: null });
@@ -50,7 +52,7 @@ export function BoardSwitcher({ boards, myId, access, own, onSwitch, onOpen, onN
     <div className="anchor board-switch">
       <button
         className="btn board-switch-btn" aria-haspopup="menu" aria-expanded={open}
-        title="Switch boards" aria-label={`${access ? `${name}'s board, ${roleWord(access)}` : name}. Switch boards`}
+        title="Switch boards" aria-label={`${access ? `${named ? `${name}, ${access.ownerEmail}'s board` : `${name}'s board`}, ${roleWord(access)}` : name}. Switch boards`}
         onClick={() => { if (!open) onOpen(); setOpen((o) => !o); }}
       >
         <IconBoards />

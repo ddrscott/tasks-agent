@@ -810,7 +810,8 @@ export async function sharedBoards(env: Env, user: User): Promise<SharedBoard[]>
     const plan = await planFor(env, b?.ownerId ?? r.owner_id);
     // An encrypted board can't have members, so there's no need to wake each board to ask.
     const d = decide({ isOwner: false, membership: r.role, plan, sealed: false });
-    shared.push({ board: r.owner_id, name: b?.name ?? "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
+    // A first board's name is "My board", which is only true for its owner: a member gets no name, and sees whose it is.
+    shared.push({ board: r.owner_id, name: b && !b.first ? b.name : "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
   }
   return shared;
 }
