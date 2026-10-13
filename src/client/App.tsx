@@ -24,7 +24,7 @@ import { Footer } from "./Footer";
 import { Invite } from "./Invite";
 import { Legal } from "./Legal";
 import { SearchBox } from "./Search";
-import { IconChat, IconClose, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
+import { IconChat, IconLock, IconRedo, IconUndo, IconUser } from "./icons";
 import { Login } from "./Login";
 import { membersChanged, MembersDialog, PlanWatch, SharedBadge, SharedButton, SharedNote, useBoardMembers } from "./Members";
 import { BoardDialog } from "./BoardDialog";
@@ -36,7 +36,7 @@ import { applyTheme, readCachedTheme } from "./themes";
 import { AskContext, AskMeContext, AskOwnerContext, AsksButton, type AnswerFn } from "./Ask";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { SectionNav } from "./SectionNav";
-import { TagFilter, useTagFilters } from "./TagFilter";
+import { FilterButton, FilterLine, useFilters } from "./Filter";
 import { MemberChat } from "./MemberChat";
 import { accessChangeText, activityText, asActivity, asMemberAccess, bannerText, boardFromUrl, boardName, joinRun, leftReasons, modeOf, roleWord, WhoContext, type ActivityRun, type Boards, type MemberAccess } from "./member";
 import { ThemePicker } from "./ThemePicker";
@@ -317,7 +317,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
   const [stack, setStack] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
   const [editing, setEditing] = useState<string | null>(null);
   // `tagFilter` is the tag clicked on a card: the rest fade back. `where` is the top bar's filter. Both live in the address.
-  const { where, setWhere, fade: tagFilter, setFade: setTagFilter } = useTagFilters(board);
+  const filters = useFilters(board, me.email);
+  const { where, fade: tagFilter, setFade: setTagFilter } = filters;
   const [quickAddLane, setQuickAddLane] = useState<string | null>(null);
   const [newCardLane, setNewCardLane] = useState<string | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -955,7 +956,6 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
           <h1 className="wordmark">tasks<span>.</span></h1>
           <BoardSwitcher boards={boards} myId={me.id} access={access} own={own} onSwitch={onSwitch} onOpen={onBoards} onNew={() => setNaming("new")} onAll={onAll} />
           <SectionNav board={sharedBoard ?? own} myId={me.id} current="board" onBoard={() => {}} onPages={(path) => onPages(sharedBoard ?? own, path)} onSheets={(sheet) => onSheets(sharedBoard ?? own, sheet)} />
-          <TagFilter board={board} where={where} onChange={setWhere} />
           {board.sealed && !sharedBoard && (
             <button className="sealed-chip" title="End-to-end encrypted: only your passphrase opens this board" aria-label="Encrypted. Encryption settings" onClick={() => setEncOpen(true)}>
               <IconLock /><span className="hide-sm label">encrypted</span>
@@ -966,12 +966,8 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
             {dueToday > 0 && <span className="due-today"><b>{dueToday}</b> due today</span>}
             {overdue > 0 && <span className="overdue"><b>{overdue}</b> overdue</span>}
           </div>
-          {tagFilter && (
-            <button className="chip tag active filter-chip" onClick={() => setTagFilter(null)} title="Show every card">
-              #{tagFilter}<IconClose />
-            </button>
-          )}
           <span className="spacer" />
+          <FilterButton board={board} me={me.email} filters={filters} />
           <SearchBox search={searchCards} onOpen={openHit} inputRef={searchInput} here={here} />
           <div className="actions">
             {/* Undo, questions, and the cloud assistant are the owner's. On someone else's board they aren't drawn. */}
@@ -1071,6 +1067,7 @@ function Workspace({ me, onSignOut, onConnect, onAdmin, onAll, onPages, onSheets
             <span className="member-line-text"><b>{banner.lead}</b> {banner.rest}</span>
           </aside>
         )}
+        <FilterLine board={board} me={me.email} filters={filters} />
         <BoardView
           board={board} actions={actions} flash={flash} mode={mode}
           tagFilter={tagFilter} onTag={(t) => setTagFilter(tagFilter === t ? null : t)} where={where}

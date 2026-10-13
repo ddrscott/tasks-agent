@@ -260,21 +260,21 @@ run ahead of whatever serves the zone.
   `--vvt` for the stylesheet. On any touch screen, buttons are 40px, keyboard-shortcut
   hints are hidden, and fields are 16px, because iOS zooms the page on anything smaller.
   The Theme button leaves the top bar on a phone; it's in the account menu.
-- **The top bar.** "Need you", due stats, the tag filter box, and a clicked tag's chip all add to
+- **The top bar.** "Need you", due stats, and the filter button's count all add to
   the bar, and the assistant panel takes 360px from it, so the bar is measured instead of
   guessed at with media queries (`src/client/topbarFit.ts`). When the buttons don't fit it
   gives up space one step at a time and stops at the first step that fits: the search box
   becomes its icon (click it or press `⌘K` and it opens across the bar), then Undo, "need
   you", and Assistant drop to icon plus count, then the open / due / overdue
-  summary goes, then the tag filter chip moves to its own row under the bar, then the
+  summary goes, then the
   "Shared with N" button (`// TEAM_BOARDS`) folds into a count on the account button, and
-  last, only when a board switcher sits beside it, the wordmark goes. A phone
-  always puts the chip on its own row. The steps are a word list in the bar's `data-tight`
+  last, only when a board switcher sits beside it, the wordmark goes. The filter's chips
+  aren't in the bar at all: they're on a line of their own under it. The steps are a word list in the bar's `data-tight`
   attribute, and `styles.css` does the rest. "Need you" is the count of open questions
   (`// QUESTIONS`), and it's only there while one is open.
   Someone with a board shared with them also gets the board switcher next to the wordmark
   (`// TEAM_BOARDS`); its name and role chip drop to an icon at the "labels" step and on a phone.
-  The tag filter box does the same: its picked tags drop to `#` and a count.
+  The Filter button does the same: its label goes and the icon and count stay.
 - **Keyboard and screen readers.** Every button has a name: icon-only ones carry an
   `aria-label` (the account button is "Account", not the email address). The account and
   lane menus are `role="menu"` with `menuitem` children, the other popovers are
@@ -325,30 +325,50 @@ run ahead of whatever serves the zone.
 - **Tags.** A card can carry up to 10 tags, like `#agent` for work an AI agent owns.
   Tags are lower case with dashes for spaces, and only letters, digits, `-` and `_`
   (`cleanTag` in `src/shared.ts`). Edit them in the card editor as a space-separated list.
-  Click a tag on a card to fade out every card without it; click again, or the chip in
-  the top bar, to clear. While a filter is on, each lane's count reads matches / total
-  ("2 / 22"). The clicked tag is in the address as `?fade=agent` (see the tag filter, next).
+  Click a tag on a card to fade out every card without it; click again, or its chip on
+  the filter line, to clear. While a filter is on, each lane's count reads matches / total
+  ("2 / 22"). The clicked tag is in the address as `?fade=agent` (see the filter, next).
   On an encrypted board each tag is its own JWE like every other field.
-- **The tag filter.** The `# Tags` combo box in the top bar (`src/client/TagFilter.tsx`) takes
-  cards off the board instead of fading them, like a WHERE clause: pick one tag or several and
-  a card that doesn't match isn't drawn. Press `f` to open it, type to narrow the list, arrows
-  to move, Enter to tick, Escape to close. Tags are listed A to Z with how many cards carry
-  each. `match any` shows a card with at least one of the picked tags (the default) and
-  `match all` only a card with every one of them (`matchesTags` in `src/shared.ts`). "All
-  tags" or Clear brings every card back. Lane counts read shown / total while it's on, a lane
-  with cards but none shown says so, and the lane menu's Clear and Delete still count every
-  card in the lane. It works together with the click-a-tag fade. A picked tag that leaves the
-  board drops out of the filter. A board with no tags doesn't draw the box. Dragging works on what's shown: a card dropped on another lands next
-  to it in the lane's full order.
-- **Filters in the address.** Both tag filters live in the query string, so a filtered board
-  can be linked to and a reload keeps it: `/tasks/?tags=agent,shop-api` is the tag filter's
-  pick, `&match=all` is added when a card needs every tag, and `&fade=agent` is the tag
-  clicked on a card. They sit beside `?board=<id>` on a shared board and work on
-  `/tasks/demo` too. `tagQueryFrom` and `tagQueryInto` in `src/shared.ts` read and write them
-  (`npm run check:tags`), and `useTagFilters` in `TagFilter.tsx` holds the state. A change
+- **The filter.** One Filter button beside search (`src/client/Filter.tsx`) opens a panel with
+  every way to limit which cards show. It takes cards off the board instead of fading them,
+  like a WHERE clause: a card that doesn't match isn't drawn.
+  - **Mine** is the first row: cards assigned to whoever is signed in (`Card.assignee`,
+    `// ASSIGNEE`). It's by assignee and nothing else, so a card that only names someone in its
+    title ("Jeff — get the agreement written") isn't theirs until it's assigned to them. When
+    nothing on the board is assigned to you, the row says so and points at Assign to.
+  - **People**: anyone with a card assigned on this board, A to Z, and Unassigned. Picking
+    several shows a card that's any one of theirs. A board where no card has an assignee
+    doesn't draw these rows.
+  - **Tags**: A to Z with how many cards carry each. `tags match any` shows a card with at
+    least one of the picked tags (the default) and `all` only a card with every one of them.
+  - People and tags narrow together: a card has to be one of the picked people's and match
+    the picked tags (`matchesWhere` in `src/shared.ts`).
+  - Press `f` to open it, type to narrow the rows (a leading `#` looks only at tags), arrows
+    to move, Enter to tick, Escape to close, which puts focus back on the button. `f` then
+    Enter is Mine.
+  - While anything is on, the button is outlined in orange with `$` and a count, and a line
+    under the top bar (`FilterLine`) says "3 of 22 cards shown" with a chip per filter that
+    one click takes off, the clicked tag's fade chip, and Clear all. Lane counts read shown /
+    total, a lane with cards but none shown says "5 cards hidden by the filter", and the lane
+    menu's Clear and Delete still count every card in the lane.
+  - A picked tag or person that leaves the board drops out of the filter. Dragging works on
+    what's shown: a card dropped on another lands next to it in the lane's full order.
+  - It's the same panel on the demo board (where you're `you@example.com`, with two cards),
+    on a board shared with you, and on All boards, where it runs over every card on screen.
+  - It all happens in the browser, on an encrypted board too: an assignee is plain and tags
+    are decrypted there, and picking a filter asks the server for nothing.
+- **Filters in the address.** The filter lives in the query string, so a filtered board
+  can be linked to and a reload keeps it: `/tasks/?who=me` is Mine, and it's whoever opens the
+  link, not whoever made it; `?who=dana@example.com,none` names people and the unassigned;
+  `?tags=agent,shop-api` is the picked tags, `&match=all` is added when a card needs every
+  tag, and `&fade=agent` is the tag clicked on a card. Links from before `who` existed read
+  the same as they did. They sit beside `?board=<id>` on a shared board and work on
+  `/tasks/demo` and `/tasks/all` too. `filterQueryFrom` and `filterQueryInto` in
+  `src/shared.ts` read and write them (`npm run check:tags`), and `useFilters` in
+  `Filter.tsx` holds the state. A change
   replaces the address instead of adding to history, so Back still leaves the board and
   doesn't walk back through every tick. Switching boards drops the filters, since the next
-  board has its own tags. Nothing is saved anywhere else: the address is the whole of it.
+  board has its own tags and people. Nothing is saved anywhere else: the address is the whole of it.
 - **Tags typed in a title.** `splitTitleTags` in `src/shared.ts` pulls trailing `#tags` off a
   title a person types for a new card. It reads only the end of the title, one word at a time,
   and stops at the first word that isn't a tag, so a title meant literally stays as typed. A
@@ -1131,6 +1151,10 @@ line agents read says `(assigned to dana@example.com)`; `get_card` says it under
   instead of read only (`agentHeld(mode, card, me)`), with the title, due date, tags, and
   assignee greyed out and a line saying they're the owner's (`mineOnly` in `CardEditor.tsx`);
   the server's sentence still backs that up on save.
+- **Whose card it is.** The assignee is also plain ownership: Mine and the people rows in the
+  filter (`// HOW_IT_WORKS`, The filter) go by it, for every card and not only agent cards, and
+  the card face's `→ dana` says the same thing. "Whose agents work it" is what the assignee
+  adds on an agent card.
 - Not yet: the member's event feed carrying cards assigned to them on other people's boards.
   `wait_for_answer` covers the answer; the feed would cover new assignments.
 - `npm run check:boards` has the whole loop: assign, claim, STATUS, a retitle refused, move,
@@ -2793,7 +2817,7 @@ board, so one person gets the same board every time. `ALLOWED_EMAILS` still appl
 
 Locally, put the same four values in `.dev.vars` (see `.dev.vars.example`).
 
-Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `f` tag filter · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
+Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `f` filter · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
 card, arrows to move it · `Enter` edit a card (then `Enter` or `e` on the notes to edit them) · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
 creates one card per line.
 
@@ -2812,7 +2836,7 @@ npm run check:lanes      # special lanes: to do, doing, done follow the lane, no
 npm run check:events     # the agent feed: #agent and #gauntlet cards publish, nothing else does
 npm run check:nudge      # "No agent connected yet": when it shows, and that undo can't bring it back
 npm run check:setup      # the event feed installer against a temp HOME: fresh, a machine with the old Sessions hooks, run twice
-npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone
+npm run check:tags       # tags typed in a title: "Write a haiku #agent" is tagged, "Fix #123" and "C#" are left alone; and the filter by person and tag, and its address
 npm run check:claims     # which board changes end a claim; with a dev server's address, claim, refuse, ask, answer, release over MCP
 npm run check:members    # team boards, against a running local dev server: five-plus real accounts attack every way in (// TEAM_BOARDS)
 npm run check:boards     # many boards per account, against the same dev server: make, rename, archive, invite into, and reach over MCP (// BOARDS)

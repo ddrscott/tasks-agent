@@ -1,18 +1,17 @@
-// The top bar's width depends on what's going on: open questions, due stats, and a
-// tag filter all add to it, and the assistant panel takes 360px away. A media query can't see any
+// The top bar's width depends on what's going on: open questions, due stats, and
+// the filter's count all add to it, and the assistant panel takes 360px away. A media query can't see any
 // of that, so the bar is measured. When the buttons don't fit, it gives up space in this order,
 // one step at a time, and stops at the first step that fits:
 //
 //   search  the search box becomes its icon (it opens across the bar when focused)
 //   labels  "Undo", "need you", "Assistant" drop to icon plus count
 //   stats   the open / due today / overdue summary goes
-//   chip    the tag filter chip moves to its own row under the bar
 //   shared  the "Shared with N" button folds into a count on the account button
 //   mark    the wordmark goes, when a board switcher sits beside it and a phone still has no room
 //
 // The steps land in data-tight as a word list, and styles.css does the rest.
 
-const STEPS = ["", "search", "search labels", "search labels stats", "search labels stats chip", "search labels stats chip shared", "search labels stats chip shared mark"];
+const STEPS = ["", "search", "search labels", "search labels stats", "search labels stats shared", "search labels stats shared mark"];
 
 /** True when the last button's right edge is inside the bar's padding. */
 function fits(bar: HTMLElement): boolean {

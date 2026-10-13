@@ -14,6 +14,10 @@ function day(offset: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Who the visitor is on the demo board, so Mine in the filter has cards behind it (Filter.tsx), and who a card can go to. */
+export const DEMO_ME = "you@example.com";
+export const DEMO_PEOPLE = [DEMO_ME, "dana@example.com"];
+
 /** One question the scripted agent asks, and what it says once it has the answer. */
 export type Beat = {
   cardId: string;
@@ -85,12 +89,12 @@ export function seedBoard(theme: string): Board {
         notes: "Somebody scraped `/search` all weekend. Cap it before it happens again.\n\n- [ ] Limiter in front of `/search`\n- [ ] Return 429 with a `Retry-After` header\n- [ ] Tests",
       }, 300),
       card({
-        id: "c-footer", laneId: "todo", title: "Checkout button sits on top of the footer on small phones", tags: ["shop-web"], due: day(0),
+        id: "c-footer", laneId: "todo", title: "Checkout button sits on top of the footer on small phones", tags: ["shop-web"], due: day(0), assignee: DEMO_ME,
         notes: "Seen on an iPhone SE. The pay button covers the terms link.",
       }, 180),
       card({ id: "c-node", laneId: "todo", title: "Move CI from Node 20 to Node 22", tags: ["infra", "agent"], due: day(4) }, 1500),
       card({
-        id: "c-password", laneId: "todo", title: "Rotate the staging database password", tags: ["infra"], due: day(1),
+        id: "c-password", laneId: "todo", title: "Rotate the staging database password", tags: ["infra"], due: day(1), assignee: DEMO_PEOPLE[1],
       }, 2900),
       {
         ...card({
@@ -124,7 +128,7 @@ export function seedBoard(theme: string): Board {
         ].join("\n"),
       }, 1),
       card({
-        id: "c-writeup", laneId: "doing", title: "Write up Tuesday's checkout outage", tags: ["infra"], due: day(1),
+        id: "c-writeup", laneId: "doing", title: "Write up Tuesday's checkout outage", tags: ["infra"], due: day(1), assignee: DEMO_ME,
         notes: "Timeline is in the incident channel. Still need the part about why the alert didn't page anyone.",
       }, 240),
       card({
