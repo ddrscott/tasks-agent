@@ -5,7 +5,7 @@ import {
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { doneLaneId, faceLine, LANE_ROLES, matchesWhere, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type Where } from "../shared";
+import { doneLaneId, faceLine, LANE_ROLES, matchesWhere, narrows, roleOf, statusLine, hasTag, shownCards, SORTS, todoLaneId, type Board, type Card, type Lane, type LaneRole, type SortBy, type Where } from "../shared";
 import { IconCalendar, IconCheck, IconClip, IconDots, IconNotes, IconPlus, IconUndo } from "./icons";
 import { AskBlock, AskMeContext, AskOwnerContext, BoardPeopleContext } from "./Ask";
 import { agentHeld, ByFace, type Mode } from "./member";
@@ -321,7 +321,7 @@ function LaneView(props: Props & {
   useEffect(() => { if (!menu) setArmed(null); }, [menu]);
   const adding = props.quickAddLane === lane.id;
   // The filter takes cards out of the lane; `cards` stays the whole lane, for the count and the menu.
-  const where = props.where && (props.where.tags.length || props.where.who.length) ? props.where : null;
+  const where = props.where && narrows(props.where) ? props.where : null;
   const shown = where ? cards.filter((c) => matchesWhere(c, where, me)) : cards;
   const matching = props.tagFilter ? shown.filter((c) => hasTag(c, props.tagFilter!)).length : shown.length;
 

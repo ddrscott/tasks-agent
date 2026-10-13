@@ -1914,6 +1914,7 @@ ol.ask-options { list-style: none; margin: 0; padding: 0; }
 .filter-line-say b { font-weight: 600; color: var(--ink); }
 .filter-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
 .filter-chips .chip { height: 24px; padding: 0 7px; max-width: 220px; }
+.filter-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter-join { color: var(--muted); font-size: 11px; margin-right: 4px; }
 .filter-chips > .filter-join { margin-right: 0; }
 .filter-line-hint { flex-basis: 100%; }
