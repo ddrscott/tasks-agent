@@ -25,7 +25,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { currentUser, type User } from "./auth";
 import { boardById, ownedBoard } from "./boards";
-import { EXPORT_FORMATS, EXPORT_TYPES, pageDocx, pageHtml, pagePdf, pagesZip, pageTitle, type ExportFormat } from "./export";
+import { EXPORT_FORMATS, EXPORT_TYPES, pageDocx, pageHtml, pageImages, pagePdf, pagesZip, pageTitle, type ExportFormat, type ExportLinks } from "./export";
 import { access, spendBoardCall } from "./members";
 import { BOARD_ID, plainText } from "./member-rules";
 import { countFileRows, countIndexed, dropBoard, dropEntries, dropFileRows, dropFileScope, dropPrefix, embed, indexEntries, markIndexed, resetEntries, unmarkIndexed, upsertVectors, type Entry } from "./search-all";
@@ -665,23 +665,61 @@ function refusal(r: { ok: false; code: string; info: FileInfo | null }): Respons
   }
 }
 
+/** Image types served as an image, and so the ones a page can show with ![alt](path). */
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/** An export carries the page's images inside it: this many at most, each no bigger than this. Past that an image is a link. */
+const EXPORT_IMAGES = 20;
+const EXPORT_IMAGE_BYTES = 4 * MB;
+
+/**
+ * Where a page's relative links go once it has left the app (// EXPORT): the app's own
+ * address for a path this board has, so the link works for anyone who can open the board, and
+ * nothing for a path it doesn't have. `images` are bytes already read, by path, as data: URLs.
+ */
+export function exportLinks(origin: string, board: string, files: FileInfo[], images?: Map<string, string>): ExportLinks {
+  const have = new Set(files.map((f) => f.path));
+  return {
+    link: (path, id) => (have.has(path) ? `${origin}/tasks/pages?board=${board}&path=${encodeURIComponent(path)}${id ? `#${id}` : ""}` : null),
+    image: (path) => images?.get(path) ?? null,
+  };
+}
+
+/** The image files a page shows, read from R2 as data: URLs, so the HTML and PDF exports need nothing from the network. */
+async function inlineImages(env: Env, board: string, path: string, text: string, files: FileInfo[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  for (const p of pageImages(path, text)) {
+    const f = byPath.get(p);
+    if (!f || f.page || !IMAGE_TYPES.has(f.type) || f.size > EXPORT_IMAGE_BYTES || out.size >= EXPORT_IMAGES) continue;
+    const obj = await env.ATTACHMENTS.get(fileKey(board, p));
+    if (!obj) continue;
+    const bytes = new Uint8Array(await obj.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    out.set(p, `data:${f.type};base64,${btoa(bin)}`);
+  }
+  return out;
+}
+
 /**
  * A page in another format (export.ts). HTML is served inline when asked (`inline=1`, for the
  * app's Print button, which opens it and calls print) and as a download otherwise; it's our
  * renderer's output, with no script, under a policy that allows none. PDF needs the browser
  * binding and says so without it.
  */
-async function exportPage(env: Env, w: { board: string; email: string }, path: string, page: { info: FileInfo; text: string }, format: ExportFormat, inline: boolean): Promise<Response> {
+async function exportPage(env: Env, w: { board: string; email: string }, path: string, page: { info: FileInfo; text: string }, format: ExportFormat, inline: boolean, origin: string): Promise<Response> {
   const base = path.split("/").pop()!.replace(/\.[a-z0-9]+$/i, "").replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "");
   const ownerName = (await ownedBoard(env, { id: w.board, email: w.email }, w.board))?.name ?? (await boardById(env, w.board))?.name ?? "Tasks";
-  const html = pageHtml(path, page.text, { board: ownerName, by: page.info.updatedBy, at: page.info.updatedAt });
+  const { files } = await docsOf(env, w.board).list();
   const headers = (type: string, ext: string, dispo: "inline" | "attachment") => ({
     "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
     "Content-Disposition": `${dispo}; filename="${base}.${ext}"; filename*=UTF-8''${encodeURIComponent(`${pageTitle(path, page.text)}.${ext}`)}`,
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:",
   });
+  if (format === "docx") return new Response(pageDocx(path, page.text, exportLinks(origin, w.board, files)) as BodyInit, { headers: headers(EXPORT_TYPES.docx, "docx", "attachment") });
+  const links = exportLinks(origin, w.board, files, await inlineImages(env, w.board, path, page.text, files));
+  const html = pageHtml(path, page.text, { board: ownerName, by: page.info.updatedBy, at: page.info.updatedAt }, links);
   if (format === "html") return new Response(html, { headers: headers(EXPORT_TYPES.html, "html", inline ? "inline" : "attachment") });
-  if (format === "docx") return new Response(pageDocx(path, page.text) as BodyInit, { headers: headers(EXPORT_TYPES.docx, "docx", "attachment") });
   const pdf = await pagePdf(env, html);
   if (!pdf) return fail(501, "no_pdf", "PDF export isn't set up on this server. Open the HTML export and print it to PDF; the Print button does that.");
   return new Response(pdf as BodyInit, { headers: headers(EXPORT_TYPES.pdf, "pdf", inline ? "inline" : "attachment") });
@@ -733,7 +771,7 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
       const pages = (await docs.allPages()).filter((p) => !prefix || p.path === prefix || p.path.startsWith(`${prefix}/`));
       if (!pages.length) return refusal({ ok: false, code: "missing", info: null });
       const name = `${(prefix || "pages").replace(/[^\w.-]+/g, "_")}.zip`;
-      return new Response(pagesZip(pages, as) as BodyInit, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
+      return new Response(pagesZip(pages, as, exportLinks(url.origin, w.board, (await docs.list()).files)) as BodyInit, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
     }
     return json(await docs.list(prefix));
   }
@@ -762,7 +800,7 @@ export async function handleFiles(req: Request, env: Env, path: string): Promise
       const format = url.searchParams.get("format");
       if (format) {
         if (!EXPORT_FORMATS.includes(format as ExportFormat)) return fail(400, "bad_format", `format is one of ${EXPORT_FORMATS.join(", ")}.`);
-        return exportPage(env, w, file, page, format as ExportFormat, url.searchParams.get("inline") === "1");
+        return exportPage(env, w, file, page, format as ExportFormat, url.searchParams.get("inline") === "1", url.origin);
       }
       if ((req.headers.get("Accept") ?? "").includes("application/json")) return json({ file: page.info, text: page.text }, 200, { ETag: page.info.etag });
       return new Response(page.text, { headers: { "Content-Type": `${info.type}; charset=utf-8`, ETag: info.etag, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox" } });

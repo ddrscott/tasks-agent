@@ -1,6 +1,7 @@
 // A board's pages and files (// PAGES in the README): the list on the left, the page on the
 // right. A page is Markdown (or other text) rendered with the same renderer card notes use,
-// edited in a plain textarea, and saved with the etag it was opened at, so a change someone
+// in its page mode (reflowed paragraphs, links and images that resolve to this board's own
+// pages and files), edited in a plain textarea, and saved with the etag it was opened at, so a change someone
 // else (or their agent) made in between is caught and said, never overwritten. Files that
 // aren't text show as a link, or inline when they're images. Everything here is the REST API
 // in src/docs.ts; agents use the same store over MCP.
@@ -9,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileInfo, Revision } from "../docs";
 import { api, BASE } from "./base";
 import { Footer } from "./Footer";
-import { Markdown } from "./Markdown";
+import { Markdown, type PageLinks } from "./Markdown";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { type Boards } from "./member";
 import { SectionNav } from "./SectionNav";
@@ -36,6 +37,8 @@ type Props = {
 
 type Loaded = { info: FileInfo; text: string | null };
 const IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]);
+/** Image files a page can show with ![alt](path): the types the server hands back as an image (docs.ts). */
+const PAGE_IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const kb = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 const when = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(); };
 const q = (board: string | null, more = "") => `?board=${encodeURIComponent(board ?? "")}${more}`;
@@ -61,6 +64,8 @@ export function Pages({ me, board, boards, onBoards, onBoard, onSwitch, onNew, o
   const [revisions, setRevisions] = useState<Revision[] | null>(null);
   const [viewingRev, setViewingRev] = useState<{ etag: string; text: string; at: string; by: string } | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  /** The heading to show once the page being opened is in: from a link like other.md#heading, or the address. */
+  const jumpTo = useRef(location.hash.slice(1));
   const upload = useRef<HTMLInputElement>(null);
 
   const say = useCallback((kind: "ok" | "error", text: string, reload = false) => setNote({ kind, text, reload }), []);
@@ -248,6 +253,38 @@ export function Pages({ me, board, boards, onBoards, onBoard, onSwitch, onNew, o
   const text = viewingRev ? viewingRev.text : loaded?.text ?? null;
   const isMd = loaded?.info.type === "text/markdown";
 
+  // Where the open page's relative links and images go: this board's own pages and files, and
+  // nowhere else. The renderer hands over a path it has already kept inside the board.
+  const openPath = loaded?.info.path;
+  const pageLinks = useMemo<PageLinks | undefined>(() => {
+    if (!openPath) return undefined;
+    const byPath = new Map((files ?? []).map((f) => [f.path, f]));
+    return {
+      path: openPath,
+      link: (path, hash) => (byPath.has(path) ? `${pathUrl(board, path)}${hash ? `#${hash}` : ""}` : null),
+      image: (path) => {
+        const f = byPath.get(path);
+        return f && !f.page && PAGE_IMAGES.has(f.type) ? api(`/api/files/${path.split("/").map(encodeURIComponent).join("/")}${q(id)}`) : null;
+      },
+      onOpen: (path, hash, e) => {
+        // A new tab or window is the browser's to open: the link's own address lands on the same page.
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        if (path === openPath) { document.getElementById(hash)?.scrollIntoView({ block: "start" }); return; }
+        jumpTo.current = hash;
+        void open(path);
+      },
+    };
+  }, [openPath, files, board, id, open]);
+
+  // A page that just opened starts at the heading its link named.
+  useEffect(() => {
+    if (!loaded || !jumpTo.current) return;
+    const hash = jumpTo.current;
+    jumpTo.current = "";
+    requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView({ block: "start" }));
+  }, [loaded]);
+
   return (
     <div className="app">
       <div className="main">
@@ -338,7 +375,7 @@ export function Pages({ me, board, boards, onBoards, onBoard, onSwitch, onNew, o
                   <textarea ref={textarea} className="field pages-editor" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={isMd}
                     onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void save(); if (e.key === "Escape") { setEditing(false); setDraft(""); } }} />
                 ) : text !== null ? (
-                  isMd ? <div className="pages-body"><Markdown text={text} /></div> : <pre className="pages-body pages-pre">{text}</pre>
+                  isMd ? <div className="pages-body"><Markdown text={text} page={pageLinks} /></div> : <pre className="pages-body pages-pre">{text}</pre>
                 ) : IMAGES.has(loaded.info.type) ? (
                   <img className="pages-image" src={api(`/api/files/${loaded.info.path.split("/").map(encodeURIComponent).join("/")}${q(id)}`)} alt={loaded.info.path} />
                 ) : (

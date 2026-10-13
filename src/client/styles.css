@@ -774,6 +774,32 @@ dialog.card-dialog.notes-full { height: calc(100dvh - 32px); }
 .md pre code { background: none; border: 0; padding: 0; white-space: pre; overflow-wrap: normal; }
 .md blockquote { padding: 2px 0 2px 12px; color: var(--muted); border-left: 2px solid var(--line); }
 .md hr { border: 0; border-top: var(--border-w) solid var(--line); margin: 14px 0; }
+/* A table scrolls sideways inside its own box, so a wide one never widens what's around it. */
+.md .md-table { max-width: 100%; margin: 0 0 12px; overflow-x: auto; overscroll-behavior-x: contain; border: var(--border-w) solid var(--line); }
+.md table { border-collapse: collapse; width: 100%; font-size: .93em; line-height: 1.45; }
+.md th, .md td { padding: 7px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); overflow-wrap: normal; word-break: normal; min-width: 9em; }
+.md th:last-child, .md td:last-child { border-right: 0; }
+.md tbody tr:last-child td { border-bottom: 0; }
+.md th { background: var(--surface-2); font: 600 12px/1.4 var(--font-mono); white-space: nowrap; }
+.md td:first-child { min-width: 7em; }
+.md td.md-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 0; }
+.md .md-l { text-align: left; }
+.md .md-c { text-align: center; }
+.md .md-r { text-align: right; }
+.md .md-img { display: block; max-width: 100%; height: auto; margin: 4px 0; border: var(--border-w) solid var(--line); }
+/* A link or image whose page isn't on the board: its words, struck off as a link, and a chip that says so. */
+.md .md-missing { text-decoration: underline dashed; text-underline-offset: 2px; color: var(--muted); cursor: help; }
+.md .md-missing-note { display: inline-block; margin-left: 5px; padding: 0 4px; font: 600 10px/1.5 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; color: var(--accent-text); border: 1px solid var(--accent); vertical-align: 1px; text-decoration: none; }
+/* A page's front matter, folded. */
+.md .md-meta { margin: 0 0 14px; border: var(--border-w) solid var(--line); font: 12px/1.5 var(--font-mono); }
+.md .md-meta summary { padding: 5px 10px; cursor: pointer; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+.md .md-meta-mark { color: var(--accent); }
+.md .md-meta-count { font-weight: 400; letter-spacing: 0; }
+.md .md-meta dl { margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--line); }
+.md .md-meta dl > div { display: grid; grid-template-columns: minmax(0, 14ch) minmax(0, 1fr); column-gap: 12px; }
+.md .md-meta dt { color: var(--muted); overflow-wrap: anywhere; }
+.md .md-meta dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md [id^="md-"] { scroll-margin-top: 12px; }
 /* Tags, with the board's tags offered above the input (TagField.tsx). */
 .tag-field { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 0; }
 .tag-field > label { font: 12px var(--font-mono); color: var(--muted); }
