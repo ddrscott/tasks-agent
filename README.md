@@ -2510,8 +2510,11 @@ address or a guess, and nothing on screen offers a change the server would refus
   stolen link says nothing about itself. From there, "Sign out and use another address" signs
   you out and brings you back to the same invite after you sign in again.
 - **The board switcher** (`src/client/BoardSwitcher.tsx`) sits next to the wordmark: My board,
-  then each board shared with you as its owner's email and your role, with "view only: the
-  owner's plan lapsed" when that's so. It's always drawn, even on a solo board: it names the
+  then each board shared with you as its name, its owner's email, and your role, with "view only: the
+  owner's plan lapsed" when that's so. With a shared board open, the button says the board's
+  name and your role, not who shared it: the line under the top bar says whose it is. An
+  owner's first board has no name a member would recognize ("My board" is only true for its
+  owner), so `GET /api/boards` lists it with an empty `name` and it's shown as the owner's email. It's always drawn, even on a solo board: it names the
   board the section nav beside it is about. On a phone, and when the top bar is tight, it's an icon.
 - **The section nav** (`src/client/SectionNav.tsx`), after the switcher on the board, Pages,
   and Worksheets screens: `Board · Pages · Worksheets` for the board on screen, the current one

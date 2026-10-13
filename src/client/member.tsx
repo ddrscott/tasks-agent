@@ -28,14 +28,17 @@ export type Boards = {
   shared: (MemberAccess & { name: string; plan: "free" | "pro"; since: number | null })[];
 };
 
-/** The name of the board `id` as the list has it: "My board" for your first, the row's name for another of yours, the owner's email for a shared one. */
+/** The name of the board `id` as the list has it: "My board" for your first, the row's name for another of yours, and for a shared one its name, or its owner's email when it's their first board, which has none. */
 export function boardName(boards: Boards | null, id: string | null, myId: string): string {
   if (!id || id === myId) return "My board";
   const mine = boards?.mine.find((b) => b.board === id);
   if (mine) return mine.name;
   const shared = boards?.shared.find((b) => b.board === id);
-  return shared ? shared.ownerEmail : "Board";
+  return shared ? shared.name || shared.ownerEmail : "Board";
 }
+
+/** What to call the shared board on screen: its name from the list, or its owner's email until the list is read and for a first board. */
+export const sharedName = (boards: Boards | null, a: MemberAccess): string => boards?.shared.find((b) => b.board === a.board)?.name || a.ownerEmail;
 
 /** What the person looking at a board may do there. The owner: anything. A writer: cards. A viewer: look. */
 export type Mode = "owner" | "writer" | "viewer";

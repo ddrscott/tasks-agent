@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A card assigned to someone who has left the board or been removed shows their name struck through with `(left)`, and the editor says to pick someone else
 
 ### Changed
+- With a board someone shared with you open, the board switcher says the board's name, not its owner's email. The line under the top bar still says whose board it is. An owner's first board has no name of its own, so it's still shown as their email, in the switcher, on All boards, and in `list_boards`, where it used to come through as "My board"
 - The `# Tags` box in the top bar is gone: tags are in the Filter panel now, and they work the way they did, including any or all, clicking a tag on a card to fade the rest, and old links with `tags`, `match`, and `fade`. The clicked tag's chip moved from the top bar to the filter line
 - Pages and Worksheets lost their back button and crumb: the board switcher and section nav do that job
 - Paragraphs on a page reflow: text hard-wrapped in its source reads as one paragraph. End a line with two spaces or a backslash to break it. Card notes keep their line breaks
