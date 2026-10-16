@@ -7,6 +7,11 @@
   // safely: fetch() can only reach the public internet, never this zone or its origin.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
+  // Smart Placement: the Worker is chatty with D1 (todo-agent-auth, in ENAM), and a request
+  // landing in Dallas paid ~100 ms for every query. Run near the database instead, so the user
+  // pays one long hop and the queries are short ones. Cloudflare only moves it once it has seen
+  // enough traffic to know that's faster; static assets are still served from the edge.
+  "placement": { "mode": "smart" },
   // Served as askscottpierce.com/tasks. Routes run ahead of whatever else serves the zone.
   // The two /.well-known routes are OAuth discovery for the MCP endpoint. RFC 8414 and
   // RFC 9728 put them at the domain root, so this app is the OAuth server for the whole

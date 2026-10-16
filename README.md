@@ -51,6 +51,16 @@ askscottpierce.com/.well-known/oauth-{authorization-server, protected-resource/t
 The rest of askscottpierce.com is untouched. Two Worker routes (`/tasks`, `/tasks/*`)
 run ahead of whatever serves the zone.
 
+**Where the Worker runs.** Smart Placement is on (`placement` in `wrangler.jsonc`), so once
+Cloudflare has seen enough traffic it runs the Worker near D1 (`todo-agent-auth`, in ENAM)
+instead of at the edge that took the request. The Worker talks to D1 several times per
+request, and from Dallas each of those was a ~100 ms hop; placed, the user pays one long hop
+and the queries are short. Static assets are still served from the edge. Keep the D1 reads on
+a hot path few and independent anyway: `GET /api/boards`, on every page load, is the session
+read and then three reads at once (`boards` and `sharedBoards` in `src/members.ts`; one
+statement joins every shared board's row and its owner's plan), and a plan is one statement
+(`planSource` in `src/billing.ts`).
+
 ## // HOW_IT_WORKS
 
 - **A board per project, and a first board per user.** The client connects to `/tasks/agent`,

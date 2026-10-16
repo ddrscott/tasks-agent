@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An assignee is who a card belongs to. On an `#agent` card that also puts their agents on it, so those stay the owner's to assign: a member who tries is told why, in the editor and over MCP
 - An assignee has to be on the board: its owner or a member who accepted an invite. Any other email is refused with a plain message, from the app and over MCP (`add_cards`, `update_card`), for the owner too. The server used to take any email
 - Assigning yourself a plain card on someone else's board doesn't make its questions yours to answer. That needs an agent card the owner assigned to you
+- The board switcher fills in faster: the server asks its database for your boards, the ones shared with you, and your plan all at once, and no longer once per shared board. The app also runs closer to its database now, so every signed-in request waits on fewer long trips
 
 ### Fixed
 - Closing a panel that opens with the cursor in a field (the filter) puts keyboard focus back on its button instead of dropping it at the top of the page

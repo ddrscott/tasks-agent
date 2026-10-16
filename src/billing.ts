@@ -12,7 +12,6 @@ import { currentUser, type User } from "./auth";
 import { maxBoards } from "./boards";
 import { planChanged } from "./members";
 import { memberCap } from "./member-rules";
-import { proGranted } from "./users";
 
 export type Plan = "free" | "pro";
 /**
@@ -53,10 +52,30 @@ async function subscribed(env: Env, userId: string): Promise<boolean> {
   return !!row && subscriptionIsPro(row);
 }
 
-/** The user's plan and where it comes from: a live subscription, or Pro an admin gave them (users.ts). */
+/** The columns a plan is decided from: the user's subscription row, if any, and the Pro an admin gave them (users.ts). */
+export type PlanRow = { status: string | null; current_period_end: number | null; pro_grant: number | null };
+
+/** A plan from its row. A live subscription wins, then a grant. */
+export function planFromRow(row: PlanRow | null): { plan: Plan; granted: boolean } {
+  if (row?.status && subscriptionIsPro({ status: row.status, current_period_end: row.current_period_end })) return { plan: "pro", granted: false };
+  return row?.pro_grant ? { plan: "pro", granted: true } : { plan: "free", granted: false };
+}
+
+/**
+ * The user's plan and where it comes from: a live subscription, or Pro an admin gave them (users.ts).
+ * One D1 read for both. If `users` can't be read (a deploy before its migration ran), it fails safe
+ * the way `proGranted` does: the subscription alone decides.
+ */
 export async function planSource(env: Env, userId: string): Promise<{ plan: Plan; granted: boolean }> {
-  if (await subscribed(env, userId)) return { plan: "pro", granted: false };
-  return (await proGranted(env, userId)) ? { plan: "pro", granted: true } : { plan: "free", granted: false };
+  try {
+    return planFromRow(await env.DB.prepare(
+      `SELECT s.status, s.current_period_end, (SELECT pro_grant FROM users WHERE user_id = ?1) AS pro_grant
+       FROM (SELECT 1) LEFT JOIN subscriptions s ON s.user_id = ?1`,
+    ).bind(userId).first<PlanRow>());
+  } catch (e) {
+    console.error("plan", (e as Error).message);
+    return { plan: (await subscribed(env, userId)) ? "pro" : "free", granted: false };
+  }
 }
 
 export const planFor = async (env: Env, userId: string): Promise<Plan> => (await planSource(env, userId)).plan;
