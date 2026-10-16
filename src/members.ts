@@ -10,7 +10,7 @@
 import { waitUntil } from "cloudflare:workers";
 import { getAgentByName } from "agents";
 import { currentUser, randomToken, sha256, spendGuess, userIdFor, type User } from "./auth";
-import { canManage, planFor } from "./billing";
+import { canManage, planFor, planFromRow, type PlanRow } from "./billing";
 import { boardById, ownedBoard, ownedBoards } from "./boards";
 import {
   BOARD_ID, decide, inviteEmail, isMemberRole, memberCap, MEMBER_HTTP_RATE, retryAfter, SIGNAL_WAITS_MS, SLOW_DOWN_HTTP, spendToken, withRetries,
@@ -799,28 +799,41 @@ export type SharedBoard = { board: string; name: string; ownerEmail: string; rol
 /** A board of yours after the first (boards.ts). */
 export type OwnBoard = { board: string; name: string; createdAt: number | null; archived: boolean };
 
-/** The boards shared with this account, with what each is worth right now. The app's switcher and the MCP server (list_boards) both read it. */
+/**
+ * The boards shared with this account, with what each is worth right now. The app's switcher and the MCP server (list_boards) both read it.
+ * One D1 read for all of them: the membership, the board's row (none for a first board), and its owner's plan come back
+ * joined. A board's owner is its row's owner_id, or the board's own id for a first board.
+ */
 export async function sharedBoards(env: Env, user: User): Promise<SharedBoard[]> {
-  const { results } = await env.DB.prepare(
-    "SELECT owner_id, owner_email, role, accepted_at FROM board_members WHERE member_id = ? AND member_email = ? AND status = 'accepted' ORDER BY accepted_at LIMIT 50",
-  ).bind(user.id, user.email).all<Pick<MemberRow, "owner_id" | "owner_email" | "role" | "accepted_at">>();
-  const shared: SharedBoard[] = [];
-  for (const r of results) {
-    const b = await boardById(env, r.owner_id);
-    const plan = await planFor(env, b?.ownerId ?? r.owner_id);
+  const query = (grants: boolean) => env.DB.prepare(
+    `SELECT m.owner_id, m.owner_email, m.role, m.accepted_at, b.name AS board_name,
+       s.status, s.current_period_end, ${grants ? "u.pro_grant" : "NULL AS pro_grant"}
+     FROM board_members m
+     LEFT JOIN boards b ON b.id = m.owner_id
+     LEFT JOIN subscriptions s ON s.user_id = COALESCE(b.owner_id, m.owner_id)
+     ${grants ? "LEFT JOIN users u ON u.user_id = COALESCE(b.owner_id, m.owner_id)" : ""}
+     WHERE m.member_id = ? AND m.member_email = ? AND m.status = 'accepted' ORDER BY m.accepted_at LIMIT 50`,
+  ).bind(user.id, user.email).all<Pick<MemberRow, "owner_id" | "owner_email" | "role" | "accepted_at"> & PlanRow & { board_name: string | null }>();
+  // Without a readable `users` table nobody has a grant, the same fail-safe as planSource.
+  const { results } = await query(true).catch((e: Error) => (console.error("plan", e.message), query(false)));
+  return results.map((r) => {
+    const { plan } = planFromRow(r);
     // An encrypted board can't have members, so there's no need to wake each board to ask.
     const d = decide({ isOwner: false, membership: r.role, plan, sealed: false });
     // A first board's name is "My board", which is only true for its owner: a member gets no name, and sees whose it is.
-    shared.push({ board: r.owner_id, name: b && !b.first ? b.name : "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at });
-  }
-  return shared;
+    return { board: r.owner_id, name: r.board_name ?? "", ownerEmail: r.owner_email, role: r.role, effective: d.effective as "viewer" | "writer", reason: d.reason as null | "plan_lapsed", plan, since: r.accepted_at };
+  });
 }
 
-/** Every board this account can reach: its first board, the rest of its own, and the ones shared with it. */
+/**
+ * Every board this account can reach: its first board, the rest of its own, and the ones shared with it.
+ * The three reads don't depend on each other, so they go out together: D1 is a long hop from most
+ * edges, and this list is on every page load.
+ */
 async function boards(env: Env, user: User): Promise<Response> {
-  const shared = await sharedBoards(env, user);
-  const mine: OwnBoard[] = (await ownedBoards(env, user, true)).filter((b) => !b.first).map((b) => ({ board: b.id, name: b.name, createdAt: b.createdAt, archived: b.archivedAt !== null }));
-  return json({ own: { board: user.id, email: user.email, plan: await planFor(env, user.id) }, mine, shared });
+  const [shared, owned, plan] = await Promise.all([sharedBoards(env, user), ownedBoards(env, user, true), planFor(env, user.id)]);
+  const mine: OwnBoard[] = owned.filter((b) => !b.first).map((b) => ({ board: b.id, name: b.name, createdAt: b.createdAt, archived: b.archivedAt !== null }));
+  return json({ own: { board: user.id, email: user.email, plan }, mine, shared });
 }
 
 async function leave(env: Env, user: User, body: Record<string, unknown>): Promise<Response> {
