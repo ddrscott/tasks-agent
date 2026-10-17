@@ -11,7 +11,7 @@ import { AskBlock, AskMeContext, AskOwnerContext, BoardPeopleContext } from "./A
 import { agentHeld, ByFace, type Mode } from "./member";
 import { AgentNudge, NoAgentChip } from "./AgentNudge";
 import { Unsaved, useDraft } from "./Unsaved";
-import { CardChipContext } from "./AllBoards";
+import { CardChipContext, realCardId } from "./AllBoards";
 
 /** What quick add hears back: how many lines became cards, the lines that didn't (as typed), and why not. */
 /** `fix` is the lines in `left` that will be refused again exactly as they are (needsEdit in member-rules.ts): they have to be edited first. */
@@ -489,6 +489,8 @@ function SortableCard(p: {
         if (e.defaultPrevented) return;
         if (e.key === "Enter") p.onOpen(p.card);
         if (e.key.toLowerCase() === "x" && p.canToggle && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); p.onToggle(p.card, true); }
+        // Through the face's own id button, so the key and the click say "copied" the same way.
+        if (e.key.toLowerCase() === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.currentTarget.querySelector<HTMLButtonElement>(".card-id")?.click(); }
       }}
     >
       <CardFace {...p} onToggle={p.canToggle ? p.onToggle : undefined} dragging={isDragging} />
@@ -521,6 +523,7 @@ export function CardFace(p: {
           onClick={(e) => { e.stopPropagation(); p.onToggle?.(card); }}
         >{p.isDone ? <IconUndo /> : <IconCheck />}</button>
       )}
+      {!p.overlay && <CardIdButton id={card.id} face />}
       <div>
         <div className="card-title">{card.title}</div>
         {!p.overlay && <AskBlock card={card} compact />}
@@ -558,6 +561,33 @@ export function CardFace(p: {
         {!p.overlay && <ByFace card={card} />}
       </div>
     </div>
+  );
+}
+
+/**
+ * The card's id, copied with one click: what an agent, a commit trailer, or get_card wants. On the
+ * face it shows on hover and keyboard focus, like Mark done; the card dialog shows it always,
+ * which is where a touch screen finds it.
+ */
+export function CardIdButton({ id: shown, face }: { id: string; face?: boolean }) {
+  // All boards gives each card a `<board id>~<card id>`; the board's own id is what's useful.
+  const id = realCardId(shown);
+  const [said, setSaid] = useState<"" | "copied" | "failed">("");
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
+  return (
+    <button
+      type="button" className={`card-id${face ? " on-face" : ""}${said ? ` ${said}` : ""}`} tabIndex={face ? -1 : undefined}
+      title={said === "failed" ? `Your browser kept the clipboard to itself. The id is ${id}.` : `Copy the card's id, ${id}${face ? " (c)" : ""}`}
+      aria-label={said === "copied" ? `Copied ${id}` : `Copy card id ${id}`}
+      onPointerDown={stop} onMouseDown={stop} onTouchStart={stop} onKeyDown={stop}
+      onClick={(e) => {
+        e.stopPropagation();
+        const say = (s: "copied" | "failed") => { setSaid(s); clearTimeout(timer.current); timer.current = setTimeout(() => setSaid(""), 1400); };
+        navigator.clipboard.writeText(id).then(() => say("copied"), () => say("failed"));
+      }}
+    >{said === "copied" ? <><IconCheck />copied</> : id}</button>
   );
 }
 

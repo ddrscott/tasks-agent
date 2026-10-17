@@ -28,6 +28,8 @@ type Reach = { id: string; name: string; first: boolean; mode: Mode; lapsed: boo
 /** A virtual card id: the board's id, a separator no card id holds, the card's id. */
 const SEP = "~";
 const vid = (board: string, card: string) => `${board}${SEP}${card}`;
+/** The card's own id, the one its board and get_card know, from a virtual id or a plain one. */
+export const realCardId = (v: string) => v.slice(v.indexOf(SEP) + 1);
 const split = (v: string): { board: string; card: string } | null => {
   const i = v.indexOf(SEP);
   return i < 0 ? null : { board: v.slice(0, i), card: v.slice(i + 1) };
