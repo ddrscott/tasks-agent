@@ -12,6 +12,7 @@ import { Markdown, toggleTask } from "./Markdown";
 import { NotesFullButton } from "./NotesFull";
 import { TagField } from "./TagField";
 import { TitleInput } from "./TitleInput";
+import { CardIdButton } from "./Board";
 import type { Vault } from "./vault";
 import { IconCheck, IconClose, IconTrash, IconUndo } from "./icons";
 
@@ -121,7 +122,7 @@ function CardView({ card, lanes, vault, board, onClose, mode, lapsed, unsaved }:
         </dl>
         <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={() => {}} dropTarget={ref} board={board} readOnly />
         <div className="dialog-meta">
-          created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+          <CardIdButton id={card.id} /> · created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           <ByLine card={card} />
         </div>
       </div>
@@ -444,7 +445,7 @@ function CardEdit({ card, lanes, knownTags, vault, filesNote, onSave, onMove, on
           <Attachments cardId={card.id} vault={vault} attachments={card.attachments ?? []} onRemove={onRemoveAttachment} dropTarget={ref} board={board} />
         )}
         <div className="dialog-meta">
-          created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+          <CardIdButton id={card.id} /> · created {new Date(card.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           <ByLine card={card} marks={!!mode && mode !== "owner"} />
         </div>
       </div>

@@ -583,6 +583,23 @@ button.chip.tag:hover { border-color: var(--accent); }
 .card-title { padding-right: 20px; } /* always reserved, so text never reflows when the button appears */
 @media (hover: none) { .done-btn { display: none; } } /* touch: use Mark done in the card editor */
 
+/* The card's id, one click to copy (CardIdButton). On the face it shows with Mark done, at the
+   bottom right corner, on a fill so it reads over a chip or the end of a title. */
+.card-id {
+  display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px;
+  font: 11px/1.2 var(--font-mono); color: var(--muted); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: copy;
+  transition: opacity .12s, border-color .15s, color .15s;
+}
+.card-id svg { width: 10px; height: 10px; }
+.card-id:hover { border-color: var(--accent); color: var(--accent-text); }
+.card-id.copied { border-color: var(--accent); color: var(--accent-text); }
+.card-id.failed { border-color: var(--danger); color: var(--danger); }
+.card-id.on-face { position: absolute; right: 7px; bottom: 7px; opacity: 0; }
+.card:hover .card-id.on-face, :focus-visible > .card .card-id.on-face, .card-id.on-face.copied, .card-id.on-face.failed { opacity: 1; }
+.shot .card-id.on-face { display: none; } /* the landing page's sample cards */
+@media (hover: none) { .card-id.on-face { display: none; } } /* touch: the card dialog shows the id */
+
 .quick-add { padding: 4px 10px 10px; }
 .quick-add .btn { width: 100%; justify-content: flex-start; color: var(--muted); }
 .quick-add .btn:hover { color: var(--ink); }

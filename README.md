@@ -1259,7 +1259,8 @@ first board, the rest of yours, and the ones shared with you. It's in the board 
   one lane per name for lanes that have no role ("Waiting on them" from two boards share a
   lane). Within a lane, boards come in list order and each board's cards in its own stored
   order. A card's id on this screen is `<board id>~<card id>`, and a chip on each face says
-  which board it's on (`CardChipContext`, read by `CardFace`).
+  which board it's on (`CardChipContext`, read by `CardFace`) Copying a card's id here (`CardIdButton`)
+  gives the card's own id, without the board's in front.
 - **Writer mode, whatever you are on each board.** The view uses `BoardView` in writer mode, so
   cards move and open and lanes have no controls; the lanes are each board's own. Moving a card
   resolves the virtual lane back to the real one on that card's board (the lane with that role,
@@ -2942,7 +2943,7 @@ board, so one person gets the same board every time. `ALLOWED_EMAILS` still appl
 Locally, put the same four values in `.dev.vars` (see `.dev.vars.example`).
 
 Keys: `⌘K` search · `n` new card · `/` assistant · `t` theme · `f` filter · `⌘Z` undo · `⇧⌘Z` redo · `Space` pick up a
-card, arrows to move it · `Enter` edit a card (then `Enter` or `e` on the notes to edit them) · `x` mark the focused card done (or reopen it). Pasting a list into "Add a card"
+card, arrows to move it · `Enter` edit a card (then `Enter` or `e` on the notes to edit them) · `x` mark the focused card done (or reopen it) · `c` copy the focused card's id. Pasting a list into "Add a card"
 creates one card per line.
 
 ## // DEVELOP
